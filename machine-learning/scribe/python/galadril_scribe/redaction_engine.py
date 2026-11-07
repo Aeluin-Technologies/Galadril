@@ -30,6 +30,7 @@ _EMAIL = r"\b[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-
 _PHONE = r"(?:\b0[1-9]|\+33[ .-]?[1-9])(?:[ .-]?[0-9]{2}){4}\b"
 
 _WORDS = re2.compile(r"[\p{L}][\p{L}\p{M}'’\-]*")
+_NAME_CONTINUATION = re2.compile(r"[\p{L}\p{M}\p{N}_'’\-]")
 _TITLE = re2.compile(
     r"(?i)^(Monsieur|Madame|M\.|Mme|Me|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|Pr\.?|Prof\.?)[ \t]+"
 )
@@ -49,11 +50,33 @@ def _initials(name: str) -> str:
     return result
 
 
+def _initial_alias(name: str) -> str | None:
+    """Only abbreviate a supplied given name, without guessing a surname."""
+    title = _TITLE.match(name)
+    words = name[title.end() if title is not None else 0 :].split()
+    if not 2 <= len(words) <= 8 or not all(
+        _WORDS.fullmatch(word) for word in words
+    ):
+        return None
+    gap = r"[ \t\x{00A0}\x{202F}]+"
+    return gap.join(
+        (re2.escape(words[0][0] + "."), *map(re2.escape, words[1:]))
+    )
+
+
+def _whole_name(text: str, start: int, end: int) -> bool:
+    return not (
+        _NAME_CONTINUATION.fullmatch(text[max(start - 1, 0) : start])
+        or _NAME_CONTINUATION.fullmatch(text[end : end + 1])
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _Span:
     start: int
     end: int
     replacement: str
+    whole_name: bool
 
 
 def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
@@ -64,8 +87,16 @@ def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
         pattern = (
             rule.pattern.get_secret_value() if rule.pattern is not None else ""
         )
+        alias = None
         if rule.kind == "literal":
+            alias = (
+                _initial_alias(pattern)
+                if rule.replacement_mode == "initials"
+                else None
+            )
             pattern = re2.escape(pattern)
+            if alias is not None:
+                pattern = f"(?:{pattern}|({alias}))"
         elif rule.kind == "email":
             pattern = _EMAIL
         elif rule.kind == "phone":
@@ -76,20 +107,28 @@ def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
         options.log_errors = False
         compiled = re2.compile(pattern, options=options)
         for match in compiled.finditer(text):
-            if match.start() == match.end() or len(spans) >= MAX_MATCHES:
+            start, end = match.span()
+            whole_name = alias is not None and match.group(1) is not None
+            if whole_name and not _whole_name(text, start, end):
+                continue
+            if start == end or len(spans) >= MAX_MATCHES:
                 raise ValueError("Match limit or empty match")
             replacement = (
                 _initials(match.group(0))
                 if rule.replacement_mode == "initials"
                 else rule.replacement
             )
-            spans.append(_Span(match.start(), match.end(), replacement))
+            spans.append(_Span(start, end, replacement, whole_name))
     spans.sort(key=lambda span: (span.start, span.end))
     result: list[_Span] = []
     previous = 0
     last: _Span | None = None
     for span in spans:
-        if span == last:
+        if last is not None and (span.start, span.end, span.replacement) == (
+            last.start,
+            last.end,
+            last.replacement,
+        ):
             continue
         if span.start < previous:
             raise ValueError("Overlapping rules require review")
@@ -337,7 +376,7 @@ def _redact_pdf(
     removed_glyphs: list[set[tuple[str, int, int]]] = []
     labels: list[_Label] = []
     masks: list[Mask] = []
-    secrets: set[str] = set()
+    secrets: set[tuple[str, bool]] = set()
     count = 0
     characters = 0
     with pdfium.PdfDocument(source) as native:
@@ -359,7 +398,7 @@ def _redact_pdf(
                     or secret.casefold() in span.replacement.casefold()
                 ):
                     raise ValueError("Invalid public replacement")
-                secrets.add(secret)
+                secrets.add((secret.casefold(), span.whole_name))
                 matched = [
                     glyph
                     for glyph in mapping[span.start : span.end]
@@ -433,8 +472,11 @@ def _redact_pdf(
         final_text += verifier.extract_text(page, extract_tables=False) + "\n"
     if any(label.text not in final_text for label in labels):
         raise ValueError("Public initials could not be preserved")
-    if any(secret.casefold() in final_text.casefold() for secret in secrets):
-        raise ValueError("Private text remains")
+    folded = final_text.casefold()
+    for secret, whole_name in secrets:
+        for occurrence in re2.finditer(re2.escape(secret), folded):
+            if not whole_name or _whole_name(folded, *occurrence.span()):
+                raise ValueError("Private text remains")
     with pdfium.PdfDocument(output) as verification:
         if (
             any(verification.get_metadata_dict().values())

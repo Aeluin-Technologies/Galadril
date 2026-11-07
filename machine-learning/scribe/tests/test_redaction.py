@@ -288,6 +288,44 @@ def test_initials_are_generated_locally_without_regex_code(
     assert base64.b64decode(result.content_base64).decode() == expected
 
 
+@pytest.mark.parametrize("mime", ["text/plain", "application/pdf"])
+def test_full_name_rule_also_replaces_an_initial_followed_by_the_surname(
+    mime: str,
+) -> None:
+    source = (
+        "R. Lenoir intervient. P. Lenoir répond. R. Lenoir-Dupont confirme."
+    )
+    original = (
+        source.encode()
+        if mime == "text/plain"
+        else Pdf.from_text(source).to_bytes()
+    )
+    result = project_document(
+        request(
+            original,
+            mime,
+            [
+                {
+                    "kind": "literal",
+                    "pattern": "Rémi Lenoir",
+                    "replacement_mode": "initials",
+                }
+            ],
+        )
+    )
+    output = base64.b64decode(result.content_base64)
+    text = (
+        output.decode()
+        if mime == "text/plain"
+        else PdfDocument.from_bytes(output).extract_text(0)
+    )
+    assert result.match_count == 1
+    assert "R. Lenoir intervient" not in text
+    assert "R. Lenoir-Dupont" in text
+    assert "R. L." in text
+    assert "P. Lenoir" in text
+
+
 def test_bounded_unicode_name_patterns_support_compound_names() -> None:
     pattern = r"\b(?:Monsieur|Madame|Jean|Marie|Pierre|René|Jacques|François|Michel|André)[ \t]+[\p{L}][\p{L}\p{M}'’\-]{1,40}(?:[ \t]+[A-ZÀ-ÖØ-Ý][\p{L}\p{M}'’\-]{1,40})?\b"
     result = project_document(
