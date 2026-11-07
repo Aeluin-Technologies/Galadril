@@ -70,6 +70,10 @@ filegroup(
     name = "ontology_packages",
     srcs = [
         "src/galadril_plugins/law/contentieux-ontology.json",
+        "src/galadril_plugins/law/socle-ontology.json",
+        "src/galadril_plugins/law/ecritures-ontology.json",
+        "src/galadril_plugins/law/moyens-ontology.json",
+        "src/galadril_plugins/law/preuves-ontology.json",
         "src/galadril_plugins/utils/mail-ontology.json",
     ],
     visibility = ["//visibility:public"],

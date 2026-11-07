@@ -9,6 +9,99 @@ from galadril_plugins.ontologies import OntologyPackage
 
 
 class Packages(unittest.TestCase):
+    def test_package_imports_deduplicate_transitive_layers_and_reject_cycles(
+        self,
+    ) -> None:
+        from galadril_plugins.ontologies import resolve_ontology_packages
+
+        def package(
+            name: str, imports: tuple[str, ...] = ()
+        ) -> OntologyPackage:
+            return OntologyPackage.model_validate(
+                {
+                    "id": name,
+                    "name": name,
+                    "version": "1",
+                    "imports": [
+                        {"id": item, "version": "1"} for item in imports
+                    ],
+                    "ontologies": [
+                        {
+                            "id": name,
+                            "version": "1",
+                            "resources": [
+                                {
+                                    "resource_id": name + ".entity",
+                                    "kind": "object_type",
+                                    "display_name": name,
+                                    "references": [],
+                                    "attributes": {},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+
+        core = package("sample.core")
+        writing = package("sample.writing", (core.id,))
+        reasoning = package("sample.reasoning", (core.id, writing.id))
+        result = resolve_ontology_packages((core, writing, reasoning))
+        self.assertEqual(
+            [module["id"] for module in result[-1].ontologies],
+            [core.id, writing.id, reasoning.id],
+        )
+        self.assertEqual(result[-1].ontologies[0]["package_id"], core.id)
+        for invalid in (
+            (package("sample.a", ("sample.missing",)),),
+            (
+                package("sample.a", ("sample.b",)),
+                package("sample.b", ("sample.a",)),
+            ),
+            (package("sample.a", ("foreign.core",)), package("foreign.core")),
+            (core.model_copy(update={"version": "2"}), writing),
+        ):
+            with self.subTest(invalid=[item.id for item in invalid]):
+                with self.assertRaises(ValueError):
+                    resolve_ontology_packages(invalid)
+
+    def test_law_core_is_shared_without_domain_version_objects(self) -> None:
+        root = files("galadril_plugins.law")
+        common = json.loads(
+            root.joinpath("contentieux-ontology.json").read_text()
+        )
+        core = {
+            resource["resource_id"]
+            for module in next(
+                item
+                for item in PluginRegistry.discover().ontology_packages()
+                if item["id"] == "law.contentieux"
+            )["ontologies"]
+            for resource in module["resources"]
+        }
+        self.assertNotIn("law.objection_version", core)
+        self.assertNotIn("law.plea_version", core)
+        self.assertNotIn("law.provision_version", core)
+        self.assertNotIn("law.deadline_adjustment", core)
+        self.assertLess(len(core), 160)
+        self.assertIn("law.party.name", core)
+        self.assertIn("law.party.public_postal_address", core)
+        self.assertIn("law.party.representative", core)
+        for branch in ("administratif", "judiciaire", "penal"):
+            package = json.loads(
+                root.joinpath(branch + "-ontology.json").read_text()
+            )
+            self.assertEqual(
+                package["imports"],
+                [{"id": "law.contentieux", "version": common["version"]}],
+            )
+            own = {
+                resource["resource_id"]
+                for module in package["ontologies"]
+                for resource in module["resources"]
+            }
+            self.assertFalse(core.intersection(own))
+
     def test_law_views_exclude_other_branches_and_dangling_resources(
         self,
     ) -> None:
@@ -25,7 +118,9 @@ class Packages(unittest.TestCase):
                     for module in package["ontologies"]
                     for item in module["resources"]
                 }
-                self.assertIn("law.brief", resources)
+                self.assertIn("law.filing", resources)
+                self.assertNotIn("law.petition", resources)
+                self.assertNotIn("law.brief", resources)
                 self.assertIn(f"law.{branch}.proceeding", resources)
                 for other in branches - {branch}:
                     self.assertFalse(
@@ -37,31 +132,15 @@ class Packages(unittest.TestCase):
                     "law.administrative_act" in resources,
                     branch == "administratif",
                 )
+                courts = resources[f"law.{branch}.court.kind"]["attributes"][
+                    "allowed_values"
+                ]
                 self.assertEqual(
-                    "law.suspension_request" in resources,
-                    branch == "administratif",
+                    "conseil_etat" in courts, branch == "administratif"
                 )
+                self.assertEqual("cour_assises" in courts, branch == "penal")
                 self.assertEqual(
-                    "law.court.judicial" in resources, branch != "administratif"
-                )
-                if branch != "administratif":
-                    courts = resources["law.court.judicial.kind"]["attributes"][
-                        "allowed_values"
-                    ]
-                    self.assertIn("cour_cassation", courts)
-                    self.assertEqual(
-                        "cour_assises" in courts, branch == "penal"
-                    )
-                    self.assertEqual(
-                        "conseil_de_prud_hommes" in courts,
-                        branch == "judiciaire",
-                    )
-                self.assertEqual(
-                    "recours_administratif"
-                    in resources["law.deadline.kind"]["attributes"][
-                        "allowed_values"
-                    ],
-                    branch == "administratif",
+                    "conseil_prudhommes" in courts, branch == "judiciaire"
                 )
                 self.assertEqual(
                     "law.algorithm.dossier" in package["contracts"],
@@ -78,252 +157,76 @@ class Packages(unittest.TestCase):
                     if owner := resource.get("owner_id"):
                         self.assertIn(owner, resources)
 
-    def test_law_package_links_source_evidence_to_disposition_and_execution(
+    def test_law_layers_link_writings_grounds_citations_and_sources(
         self,
     ) -> None:
-        package = OntologyPackage.model_validate(
-            {
-                key: value
-                for key, value in next(
-                    item
-                    for item in PluginRegistry.discover().ontology_packages()
-                    if item["id"] == "law.contentieux"
-                ).items()
-                if key not in {"plugin_id", "plugin_version"}
-            }
+        package = next(
+            item
+            for item in PluginRegistry.discover().ontology_packages()
+            if item["id"] == "law.contentieux"
         )
         self.assertEqual(
-            {module["id"] for module in package.ontologies},
-            {
-                "law.procedure",
-                "law.ecritures",
-                "law.evenements",
-                "law.actes",
-                "law.faits",
-                "law.normes",
-                "law.moyens",
-                "law.preuves",
-                "law.decisions",
-                "law.delais",
-                "law.execution",
-                "law.administratif",
-                "law.judiciaire",
-                "law.penal",
-            },
+            {module["id"] for module in package["ontologies"]},
+            {"law.socle", "law.ecritures", "law.moyens", "law.preuves"},
         )
         resources = {
             item["resource_id"]: item
-            for module in package.ontologies
+            for module in package["ontologies"]
             for item in module["resources"]
         }
-        for name, source, target, minimum, maximum in (
-            ("law.filing.proceeding", "law.filing", "law.proceeding", 1, 1),
-            (
-                "law.proceeding.petitions",
-                "law.proceeding",
-                "law.petition",
-                0,
-                None,
-            ),
-            (
-                "law.proceeding.challenged_acts",
-                "law.proceeding",
-                "law.administrative_act",
-                0,
-                None,
-            ),
-            (
-                "law.act_documentation.document_version",
-                "law.act_documentation",
-                "law.document_version",
-                1,
-                1,
-            ),
-            (
-                "law.evidence_relation.assertion",
-                "law.evidence_relation",
-                "law.assertion",
-                1,
-                1,
-            ),
-            (
-                "law.evidence_relation.passage",
-                "law.evidence_relation",
-                "law.passage",
-                1,
-                1,
-            ),
-            (
-                "law.qualification.assertions",
-                "law.qualification",
-                "law.assertion",
-                1,
-                None,
-            ),
-            (
-                "law.qualification.rules",
-                "law.qualification",
-                "law.legal_rule",
-                1,
-                None,
-            ),
-            (
-                "law.plea_version.qualifications",
-                "law.plea_version",
-                "law.qualification",
-                0,
-                None,
-            ),
-            (
-                "law.objection_version.target",
-                "law.objection_version",
-                "law.position_version",
-                1,
-                1,
-            ),
-            (
-                "law.plea_ruling.plea",
-                "law.plea_ruling",
-                "law.plea_version",
-                1,
-                1,
-            ),
-            (
-                "law.disposition_item.effects",
-                "law.disposition_item",
-                "law.dispositive_effect",
-                0,
-                None,
-            ),
-            (
-                "law.proceeding_closure.disposition",
-                "law.proceeding_closure",
-                "law.disposition",
-                0,
-                1,
-            ),
-            (
-                "law.obligation.effect",
-                "law.obligation",
-                "law.dispositive_effect",
-                1,
-                1,
-            ),
-            (
-                "law.review_challenge.challenged_decision",
-                "law.review_challenge",
-                "law.judicial_decision",
-                1,
-                1,
-            ),
-            (
-                "law.suspension_effect.act",
-                "law.suspension_effect",
-                "law.administrative_act",
-                1,
-                1,
-            ),
+        for key, source, target in (
+            ("law.case.proceedings", "law.case", "law.proceeding"),
+            ("law.proceeding.court", "law.proceeding", "law.court"),
+            ("law.filing.proceeding", "law.filing", "law.proceeding"),
+            ("law.filing.author", "law.filing", "law.party"),
+            ("law.filing.pleas", "law.filing", "law.plea"),
+            ("law.plea.provisions", "law.plea", "law.provision"),
+            ("law.plea.jurisprudence", "law.plea", "law.judicial_decision"),
+            ("law.plea.exhibits", "law.plea", "law.exhibit"),
+            ("law.exhibit.document", "law.exhibit", "law.document"),
         ):
-            with self.subTest(name=name):
-                attributes = resources[name]["attributes"]
+            with self.subTest(key=key):
                 self.assertEqual(
-                    (
-                        attributes["source_type"],
-                        attributes["target_type"],
-                        attributes["min_count"],
-                        attributes.get("max_count"),
-                    ),
-                    (source, target, minimum, maximum),
+                    resources[key]["attributes"]["source_type"], source
                 )
                 self.assertEqual(
-                    set(resources[name]["references"]), {source, target}
+                    resources[key]["attributes"]["target_type"], target
                 )
-        for item in resources.values():
-            if item["kind"] != "link_type":
-                continue
-            attributes = item["attributes"]
-            minimum = attributes["min_count"]
-            maximum = attributes.get("max_count")
-            endpoints = {attributes["source_type"], attributes["target_type"]}
-            self.assertEqual(set(item["references"]), endpoints)
-            for endpoint in endpoints:
-                self.assertIn(
-                    resources[endpoint]["kind"], {"object_type", "event_type"}
-                )
-            self.assertIs(type(minimum), int)
-            self.assertGreaterEqual(minimum, 0)
-            if maximum is not None:
-                self.assertIs(type(maximum), int)
-                self.assertGreaterEqual(maximum, minimum)
-        for item in resources.values():
-            for replacement in item["attributes"].get("superseded_by", []):
-                self.assertIn(replacement, resources)
         self.assertEqual(
-            resources["law.disposition.items"]["attributes"][
-                "inverse_max_count"
-            ],
-            1,
-        )
-        self.assertEqual(
-            resources["law.case.petition"]["attributes"]["max_count"], 1
-        )
-        self.assertNotIn(
+            resources["law.judicial_decision.disposition"]["owner_id"],
             "law.judicial_decision",
-            package.contracts["law.algorithm.dossier"].resources,
+        )
+        self.assertFalse(
+            any("_version" in key or "temporal" in key for key in resources)
+        )
+        self.assertTrue(
+            all(
+                module["package_id"] == module["id"]
+                for module in package["ontologies"]
+            )
         )
 
     def test_law_branches_reuse_common_types_and_scope_administrative_skills(
         self,
     ) -> None:
         registry = PluginRegistry.discover()
-        package = next(
-            item
-            for item in registry.ontology_packages()
-            if item["id"] == "law.contentieux"
-        )
-        modules = {
-            module["id"]: {
-                item["resource_id"]: item for item in module["resources"]
-            }
-            for module in package["ontologies"]
-        }
+        packages = {item["id"]: item for item in registry.ontology_packages()}
         for branch in ("administratif", "judiciaire", "penal"):
-            module = modules[f"law.{branch}"]
-            proceeding = module[f"law.{branch}.proceeding"]
+            resources = {
+                item["resource_id"]: item
+                for module in packages[f"law.{branch}"]["ontologies"]
+                for item in module["resources"]
+            }
             self.assertEqual(
-                proceeding["attributes"]["extends"], ["law.proceeding"]
+                resources[f"law.{branch}.proceeding"]["attributes"]["extends"],
+                ["law.proceeding"],
             )
-            court = module[f"law.{branch}.proceeding.court"]
             self.assertEqual(
-                court["attributes"]["target_type"],
-                "law.administratif.court"
-                if branch == "administratif"
-                else "law.court.judicial",
+                resources[f"law.{branch}.proceeding.court"]["attributes"][
+                    "target_type"
+                ],
+                f"law.{branch}.court",
             )
-        self.assertEqual(
-            modules["law.ecritures"]["law.brief"]["attributes"]["extends"],
-            ["law.filing"],
-        )
-        self.assertEqual(package["name"], "French litigation")
-        self.assertEqual(
-            modules["law.ecritures"]["law.brief"]["display_name"], "Mémoire"
-        )
-        self.assertEqual(
-            modules["law.decisions"]["law.disposition"]["display_name"],
-            "Dispositif of the judicial decision",
-        )
-        self.assertIn(
-            "tribunal_correctionnel",
-            modules["law.penal"]["law.penal.proceeding.formation"][
-                "attributes"
-            ]["allowed_values"],
-        )
-        self.assertEqual(
-            modules["law.administratif"][
-                "law.administratif.proceeding.defendants"
-            ]["attributes"]["min_count"],
-            1,
-        )
         manifest = json.loads(
             files("galadril_plugins.law")
             .joinpath("plugin.json")
@@ -362,25 +265,16 @@ class Packages(unittest.TestCase):
             for resource in module["resources"]
         }
         self.assertEqual(
-            resources["law.case.petition"]["attributes"]["max_count"], 1
+            resources["law.filing.proceeding"]["attributes"]["max_count"], 1
         )
         self.assertEqual(
-            resources["law.case.proceedings"]["attributes"]["min_count"], 1
+            resources["law.proceeding.court"]["attributes"]["min_count"], 1
         )
-        self.assertEqual(
-            resources["law.proceeding.defendants"]["attributes"]["min_count"], 0
-        )
-        self.assertEqual(
-            resources["law.proceeding.suspends"]["attributes"]["target_type"],
-            "law.proceeding",
-        )
-        for section in ("subject", "facts", "discussion", "relief"):
-            self.assertTrue(
-                resources[f"law.petition.{section}"]["attributes"]["required"]
-            )
+        for section in ("subject", "facts", "discussion", "conclusions"):
+            self.assertIn(f"law.filing.{section}", resources)
         contract = ontology.contracts["law.algorithm.dossier"]
         self.assertEqual(contract.mode, "required")
-        self.assertIn("law.proceeding.suspends", contract.resources)
+        self.assertIn("law.plea.jurisprudence", contract.resources)
 
     def test_law_dossier_accepts_one_petition_and_rejects_inconsistent_evidence(
         self,
