@@ -41,6 +41,11 @@ const modelLabel = computed(
     ),
 );
 const modelItems = computed<MenuItem[]>(() => [
+  {
+    id: "execution-mode",
+    label: t("pengolo.execution.research"),
+    icon: ui.executionMode === "research" ? CheckIcon : undefined,
+  },
   ...models.models.map((model) => ({
     id: `model:${model.alias}`,
     label: modelDisplayName(model.model || model.alias),
@@ -54,6 +59,10 @@ const modelItems = computed<MenuItem[]>(() => [
   },
 ]);
 function chooseModel(id: string) {
+  if (id === "execution-mode") {
+    ui.executionMode = ui.executionMode === "research" ? "chat" : "research";
+    return;
+  }
   const model = models.models.find((model) => `model:${model.alias}` === id);
   if (model) models.selected = model.alias;
 }

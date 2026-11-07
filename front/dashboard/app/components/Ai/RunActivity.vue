@@ -151,6 +151,8 @@ async function respond(question: VisibleQuestion, cancelled = false) {
         v-if="
           !terminal ||
           activity.tasks.length ||
+          activity.tools.length ||
+          activity.usage ||
           activity.python.length ||
           activity.warnings.length ||
           operations?.length
@@ -170,6 +172,50 @@ async function respond(question: VisibleQuestion, cancelled = false) {
           }}</span>
         </summary>
         <AiWebResearch :events="events" />
+        <ul v-if="activity.tools.length" class="space-y-1 text-sm text-muted">
+          <li
+            v-for="tool in activity.tools"
+            :key="tool.id"
+            class="flex items-center gap-2"
+          >
+            <CheckIcon
+              v-if="tool.status === 'completed'"
+              class="size-4"
+              aria-hidden="true"
+            />
+            <XMarkIcon
+              v-else-if="tool.status === 'failed'"
+              class="size-4 text-danger"
+              aria-hidden="true"
+            />
+            <ArrowPathIcon
+              v-else
+              class="size-4 motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+            <span>{{ tool.name.replaceAll("_", " ") }}</span>
+          </li>
+        </ul>
+        <p v-if="activity.usage" class="text-xs text-muted">
+          {{
+            $t("pengolo.execution.usage", {
+              iterations: activity.usage.requests,
+              tokens:
+                activity.usage.input_tokens + activity.usage.output_tokens,
+              seconds: Math.round(activity.usage.elapsed_seconds),
+            })
+          }}
+          <span v-if="activity.usage.cost_usd !== null">
+            · {{ activity.usage.cost_usd.toFixed(4) }} USD</span
+          >
+        </p>
+        <p
+          v-if="activity.usage?.stop_reason"
+          class="text-sm text-warning"
+          role="status"
+        >
+          {{ $t("pengolo.execution.stopped." + activity.usage.stop_reason) }}
+        </p>
         <ul
           v-if="operations?.length"
           :aria-label="$t('pengolo.analysis.checks')"

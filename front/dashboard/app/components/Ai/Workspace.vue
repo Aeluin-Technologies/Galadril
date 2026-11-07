@@ -280,9 +280,12 @@ async function send(shareWithIsolatedReviewers = false) {
       projectId: ui.temporary ? null : ui.projectId,
       prompt: ui.prompt,
       modelAlias: models.selected,
+      executionMode: ui.executionMode,
       agentIds: usePengoloAgents().selected,
       fileIds: ui.files.map((file) => file.id),
-      ...(shareWithIsolatedReviewers ? { shareWithIsolatedReviewers: true } : {}),
+      ...(shareWithIsolatedReviewers
+        ? { shareWithIsolatedReviewers: true }
+        : {}),
       graphContext: ui.graphContext,
       webSearch: ui.webEnabled,
       temporary: ui.temporary,
