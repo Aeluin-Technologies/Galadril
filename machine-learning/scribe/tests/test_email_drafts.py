@@ -12,6 +12,50 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_native_mail_read_follows_the_original_body_cursor(self) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from galadril_scribe.email import read_email
+        from pydantic_ai import ModelRetry
+
+        async def run() -> None:
+            calls = 0
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                nonlocal calls
+                calls += 1
+                self.assertEqual(
+                    json.loads(request.content)["request"]["offset"], 16384
+                )
+                return httpx.Response(
+                    200,
+                    json={"body": "End of original message.", "next_offset": 0},
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        client=client,
+                        capability="delegated",
+                        tools_url="http://gateway/tools",
+                    )
+                )
+                result = json.loads(
+                    await read_email(ctx, "a" * 32, "b" * 32, offset=16384)
+                )
+                self.assertEqual(
+                    result["message"]["body"], "End of original message."
+                )
+                self.assertEqual(result["message"]["next_offset"], 0)
+                with self.assertRaises(ModelRetry):
+                    await read_email(ctx, "a" * 32, "b" * 32, offset=-1)
+            self.assertEqual(calls, 1)
+
+        asyncio.run(run())
+
     def test_native_mail_search_reads_original_and_keeps_reply_parent(
         self,
     ) -> None:
@@ -74,6 +118,7 @@ class EmailDrafting(unittest.TestCase):
                         "operation": "message",
                         "account": account,
                         "message": message,
+                        "offset": 0,
                     },
                 )
                 return httpx.Response(

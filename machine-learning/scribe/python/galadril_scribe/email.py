@@ -165,12 +165,15 @@ async def read_email(
     account: str,
     message: str,
     include_thread: bool = False,
+    offset: int = 0,
 ) -> str:
     """Read the original collected message and optionally its thread.
 
     Use the account and message identifiers from search_emails, not a GDR
     tracking reference. Pass the returned reply_source to propose_email to
     keep the reply in the original thread. Sending remains a user action.
+    Follow message.next_offset by calling again with that offset; a page is
+    not the complete original until next_offset is zero.
     """
     try:
         source = ReplySource(account=account, message=message)
@@ -178,10 +181,13 @@ async def read_email(
         raise ModelRetry(
             "Use the account and message identifiers returned by search_emails."
         ) from None
+    if not 0 <= offset <= 1024 * 1024:
+        raise ModelRetry("Use a body cursor between zero and 1048576.")
     operation = "message"
     try:
         original = await _mail_operation(
-            ctx, {"operation": "message", **source.model_dump()}
+            ctx,
+            {"operation": "message", **source.model_dump(), "offset": offset},
         )
         result: dict[str, JsonValue] = {
             "status": "ok",
