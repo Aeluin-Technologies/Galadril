@@ -104,9 +104,6 @@ services:
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
       VISION_BOOTSTRAP_PATH: /connectors.yaml
-      VISION_TENANT_IDS: ${VISION_TENANT_IDS:-}
-      VISION_TENANT_ID: ${VISION_TENANT_ID:-tenant}
-      VISION_PIPELINE_ID: ${VISION_PIPELINE_ID:-default}
       GRPC_DNS_RESOLVER: native
       RAY_raylet_start_wait_time_s: "60"
       PYTHONUNBUFFERED: "1"

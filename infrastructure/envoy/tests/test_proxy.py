@@ -658,6 +658,10 @@ class ProxyIntegrationTest(unittest.TestCase):
                         client.post(base + "GetTenant").status_code, 200
                     )
                     self.assertEqual(
+                        client.post(base + "ListTenants").status_code,
+                        403 if identity == "gateway" else 200,
+                    )
+                    self.assertEqual(
                         client.post(base + "PutTenant").status_code,
                         200 if identity == "gateway" else 403,
                     )

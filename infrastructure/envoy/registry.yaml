@@ -178,6 +178,9 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /galadril.registry.v1.Registry/ListPublishedPipelines
+                            - url_path:
+                                path:
+                                  exact: /galadril.registry.v1.Registry/ListTenants
                   health:
                     principals:
                     - authenticated:

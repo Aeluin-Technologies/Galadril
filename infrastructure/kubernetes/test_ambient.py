@@ -426,6 +426,14 @@ class AmbientIntegrationTest(unittest.TestCase):
     def test_workload_identity_and_rpc_permissions(self) -> None:
         read = "/galadril.registry.v1.Registry/GetRuntimePipeline"
         write = "/galadril.registry.v1.Registry/PutPipeline"
+        discover = "/galadril.registry.v1.Registry/ListTenants"
+        for caller in ("gateway", "intake", "vision", "scribe", "unknown"):
+            response = self.request(caller, "registry:50053", discover)
+            self.assertTrue(
+                response.rstrip().endswith(
+                    "200" if caller in {"intake", "vision"} else "403"
+                )
+            )
         for caller in ("gateway", "intake", "vision"):
             self.assertTrue(
                 self.request(caller, "registry:50053", read)
