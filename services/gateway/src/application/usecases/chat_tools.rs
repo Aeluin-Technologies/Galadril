@@ -105,6 +105,13 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    ConversationMemory {
+        id: Option<String>,
+    },
+    AgentState {
+        key: String,
+        value: Option<Value>,
+    },
     RedactDocument {
         file_id: String,
         rules: Vec<crate::domain::redaction::RedactionRule>,
@@ -364,6 +371,20 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::ConversationMemory { id } => {
+                    ensure!(scope.pengolo && !scope.temporary, "Conversation memory unavailable");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, false).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.conversation_memory(&actor, &generation, id.as_deref()).await
+                },
+                ToolRequest::AgentState { key, value } => {
+                    ensure!(scope.pengolo, "State requires a Pengolo generation");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.agent_state(&actor, &generation, &key, value).await
+                },
                 ToolRequest::RedactDocument { file_id, rules, request_id } => {
                     ensure!(scope.pengolo, "Redaction requires a Pengolo generation");
                     let service = self.pengolo_service()?;

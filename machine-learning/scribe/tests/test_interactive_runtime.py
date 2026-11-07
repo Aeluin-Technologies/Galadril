@@ -256,8 +256,17 @@ async def test_background_batches_fit_gateway_http_body_limit() -> None:
         ensure_ascii=False,
     )
     bodies: list[bytes] = []
+    states: dict[str, object] = {}
 
     def gateway(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if payload.get("operation") == "agent_state":
+            if payload.get("value") is not None:
+                states[payload["key"]] = payload["value"]
+                return httpx.Response(200, json=True)
+            return httpx.Response(
+                200, content=json.dumps(states.get(payload["key"]))
+            )
         bodies.append(request.content)
         return httpx.Response(200 if len(request.content) <= 4096 else 413)
 
@@ -320,7 +329,9 @@ async def test_default_budget_allows_planning_alongside_research() -> None:
             )
         ]
     assert chunks[-1].kind == "completed"
-    assert any(chunk.content == "Research complete." for chunk in chunks)
+    assert "Research complete." in "".join(
+        chunk.content for chunk in chunks if chunk.kind == "content"
+    )
 
 
 # Valid arguments exercise source failures rather than schema-retry behavior.

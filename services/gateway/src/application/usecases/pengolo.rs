@@ -1465,6 +1465,26 @@ impl PengoloService {
         sources: &[EvidenceSource],
     ) -> Result<bool> {
         for source in sources {
+            if source.resource_type == "pengolo_chat" {
+                let Some(chat) = self
+                    .store
+                    .get(
+                        actor.tenant,
+                        Collection::Chat,
+                        &source.resource_id,
+                        false,
+                    )
+                    .await?
+                else {
+                    return Ok(false);
+                };
+                if !file_evidence_visible(
+                    self.authorize_record(actor, &chat).await.map(|()| chat),
+                )? {
+                    return Ok(false);
+                }
+                continue;
+            }
             if matches!(
                 source.resource_type.as_str(),
                 "pengolo_file" | "pengolo_temporary_file"
@@ -1747,7 +1767,8 @@ impl PengoloService {
         value: Value,
     ) -> Result<Value> {
         self.verify(actor).await?;
-        let input = SendInput::parse(value)?;
+        let mut input = SendInput::parse(value)?;
+        let resume_state = self.resume_state(actor, &mut input).await?;
         let id = uuid::Uuid::parse_str(&input.idempotency_key)?
             .simple()
             .to_string();
@@ -1959,7 +1980,7 @@ impl PengoloService {
                 } else {
                     Vec::new()
                 };
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions,"execution_context":branch,"shared_attachment_indices":defense_attachment_indices});
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","execution_mode":if input.execution_mode.as_deref()==Some("research") || !input.agent_ids.is_empty() {"research"} else {"chat"},"resume_state":resume_state,"resume_source":input.resume_source,"capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"conversation_memory":!input.temporary,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions,"execution_context":branch,"shared_attachment_indices":defense_attachment_indices});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -3373,5 +3394,6 @@ mod tests {
 mod compiler;
 mod document_fields;
 pub(crate) use document_fields::compiler_binding_key_matches;
+mod agent_state;
 mod redaction;
 pub use compiler::CompiledArtifact;

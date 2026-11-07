@@ -536,7 +536,7 @@ impl PengoloStore for PgPengoloStore {
         session: &str,
     ) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
-        let ids:Vec<(String,String)>=sqlx::query_as("UPDATE pengolo_ephemeral_records SET expires_at=$1 WHERE tenant_id=$2 AND owner_id=$3 AND ((kind='chat' AND id=$4) OR (kind='generation' AND data->>'chatId'=$4) OR (kind='file' AND data->>'temporarySession'=$4)) RETURNING kind,id").bind(now()).bind(tenant).bind(owner).bind(session).fetch_all(&mut *tx).await?;
+        let ids:Vec<(String,String)>=sqlx::query_as("UPDATE pengolo_ephemeral_records SET expires_at=$1 WHERE tenant_id=$2 AND owner_id=$3 AND ((kind='chat' AND id=$4) OR (kind IN ('generation','agent_state') AND data->>'chatId'=$4) OR (kind='file' AND data->>'temporarySession'=$4)) RETURNING kind,id").bind(now()).bind(tenant).bind(owner).bind(session).fetch_all(&mut *tx).await?;
         for (kind, id) in ids {
             sqlx::query("UPDATE pengolo_retention SET expires_at=$1 WHERE tenant_id=$2 AND kind=$3 AND id=$4 AND temporary").bind(now()).bind(tenant).bind(&kind).bind(&id).execute(&mut *tx).await?;
             if kind == "generation" {
@@ -662,6 +662,10 @@ impl PengoloStore for PgPengoloStore {
     ) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
         if matches!(collection, Collection::Chat) {
+            let states: Vec<String> = sqlx::query_scalar(AssertSqlSafe(format!("DELETE FROM {} WHERE tenant_id=$1 AND kind='agent_state' AND data->>'chatId'=$2 RETURNING id", table(temporary)))).bind(tenant).bind(id).fetch_all(&mut *tx).await?;
+            for state in states {
+                sqlx::query("DELETE FROM pengolo_retention WHERE tenant_id=$1 AND kind='agent_state' AND id=$2 AND temporary=$3").bind(tenant).bind(state).bind(temporary).execute(&mut *tx).await?;
+            }
             let generations:Vec<String>=sqlx::query_scalar(AssertSqlSafe(format!("DELETE FROM {} WHERE tenant_id=$1 AND kind='generation' AND data->>'chatId'=$2 RETURNING id",table(temporary)))).bind(tenant).bind(id).fetch_all(&mut *tx).await?;
             for generation in generations {
                 sqlx::query(AssertSqlSafe(format!(
@@ -842,7 +846,7 @@ impl PengoloStore for PgPengoloStore {
             None,
         )
         .await?;
-        sqlx::query("INSERT INTO pengolo_capabilities(tenant_id,token,generation_id,temporary,expires_at) VALUES($1,$2,$3,$4,$5)").bind(tenant).bind(capability).bind(&id).bind(input.temporary).bind(now()+900000).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO pengolo_capabilities(tenant_id,token,generation_id,temporary,expires_at) VALUES($1,$2,$3,$4,$5)").bind(tenant).bind(capability).bind(&id).bind(input.temporary).bind(now()+86_400_000).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO pengolo_retention(tenant_id,kind,id,temporary,expires_at) VALUES($1,'lease',$2,$3,$4)").bind(tenant).bind(&id).bind(input.temporary).bind(now()+45000).execute(&mut *tx).await?;
         chat = Self::read(
             &mut tx,
@@ -1234,6 +1238,7 @@ impl PengoloStore for PgPengoloStore {
                     "file" => Collection::File,
                     "chat" => Collection::Chat,
                     "generation" => Collection::Generation,
+                    "agent_state" => Collection::AgentState,
                     _ => continue,
                 };
                 result.push((
@@ -1318,6 +1323,70 @@ mod tests {
         let mut other = record;
         other.owner_id = "bob".into();
         assert!(store.reserve_file("tenant_a", &other, false).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn agent_checkpoints_are_tenant_scoped_revisioned_and_expiring()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        database.verify_security().await?;
+        let store = PgPengoloStore::new(database);
+        for temporary in [false, true] {
+            let checkpoint = Record {
+                id: "d".repeat(32),
+                owner_id: "alice".into(),
+                project_id: None,
+                expires_at: Some(now() + 60000),
+                revision: 1,
+                updated_at: now(),
+                data: json!({"checkpoint":"private-state"}),
+            };
+            let saved = store
+                .save(
+                    "tenant_a",
+                    Collection::AgentState,
+                    &checkpoint,
+                    temporary,
+                    None,
+                )
+                .await?;
+            assert!(
+                store
+                    .get(
+                        "tenant_b",
+                        Collection::AgentState,
+                        &saved.id,
+                        temporary
+                    )
+                    .await?
+                    .is_none()
+            );
+            assert!(
+                store
+                    .save(
+                        "tenant_a",
+                        Collection::AgentState,
+                        &saved,
+                        temporary,
+                        Some(0)
+                    )
+                    .await
+                    .is_err()
+            );
+            let restored = store
+                .get("tenant_a", Collection::AgentState, &saved.id, temporary)
+                .await?
+                .context("Checkpoint lost")?;
+            assert_eq!(restored.data, checkpoint.data);
+            assert_eq!(restored.expires_at, checkpoint.expires_at);
+        }
         Ok(())
     }
 

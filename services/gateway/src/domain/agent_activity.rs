@@ -163,6 +163,20 @@ pub fn web_research_sites(results: &[Value]) -> Vec<WebSite> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    Usage {
+        requests: u64,
+        tool_calls: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+        elapsed_seconds: f64,
+        cost_usd: Option<f64>,
+        stop_reason: Option<String>,
+    },
+    ToolStatus {
+        id: String,
+        name: String,
+        status: String,
+    },
     WebResearch {
         id: String,
         sites: Vec<WebSite>,
@@ -215,6 +229,35 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::Usage {
+                requests,
+                tool_calls,
+                elapsed_seconds,
+                cost_usd,
+                stop_reason,
+                ..
+            } => ensure!(
+                *requests <= 1_000_000 &&
+                    *tool_calls <= 10_000_000 &&
+                    elapsed_seconds.is_finite() &&
+                    *elapsed_seconds >= 0.0 &&
+                    cost_usd
+                        .is_none_or(|cost| cost.is_finite() && cost >= 0.0) &&
+                    stop_reason.as_deref().is_none_or(|reason| matches!(
+                        reason,
+                        "budget" | "timeout" | "error"
+                    )),
+                "Invalid execution usage"
+            ),
+            Self::ToolStatus { id, name, status } => ensure!(
+                identifier(id) &&
+                    identifier(name) &&
+                    matches!(
+                        status.as_str(),
+                        "started" | "completed" | "failed"
+                    ),
+                "Invalid tool activity"
+            ),
             Self::WebResearch { id, sites } => {
                 ensure!(
                     identifier(id) && !sites.is_empty() && sites.len() <= 8,

@@ -47,6 +47,7 @@ pub enum Collection {
     Project,
     File,
     Generation,
+    AgentState,
 }
 
 impl Collection {
@@ -58,6 +59,7 @@ impl Collection {
             Self::Project => "project",
             Self::File => "file",
             Self::Generation => "generation",
+            Self::AgentState => "agent_state",
         }
     }
 }

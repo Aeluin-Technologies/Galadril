@@ -1,5 +1,6 @@
 """Bounded wire contracts; model arguments cannot carry authority."""
 
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from galadril_pipeline.capabilities import CapabilityId
@@ -65,12 +66,16 @@ class RunRequest(BaseModel):
     model_alias: ModelAlias | None = None
     openai_owner_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     reasoning_effort: ReasoningEffort | None = None
+    execution_mode: Literal["chat", "research"] = "chat"
+    resume_state: str | None = Field(default=None, max_length=524288)
+    resume_source: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     history: list[HistoryMessage] = Field(default_factory=list, max_length=64)
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
     graph_context: GraphContext | None = None
     web_query: str | None = Field(default=None, min_length=1, max_length=512)
     web_search: bool = False
     library_enabled: bool = False
+    conversation_memory: bool = False
     tool_ids: tuple[CapabilityId, ...] = Field(default=(), max_length=32)
     team_id: CapabilityId | None = None
     team: TeamDefinition | None = None
@@ -286,7 +291,13 @@ class Settings(BaseSettings):
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)
     max_tool_calls: int = Field(default=32, ge=1, le=32)
     max_model_requests: int = Field(default=40, ge=1, le=64)
-    run_timeout_seconds: int = Field(default=600, ge=1, le=900)
+    run_timeout_seconds: int = Field(default=600, ge=1, le=86400)
+    research_model_requests: int = Field(default=4096, ge=1, le=65536)
+    research_timeout_seconds: int = Field(default=28800, ge=1, le=86400)
+    chat_token_limit: int = Field(default=250000, ge=1)
+    research_token_limit: int = Field(default=8000000, ge=1)
+    chat_cost_limit_usd: Decimal | None = Field(default=None, ge=0)
+    research_cost_limit_usd: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def configured_model(self) -> "Settings":
