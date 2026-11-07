@@ -473,11 +473,21 @@ def _redact_pdf(
     if any(label.text not in final_text for label in labels):
         raise ValueError("Public initials could not be preserved")
     folded = final_text.casefold()
-    for secret, whole_name in secrets:
-        for occurrence in re2.finditer(re2.escape(secret), folded):
-            if not whole_name or _whole_name(folded, *occurrence.span()):
-                raise ValueError("Private text remains")
+    if any(secret in folded for secret, bounded in secrets if not bounded):
+        raise ValueError("Private text remains")
     with pdfium.PdfDocument(output) as verification:
+        aliases = tuple(secret for secret, bounded in secrets if bounded)
+        if aliases:
+            # PDF Oxide can split a compound surname at its hyphen after glyph reconstruction.
+            for page in range(pages):
+                text, _ = _glyph_text(_glyphs(verification, page))
+                text = text.casefold()
+                for secret in aliases:
+                    offset = text.find(secret)
+                    while offset >= 0:
+                        if _whole_name(text, offset, offset + len(secret)):
+                            raise ValueError("Private name remains")
+                        offset = text.find(secret, offset + len(secret))
         if (
             any(verification.get_metadata_dict().values())
             or verification.count_attachments()

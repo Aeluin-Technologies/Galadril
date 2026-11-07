@@ -314,11 +314,11 @@ def test_full_name_rule_also_replaces_an_initial_followed_by_the_surname(
         )
     )
     output = base64.b64decode(result.content_base64)
-    text = (
-        output.decode()
-        if mime == "text/plain"
-        else PdfDocument.from_bytes(output).extract_text(0)
-    )
+    if mime == "application/pdf":
+        with pdfium.PdfDocument(output) as document:
+            text = document[0].get_textpage().get_text_range()
+    else:
+        text = output.decode()
     assert result.match_count == 1
     assert "R. Lenoir intervient" not in text
     assert "R. Lenoir-Dupont" in text
