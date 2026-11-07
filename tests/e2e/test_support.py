@@ -1439,3 +1439,57 @@ def test_authentication_readiness_accepts_the_complete_route(
         "http://127.0.0.1:4445/health/ready",
         "https://127.0.0.1:8080/healthz",
     ]
+
+
+@pytest.mark.parametrize(
+    ("catalog", "expected"),
+    [
+        (None, None),
+        ({"defaultModel": None, "models": []}, None),
+        ({"defaultModel": "fixture", "models": []}, None),
+        ({"defaultModel": "fixture", "models": [{"alias": "other"}]}, None),
+        ({"defaultModel": "fixture", "models": [{"alias": "fixture"}]}, True),
+        ({"defaultModel": "cloud", "models": [{"alias": "cloud"}]}, True),
+    ],
+)
+def test_gateway_readiness_waits_for_the_scribe_model_catalog(
+    catalog: dict[str, object] | None,
+    expected: bool | None,
+) -> None:
+    async def exercise() -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert request.headers["authorization"] == "Bearer fixture-token"
+            query = json.loads(request.content)["query"]
+            if "scribeModels" not in query:
+                return httpx.Response(
+                    200, json={"data": {"__typename": "Query"}}
+                )
+            if catalog is None:
+                return httpx.Response(
+                    200,
+                    json={
+                        "errors": [
+                            {
+                                "message": "Scribe catalog transport failed",
+                                "path": ["scribeModels"],
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={"data": {"__typename": "Query", "scribeModels": catalog}},
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond)
+        ) as client:
+            gateway = object.__new__(e2e_clients.GatewayClient)
+            gateway._client = client
+            if catalog is None:
+                with pytest.raises(e2e_clients.GraphQLOperationError):
+                    await gateway.ready("fixture-token")
+            else:
+                assert await gateway.ready("fixture-token") is expected
+
+    asyncio.run(exercise())

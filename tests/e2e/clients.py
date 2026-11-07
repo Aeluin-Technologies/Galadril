@@ -232,9 +232,26 @@ class GatewayClient:
         )
 
     async def ready(self, token: str) -> bool | None:
-        """Returns readiness only after authenticated GraphQL is usable."""
-        await self.execute(token, "query { __typename }")
-        return True
+        """Waits for the authenticated model catalog before testing dependent APIs."""
+        data = await self.execute(
+            token,
+            "query { __typename scribeModels { defaultModel models { alias } } }",
+        )
+        catalog = require_mapping(
+            data.get("scribeModels"), "Scribe model catalog"
+        )
+        default = catalog.get("defaultModel")
+        models = require_sequence(catalog.get("models"), "Scribe models")
+        if not isinstance(default, str) or not default:
+            return None
+        return (
+            True
+            if any(
+                require_mapping(model, "Scribe model").get("alias") == default
+                for model in models
+            )
+            else None
+        )
 
 
 def _serialize(message: object) -> bytes:
