@@ -1061,7 +1061,9 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
     .getByRole("button", { name: "Download Excel", exact: true })
     .click();
   expect((await download).suggestedFilename()).toBe("pengolo-table.xlsx");
-  await page.getByRole("checkbox", { name: "Task 1", exact: true }).check();
+  await page
+    .getByRole("checkbox", { name: "Vérifier la source", exact: true })
+    .check();
   await expect.poll(() => checked).toBe(true);
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page
@@ -1089,7 +1091,7 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.getByRole("article")).toHaveCount(10);
   await expect(page.getByRole("article").last()).toBeInViewport();
   await expect(
-    page.getByRole("checkbox", { name: "Task 1", exact: true }),
+    page.getByRole("checkbox", { name: "Vérifier la source", exact: true }),
   ).toBeChecked();
   const chartCanvas = page.locator(".p-chart canvas");
   await expect(chartCanvas).toHaveCount(1);
