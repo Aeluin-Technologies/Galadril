@@ -45,6 +45,19 @@ class TemplateMutation(StrictModel):
     version: str = Field(pattern="^[0-9a-f]{64}$")
 
 
+class RedactRule(StrictModel):
+    kind: Literal["email", "phone", "literal", "regex"]
+    pattern: str | None = Field(default=None, min_length=1, max_length=512)
+    replacement: str = Field(default="[REDACTED]", min_length=1, max_length=64)
+    case_sensitive: bool = False
+    replacement_mode: Literal["literal", "initials"] = "literal"
+
+
+class RedactDocument(StrictModel):
+    file_id: str = Field(pattern="^[0-9a-f]{32}$")
+    rules: tuple[RedactRule, ...] = Field(min_length=1, max_length=16)
+
+
 class DocumentCase(StrictModel):
     action: Literal["document_case"]
     template_id: str = Field(pattern="^[0-9a-f]{32}$")
@@ -112,6 +125,23 @@ JSON = TypeAdapter(JsonValue)
 
 
 def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
+    async def redact_document(
+        ctx: RunContext[Dependencies], request: RedactDocument
+    ) -> str:
+        """Create a redacted copy of an attached PDF or UTF-8 text document. Specify literal matches, bounded RE2 regex, email or phone rules. Match complete words with a bounded RE2 pattern and set case_sensitive=false when appropriate. Original bytes stay in the processing service. Return the download link and advise review of the provided rules' coverage."""
+        return await invoke(
+            ctx,
+            "redact_document",
+            {
+                "file_id": request.file_id,
+                "rules": cast(
+                    JsonValue,
+                    [rule.model_dump(mode="json") for rule in request.rules],
+                ),
+                "request_id": ctx.tool_call_id,
+            },
+        )
+
     async def read_document(
         ctx: RunContext[Dependencies],
         template_id: str,
@@ -277,6 +307,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
     return [
         Tool[Dependencies](tool)
         for tool in (
+            redact_document,
             read_document,
             document_templates,
             compile_document,

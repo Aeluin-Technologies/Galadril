@@ -257,6 +257,24 @@ impl PengoloService {
         capability: &str,
         artifact: CompiledArtifact<'_>,
     ) -> Result<Value> {
+        self.authorize_compiler(
+            capability,
+            AuthorizationRequest {
+                action: Action::PublishPdf,
+                template: None,
+            },
+        )
+        .await?;
+        self.save_generated_artifact(actor, generation, artifact)
+            .await
+    }
+
+    pub(super) async fn save_generated_artifact(
+        &self,
+        actor: &Principal<'_>,
+        generation: &Record,
+        artifact: CompiledArtifact<'_>,
+    ) -> Result<Value> {
         use sha2::{Digest, Sha256};
         let CompiledArtifact {
             id: job,
@@ -269,14 +287,6 @@ impl PengoloService {
         crate::domain::pengolo::validate_file_prefix(mime, &pdf)?;
         let extension =
             validate_upload(name, mime, i64::try_from(pdf.len())?)?;
-        self.authorize_compiler(
-            capability,
-            AuthorizationRequest {
-                action: Action::PublishPdf,
-                template: None,
-            },
-        )
-        .await?;
         let temporary = generation
             .data
             .get("input")
@@ -365,14 +375,6 @@ impl PengoloService {
                 axum::body::Bytes::from(pdf),
             )
             .await?;
-        self.authorize_compiler(
-            capability,
-            AuthorizationRequest {
-                action: Action::PublishPdf,
-                template: None,
-            },
-        )
-        .await?;
         self.authorize_generation(actor, generation, temporary)
             .await?;
         let file = self

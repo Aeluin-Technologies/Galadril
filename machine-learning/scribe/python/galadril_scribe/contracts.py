@@ -28,6 +28,7 @@ ModelAlias = Annotated[
 
 class Attachment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    file_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     kind: Literal["image", "audio", "document", "text"]
     url: str = Field(default="", max_length=8192)
     media_type: str | None = Field(default=None, max_length=128)

@@ -1617,12 +1617,12 @@ impl PengoloService {
         Ok(None)
     }
 
-    async fn attachment(
+    async fn attached_file(
         &self,
         actor: &Principal<'_>,
         input: &SendInput,
         id: &str,
-    ) -> Result<(Value, EvidenceSource, String)> {
+    ) -> Result<Record> {
         let temporary_session = input
             .temporary
             .then_some(input.chat_id.as_deref())
@@ -1659,6 +1659,18 @@ impl PengoloService {
             ),
             "Document is outside this conversation's library"
         );
+        Ok(file)
+    }
+
+    async fn attachment(
+        &self,
+        actor: &Principal<'_>,
+        input: &SendInput,
+        id: &str,
+    ) -> Result<(Value, EvidenceSource, String)> {
+        let file = self.attached_file(actor, input, id).await?;
+        let temporary_file =
+            file.data.get("temporarySession").and_then(Value::as_str);
         let remaining = file
             .expires_at
             .context("Missing expiration")?
@@ -1687,7 +1699,7 @@ impl PengoloService {
             }
             let text = String::from_utf8(body)
                 .context("Text document must use UTF-8")?;
-            json!({"kind":"text","text":text})
+            json!({"kind":"text","text":text,"file_id":id})
         } else {
             let kind = if mime.starts_with("image/") {
                 "image"
@@ -1701,7 +1713,7 @@ impl PengoloService {
                     u64::try_from(remaining.min(300))?,
                 )
                 .await?;
-            json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true})
+            json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true,"file_id":id})
         };
         self.store
             .refresh_file_retention(

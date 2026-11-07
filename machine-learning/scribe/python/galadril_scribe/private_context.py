@@ -88,18 +88,28 @@ class PrivateContextProcessor:
         ]
         values = await self.project_sources(tuple(sources))
 
-        def projected(indices: list[int]) -> list[Attachment]:
+        def projected(
+            indices: list[int], originals: list[Attachment]
+        ) -> list[Attachment]:
             return [
-                Attachment(kind="text", text=values[index].replace("\f", "\n"))
-                for index in indices
+                Attachment(
+                    kind="text",
+                    text=values[index].replace("\f", "\n"),
+                    file_id=original.file_id,
+                )
+                for index, original in zip(indices, originals, strict=True)
             ]
 
         return request.model_copy(
             update={
-                "attachments": projected(attached),
+                "attachments": projected(attached, request.attachments),
                 "history": [
                     message.model_copy(
-                        update={"attachments": projected(indices)}
+                        update={
+                            "attachments": projected(
+                                indices, message.attachments
+                            )
+                        }
                     )
                     for message, indices in zip(
                         request.history, history, strict=True

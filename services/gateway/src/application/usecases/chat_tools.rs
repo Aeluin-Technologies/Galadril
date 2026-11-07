@@ -105,6 +105,11 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    RedactDocument {
+        file_id: String,
+        rules: Vec<crate::domain::redaction::RedactionRule>,
+        request_id: String,
+    },
     DocumentTemplates {
         request: galadril_document_compiler::tools::TemplateOperation,
     },
@@ -359,6 +364,13 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::RedactDocument { file_id, rules, request_id } => {
+                    ensure!(scope.pengolo, "Redaction requires a Pengolo generation");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.redact_attached_document(&actor, &generation, &file_id, rules, &request_id).await
+                },
                 ToolRequest::DocumentTemplates { request } => {
                     ensure!(scope.pengolo, "Templates require a Pengolo generation");
                     let compiler = self.compiler.get().context("Document compiler unavailable")?;

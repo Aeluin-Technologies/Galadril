@@ -313,7 +313,8 @@ impl OutputEvent {
             ensure!(
                 matches!(
                     self.content.as_str(),
-                    "context" |
+                    "redact_document" |
+                        "context" |
                         "web" |
                         "search" |
                         "graph" |

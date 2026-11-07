@@ -289,3 +289,11 @@ On Kubernetes, mount the same provisioned assets read-only in the Scribe
 deployment overlay and set `SCRIBE_PRIVATE_MODEL_DIR` to the mount path.
 Only one automatic projection runs at a time. The worker loads local files
 with network downloads disabled.
+
+Document redaction is also available through the native `redact_document` chat
+tool. It takes an explicitly attached file ID and up to sixteen declarative
+matching rules. Gateway validates the generation and source, streams the
+original into the bounded redaction service and publishes the resulting copy.
+The model receives metadata and a download link. Automatic pseudonymization
+for protected specialist attachments remains independent of these explicit
+user-requested rules.
