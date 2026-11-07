@@ -34,6 +34,7 @@ class ExecutionState(BaseModel):
     output_tokens: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
     web_closed: bool = False
+    web_requires_approval: bool = True
     team_reports: str = Field(default='{"reports":[]}', max_length=65536)
     safe: bool
     cost_usd: Decimal | None = Field(default=None, ge=0)
@@ -243,6 +244,21 @@ def unpack_text(value: str) -> str:
 
 def safe_to_replay(messages: list[ModelMessage]) -> bool:
     """Replay known read operations; unknown effects require an explicit review."""
+    retryable = {
+        "web_search",
+        "date_interval",
+        "document_search",
+        "search",
+        "search_evidence",
+        "read_file",
+        "read_document",
+        "memory_inventory",
+        "save_checkpoint",
+        "compact_memory",
+        "restore_memory",
+        "read_plan",
+        "search_conversation_history",
+    }
     pending: dict[str, str] = {}
     for message in messages:
         for part in message.parts:
@@ -253,18 +269,11 @@ def safe_to_replay(messages: list[ModelMessage]) -> bool:
             elif isinstance(message, ModelRequest) and isinstance(
                 part, ToolReturnPart
             ):
-                pending.pop(part.tool_call_id, None)
-    retryable = {
-        "web_search",
-        "date_interval",
-        "document_search",
-        "search",
-        "search_evidence",
-        "read_file",
-        "read_document",
-        "memory_inventory",
-        "restore_memory",
-        "read_plan",
-        "search_conversation_history",
-    }
+                if (
+                    part.outcome in {"success", "denied"}
+                    or part.tool_name in retryable
+                ):
+                    pending.pop(part.tool_call_id, None)
+                else:
+                    pending[part.tool_call_id] = part.tool_name
     return all(name in retryable for name in pending.values())

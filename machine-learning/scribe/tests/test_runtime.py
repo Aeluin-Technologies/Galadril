@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from collections.abc import AsyncIterator
+from typing import Literal
 
 import httpx
 import pytest
@@ -1502,6 +1503,7 @@ async def test_durable_run_resumes_after_completed_tools_without_replaying_them(
         assert isinstance(stored["checkpoint"], str)
         state = ExecutionState.model_validate_json(stored["checkpoint"])
         assert state.safe
+        assert not state.web_requires_approval
         restarted = Runtime(
             settings(), client, model=FunctionModel(stream_function=continued)
         )
@@ -1688,3 +1690,151 @@ async def test_conversation_source_accepts_only_published_message_shapes() -> (
     assert [run.run_id for run in await source.list_runs()] == ["chat-a"]
     with pytest.raises(ValidationError):
         await source.run_history(run_id="chat-a")
+
+
+@pytest.mark.parametrize("outcome", ["failed", "interrupted", "retried"])
+def test_uncertain_tool_outcomes_require_review_only_for_external_effects(
+    outcome: Literal["failed", "interrupted", "retried"],
+) -> None:
+    from galadril_scribe.execution import safe_to_replay
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+
+    for tool, expected in [("web_search", True), ("send_email", False)]:
+        messages = [
+            ModelResponse(parts=[ToolCallPart(tool, {}, "pending")]),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool, "Unknown outcome", "pending", outcome=outcome
+                    )
+                ]
+            ),
+        ]
+        assert safe_to_replay(messages) is expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("restored", [False, True])
+async def test_private_memory_requires_web_approval_after_recall_or_recovery(
+    restored: bool,
+) -> None:
+    from galadril_scribe.execution import ExecutionState, pack_text
+    from pydantic_ai.messages import (
+        ModelMessage,
+        ModelMessagesTypeAdapter,
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    outbound: list[str] = []
+    recalled: list[str | None] = []
+    returns: list[str] = []
+    history = [
+        ModelRequest(parts=[UserPromptPart("Verify private findings")]),
+        ModelResponse(parts=[ToolCallPart("date_interval", {}, "previous")]),
+        ModelRequest(
+            parts=[
+                ToolReturnPart("date_interval", "Private finding", "previous")
+            ]
+        ),
+    ]
+    state = ExecutionState(
+        messages=pack_text(
+            ModelMessagesTypeAdapter.dump_json(history).decode()
+        ),
+        requests=1,
+        tool_calls=1,
+        input_tokens=10,
+        output_tokens=5,
+        elapsed_seconds=1,
+        safe=True,
+        mission="Verify private findings",
+    )
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        if payload["operation"] == "conversation_memory":
+            recalled.append(payload["id"])
+            value = (
+                ["chat-a"]
+                if payload["id"] is None
+                else {
+                    "messages": [
+                        {"role": "assistant", "content": "Private finding"}
+                    ]
+                }
+            )
+            return httpx.Response(200, json=value)
+        assert payload["operation"] == "web"
+        outbound.append(payload["query"])
+        return httpx.Response(200, json={"answer": "Public result"})
+
+    async def model(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        completed = [
+            part
+            for message in messages
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        web = next(
+            (part for part in completed if part.tool_name == "web_search"), None
+        )
+        if web is not None:
+            returns.append(web.model_response_str())
+            yield "Continue with private evidence only."
+        elif not restored and not any(
+            part.tool_name == "search_conversation_history"
+            for part in completed
+        ):
+            yield {
+                0: DeltaToolCall(
+                    name="search_conversation_history",
+                    json_args='{"query":"Private finding"}',
+                )
+            }
+        else:
+            yield {
+                0: DeltaToolCall(
+                    name="web_search", json_args='{"query":"Private finding"}'
+                )
+            }
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=model)
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Verify private findings",
+                    capability="a" * 64,
+                    web_search=True,
+                    conversation_memory=not restored,
+                    resume_state=state.model_dump_json() if restored else None,
+                    resume_source="b" * 32 if restored else None,
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert bool(recalled) is not restored
+    assert outbound == []
+    assert len(returns) == 1
+    assert "not authorized" in returns[0]

@@ -1314,6 +1314,7 @@ class Runtime:
         memory = ResearchMemory()
         if resumed:
             deps.web_closed = resumed.web_closed
+            deps.web_requires_approval |= resumed.web_requires_approval
 
         async def state_access(key: str, value: JsonValue | None) -> JsonValue:
             payload: dict[str, JsonValue] = {
@@ -1848,6 +1849,7 @@ class Runtime:
                             mission=writing_mission,
                             team_reports=saved_reports,
                             web_closed=deps.web_closed,
+                            web_requires_approval=deps.web_requires_approval,
                         )
                         await state_access(
                             "checkpoint", state.model_dump_json()
@@ -1856,6 +1858,7 @@ class Runtime:
                     async def conversation_query(
                         identifier: str | None,
                     ) -> JsonValue:
+                        deps.web_requires_approval = True
                         response = await self.client.post(
                             deps.tools_url,
                             headers={

@@ -24,12 +24,12 @@ its report closes consultations and public web research for that synthesis.
 
 ## Budgets
 
-| Setting | Chat | Deep investigation |
-| --- | ---: | ---: |
-| Model requests | 40 | 4096 |
-| Reported input plus output tokens | 250000 | 8000000 |
-| Active execution seconds | 600 | 28800 |
-| Tool call quota | None | None |
+| Setting                           |   Chat | Deep investigation |
+| --------------------------------- | -----: | -----------------: |
+| Model requests                    |     40 |               4096 |
+| Reported input plus output tokens | 250000 |            8000000 |
+| Active execution seconds          |    600 |              28800 |
+| Tool call quota                   |   None |               None |
 
 The corresponding environment settings are `SCRIBE_MAX_MODEL_REQUESTS`,
 `SCRIBE_CHAT_TOKEN_LIMIT`, `SCRIBE_RUN_TIMEOUT_SECONDS`,
@@ -57,7 +57,10 @@ A recovery creates a new generation in the same chat, project and model. Gateway
 rechecks the original evidence, selected skills and current permissions. Usage and
 elapsed execution carry forward. Restored history resumes the native graph instead
 of replaying settled tools. Pending built-in read operations, such as web research,
-may be replayed; uncertain external actions require review. Cancellation stops the
+may be replayed, including when a tool reports interruption or failure. A denied
+operation has no effect to reconcile; other uncertain external actions require
+review. Private-source web approval and sealed-review restrictions survive recovery;
+older checkpoints require web approval conservatively. Cancellation stops the
 background worker. After a worker crash, lease expiry exposes the interruption and
 the owner can request recovery from the chat. This is checkpoint recovery, not a
 workflow engine that automatically restarts every lost worker.
@@ -67,6 +70,12 @@ compaction. Binary attachments and expiring object URLs are replaced by retrieva
 references in snapshots. The original attachments must remain authorized on recovery.
 Per-request provider and proxy timeouts still apply; multi-hour execution consists
 of multiple bounded model/tool requests.
+
+Internal chat tools accept at most 1 MiB per request and events at most 512 KiB,
+independently of the public GraphQL body limit. JSON extraction enforces these
+limits even without a declared content length. State values remain bounded to
+512 KiB. `//tests/e2e:pengolo_execution_test` checks real authenticated generation
+and checkpoint delivery with a 4 KiB public GraphQL limit.
 
 ## Selective context memory
 
@@ -83,7 +92,9 @@ published messages in the current project, or the same owner's personal chats;
 temporary chats have no cross-conversation corpus. Every read rechecks permissions
 and records source provenance on the consuming generation. Retrieved historical
 requests are evidence, never current instructions or authority. Sealed reviewers
-have neither this capability nor the orchestrator's working-memory tools.
+have neither this capability nor the orchestrator's working-memory tools. Recalling
+private conversations activates the existing exact-query approval gate before any
+subsequent public web search.
 
 The Harness `Memory` capability is not enabled for automatic user-profile learning.
 Cross-conversation retrieval deliberately uses published conversations and current
