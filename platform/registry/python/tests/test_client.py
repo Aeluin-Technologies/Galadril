@@ -30,7 +30,9 @@ class FakeChannel:
         request_serializer: Callable[[object], bytes],
         response_deserializer: _Deserializer,
     ) -> Callable[[object], object]:
-        async def invoke(request: object) -> object:
+        async def invoke(
+            request: object, *, timeout: float | None = None
+        ) -> object:
             request_serializer(request)
             self.calls.append(path)
             payload = self.responses.pop(0)
@@ -43,6 +45,46 @@ class FakeChannel:
 
 
 class RegistryClientTenantTest(unittest.IsolatedAsyncioTestCase):
+    async def test_native_tenant_discovery_reads_every_page(self) -> None:
+        channel = FakeChannel(
+            [
+                registry_pb2.ListTenantsResponse(
+                    tenant_ids=["tenant_a"], next_page_token="opaque-next"
+                ).SerializeToString(),
+                registry_pb2.ListTenantsResponse(
+                    tenant_ids=["tenant_b"]
+                ).SerializeToString(),
+            ]
+        )
+        with patch("grpc.aio.insecure_channel", return_value=channel):
+            client = RegistryClient(RegistryConfig())
+        self.assertEqual(await client.list_tenants(), ("tenant_a", "tenant_b"))
+        self.assertEqual(
+            channel.calls, ["/galadril.registry.v1.Registry/ListTenants"] * 2
+        )
+
+    async def test_native_discovery_rejects_unsafe_identity_and_cursor_cycle(
+        self,
+    ) -> None:
+        for responses in (
+            [
+                registry_pb2.ListTenantsResponse(
+                    tenant_ids=["../foreign"]
+                ).SerializeToString()
+            ],
+            [
+                registry_pb2.ListTenantsResponse(
+                    next_page_token="cycle"
+                ).SerializeToString()
+            ]
+            * 2,
+        ):
+            channel = FakeChannel(responses)
+            with patch("grpc.aio.insecure_channel", return_value=channel):
+                client = RegistryClient(RegistryConfig())
+            with self.assertRaises(ValueError):
+                await client.list_tenants()
+
     def test_ontology_authoring_fields_remain_optional_on_the_wire(
         self,
     ) -> None:

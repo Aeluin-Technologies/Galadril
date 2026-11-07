@@ -66,6 +66,33 @@ async fn pipeline_edits_preserve_an_immutable_revision_chain() -> Result<()> {
 
 #[async_trait]
 impl RevisionStore for MemoryStore {
+    async fn list_tenants(
+        &self,
+        limit: u32,
+        page_token: Option<&str>,
+    ) -> anyhow::Result<galadril_registry::storage::TenantPage> {
+        let tenants = self
+            .tenants
+            .lock()
+            .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
+        let mut ids = tenants
+            .keys()
+            .filter(|key| page_token.is_none_or(|token| key.as_str() > token))
+            .take(usize::try_from(limit)? + 1)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_page_token = if ids.len() > usize::try_from(limit)? {
+            ids.pop();
+            ids.last().cloned()
+        } else {
+            None
+        };
+        Ok(galadril_registry::storage::TenantPage {
+            tenant_ids: ids,
+            next_page_token,
+        })
+    }
+
     async fn tenant_exists(&self, tenant: &str) -> Result<bool> {
         let tenants =
             self.tenants.lock().map_err(|_| anyhow::anyhow!("lock"))?;

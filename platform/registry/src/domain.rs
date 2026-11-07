@@ -15,7 +15,10 @@ use crate::state::{
     OntologyBindingRecord, OntologyPublicationRecord, OntologyRecord,
     PipelineRecord, TenantState,
 };
-use crate::storage::{RevisionStore, Snapshot, valid_revision, valid_tenant};
+use crate::storage::{
+    RevisionStore, Snapshot, TenantPage, valid_revision, valid_tenant,
+    validate_discovery_page,
+};
 
 const MAX_TENANT_VALIDATIONS: usize = 100;
 
@@ -111,6 +114,16 @@ where
     /// Creates a Registry using the supplied versioned storage boundary.
     pub fn new(store: S) -> Self {
         Self { store }
+    }
+
+    /// Enumerates initialized tenants for authenticated runtime discovery.
+    pub async fn list_tenants(
+        &self,
+        limit: u32,
+        page_token: Option<&str>,
+    ) -> Result<TenantPage> {
+        validate_discovery_page(limit, page_token)?;
+        self.store.list_tenants(limit, page_token).await
     }
 
     /// Validates a bounded tenant set by checking physical S3 markers.

@@ -1,8 +1,9 @@
 //! Typed gRPC boundary for Registry callers and the service binary.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
 use tonic::transport::{Channel, Endpoint};
@@ -17,6 +18,46 @@ use crate::storage::RevisionStore;
 
 /// Cloneable generated client used by trusted internal services.
 pub type RegistryClient = proto::registry_client::RegistryClient<Channel>;
+
+impl RegistryClient {
+    /// Discovers initialized tenants without accepting event-supplied
+    /// identities.
+    pub async fn discover_tenants(&mut self) -> Result<Vec<String>> {
+        let mut tenants = BTreeSet::new();
+        let mut cursors = BTreeSet::new();
+        let mut page_token = None;
+        loop {
+            let page = self
+                .list_tenants(proto::ListTenantsRequest {
+                    limit: 100,
+                    page_token,
+                })
+                .await
+                .context("Registry tenant discovery failed")?
+                .into_inner();
+            ensure!(
+                page.tenant_ids.len() <= 100,
+                "Registry tenant discovery page exceeds limit"
+            );
+            for tenant in page.tenant_ids {
+                ensure!(
+                    crate::storage::valid_tenant(&tenant),
+                    "Registry returned invalid tenant identity"
+                );
+                tenants.insert(tenant);
+            }
+            let Some(next) = page.next_page_token else {
+                return Ok(tenants.into_iter().collect());
+            };
+            crate::storage::validate_discovery_page(100, Some(&next))?;
+            ensure!(
+                cursors.insert(next.clone()),
+                "Registry tenant discovery cursor repeated"
+            );
+            page_token = Some(next);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +100,29 @@ impl<S> proto::registry_server::Registry for RegistryGrpc<S>
 where
     S: RevisionStore + 'static,
 {
+    async fn list_tenants(
+        &self,
+        request: Request<proto::ListTenantsRequest>,
+    ) -> Result<Response<proto::ListTenantsResponse>, Status> {
+        let request = request.into_inner();
+        let page = self
+            .registry
+            .list_tenants(
+                if request.limit == 0 {
+                    100
+                } else {
+                    request.limit
+                },
+                request.page_token.as_deref(),
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::ListTenantsResponse {
+            tenant_ids: page.tenant_ids,
+            next_page_token: page.next_page_token,
+        }))
+    }
+
     async fn validate_tenants(
         &self,
         request: Request<proto::ValidateTenantsRequest>,
@@ -746,6 +810,35 @@ mod tests {
 
     #[async_trait]
     impl RevisionStore for MemoryStore {
+        async fn list_tenants(
+            &self,
+            limit: u32,
+            page_token: Option<&str>,
+        ) -> anyhow::Result<crate::storage::TenantPage> {
+            let tenants = self
+                .tenants
+                .lock()
+                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
+            let mut ids = tenants
+                .keys()
+                .filter(|key| {
+                    page_token.is_none_or(|token| key.as_str() > token)
+                })
+                .take(usize::try_from(limit)? + 1)
+                .cloned()
+                .collect::<Vec<_>>();
+            let next_page_token = if ids.len() > usize::try_from(limit)? {
+                ids.pop();
+                ids.last().cloned()
+            } else {
+                None
+            };
+            Ok(crate::storage::TenantPage {
+                tenant_ids: ids,
+                next_page_token,
+            })
+        }
+
         async fn tenant_exists(
             &self,
             tenant_id: &str,
@@ -959,6 +1052,97 @@ mod tests {
         assert_eq!(
             runtime.pointer("/pipeline/0/type"),
             Some(&serde_json::json!("forward"))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shared_discovery_client_paginates_new_tenants()
+    -> anyhow::Result<()> {
+        use proto::registry_server::RegistryServer;
+        use tonic::transport::Server;
+        use tonic::transport::server::TcpIncoming;
+
+        let registry = Arc::new(Registry::new(MemoryStore::default()));
+        for index in 0..101 {
+            registry.put_tenant(&format!("tenant_{index:03}")).await?;
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(
+            Server::builder()
+                .add_service(RegistryServer::new(RegistryGrpc::new(
+                    Arc::clone(&registry),
+                )))
+                .serve_with_incoming(TcpIncoming::from(listener)),
+        );
+        let mut client = registry_client(&format!("http://{address}"))?;
+        let tenants = client.discover_tenants().await?;
+        assert_eq!(tenants.len(), 101);
+        assert_eq!(tenants.first().map(String::as_str), Some("tenant_000"));
+        registry.put_tenant("tenant_new").await?;
+        assert_eq!(client.discover_tenants().await?.len(), 102);
+        server.abort();
+        match server.await {
+            Err(error) if error.is_cancelled() => {},
+            result => {
+                result??;
+            },
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discovery_pages_initialized_tenants_and_reflects_deletion()
+    -> anyhow::Result<()> {
+        let service =
+            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
+        for tenant in ["tenant_a", "tenant_b"] {
+            service
+                .put_tenant(Request::new(proto::PutTenantRequest {
+                    tenant_id: tenant.to_owned(),
+                }))
+                .await?;
+        }
+        let first = service
+            .list_tenants(Request::new(proto::ListTenantsRequest {
+                limit: 1,
+                page_token: None,
+            }))
+            .await?
+            .into_inner();
+        assert_eq!(first.tenant_ids, ["tenant_a"]);
+        let second = service
+            .list_tenants(Request::new(proto::ListTenantsRequest {
+                limit: 1,
+                page_token: first.next_page_token,
+            }))
+            .await?
+            .into_inner();
+        assert_eq!(second.tenant_ids, ["tenant_b"]);
+        assert!(second.next_page_token.is_none());
+        service
+            .delete_tenant(Request::new(proto::DeleteTenantRequest {
+                tenant_id: "tenant_a".to_owned(),
+                confirmation_tenant_id: "tenant_a".to_owned(),
+            }))
+            .await?;
+        let all = service
+            .list_tenants(Request::new(proto::ListTenantsRequest {
+                limit: 0,
+                page_token: None,
+            }))
+            .await?
+            .into_inner();
+        assert_eq!(all.tenant_ids, ["tenant_b"]);
+        assert!(
+            service
+                .list_tenants(Request::new(proto::ListTenantsRequest {
+                    limit: 101,
+                    page_token: None
+                }))
+                .await
+                .is_err()
         );
         Ok(())
     }
