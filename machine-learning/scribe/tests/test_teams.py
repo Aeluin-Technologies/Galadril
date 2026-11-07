@@ -892,6 +892,109 @@ async def test_unknown_team_or_incompatible_skill_rejected_before_admission() ->
 
 
 @pytest.mark.anyio
+async def test_normal_chat_reads_mail_and_proposes_a_reply_without_tool_quota() -> (
+    None
+):
+    account, message = "a" * 32, "b" * 32
+    calls: list[str] = []
+    turn = 0
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer " + "a" * 64
+        payload = json.loads(request.content)
+        assert payload["operation"] == "email"
+        operation = payload["request"]["operation"]
+        calls.append(operation)
+        if operation == "accounts":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": account,
+                        "rights": ["read"],
+                        "config": {"address": "owner@example.org"},
+                    }
+                ],
+            )
+        if operation == "messages":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [{"id": message}],
+                    "next_before": 0,
+                },
+            )
+        assert operation == "message"
+        assert payload["request"]["message"] == message
+        return httpx.Response(
+            200,
+            json={
+                "sender": "alex@example.org",
+                "subject": "Meeting",
+                "body": "Please confirm the meeting.",
+            },
+        )
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        nonlocal turn
+        assert {"search_emails", "read_email", "propose_email"}.issubset(
+            {tool.name for tool in info.function_tools}
+        )
+        steps = [
+            ToolCallPart("search_emails", {"query": "alex@example.org"}),
+            ToolCallPart(
+                "read_email", {"account": account, "message": message}
+            ),
+            ToolCallPart(
+                "propose_email",
+                {
+                    "to": [],
+                    "subject": "Re: Meeting",
+                    "body": "The meeting is confirmed.",
+                    "reply_source": {"account": account, "message": message},
+                },
+            ),
+        ]
+        if turn >= len(steps):
+            return ModelResponse(parts=[TextPart("Reply ready for review.")])
+        part = steps[turn]
+        turn += 1
+        return ModelResponse(parts=[part])
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(max_tool_calls=1), client, model=scripted_model(response)
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Find Alex's message and prepare a reply.",
+                    capability="a" * 64,
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert calls == ["accounts", "messages", "message", "message"]
+    proposals = [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+        and json.loads(chunk.content).get("type") == "email_draft"
+    ]
+    assert len(proposals) == 1
+    assert proposals[0]["reply_source"] == {
+        "account": account,
+        "message": message,
+    }
+    assert proposals[0]["to"] == ["alex@example.org"]
+
+
+@pytest.mark.anyio
 async def test_team_has_no_tool_quota_while_model_requests_remain_bounded() -> (
     None
 ):

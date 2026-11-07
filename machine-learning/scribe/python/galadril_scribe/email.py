@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,15 +19,183 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
+    TypeAdapter,
     ValidationError,
     model_validator,
 )
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.usage import UsageLimits
 
 from galadril_scribe.activity import EmailDraftActivity
 from galadril_scribe.dependencies import Dependencies
+
+_MAIL_JSON = TypeAdapter(JsonValue)
+
+
+class MailReadError(ValueError):
+    """Distinguishes revoked mail access from a transient transport failure."""
+
+    __slots__ = ("reason",)
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+async def _mail_operation(
+    ctx: RunContext[Dependencies], request: dict[str, JsonValue]
+) -> JsonValue:
+    try:
+        response = await ctx.deps.client.post(
+            ctx.deps.tools_url,
+            headers={"authorization": f"Bearer {ctx.deps.capability}"},
+            json={"operation": "email", "request": request},
+            timeout=25,
+        )
+        if response.status_code != 200 or len(response.content) > 1024 * 1024:
+            trace.get_current_span().add_event(
+                "scribe.email.read_failed",
+                {
+                    "operation": str(request["operation"]),
+                    "status_code": response.status_code,
+                },
+            )
+            raise MailReadError(
+                "denied"
+                if response.status_code in {401, 403}
+                else "unavailable"
+            )
+        result = _MAIL_JSON.validate_json(response.content)
+        if not isinstance(result, (dict, list)):
+            raise MailReadError("unavailable")
+        return result
+    except (httpx.HTTPError, ValidationError):
+        raise MailReadError("unavailable") from None
+
+
+async def search_emails(
+    ctx: RunContext[Dependencies],
+    query: str,
+    account: str | None = None,
+    before: int = 0,
+) -> str:
+    """Find recent collected mail by sender, subject, text or GDR reference.
+
+    Mail indexing is not required. With several readable accounts, choose one
+    from the returned list and call again. Follow next_before even when a page
+    contains no match. Read the original with read_email before summarizing or
+    replying; indexed excerpts and previous chat summaries are incomplete.
+    """
+    if (
+        len(query) > 512
+        or any(not char.isprintable() for char in query)
+        or before < 0
+        or (
+            account is not None
+            and re.fullmatch(r"[a-f0-9]{32}", account) is None
+        )
+    ):
+        raise ModelRetry(
+            "Use a valid account identifier, printable query up to 512 characters and nonnegative page cursor."
+        )
+    operation = "accounts" if account is None else "messages"
+    try:
+        if account is None:
+            values = await _mail_operation(ctx, {"operation": "accounts"})
+            if not isinstance(values, list):
+                raise MailReadError("unavailable")
+            accounts: list[dict[str, JsonValue]] = []
+            for value in values:
+                if (
+                    not isinstance(value, dict)
+                    or not isinstance(rights := value.get("rights"), list)
+                    or "read" not in rights
+                ):
+                    continue
+                identifier = value.get("id")
+                if (
+                    not isinstance(identifier, str)
+                    or re.fullmatch(r"[a-f0-9]{32}", identifier) is None
+                ):
+                    raise MailReadError("unavailable")
+                config = value.get("config")
+                accounts.append(
+                    {
+                        "id": identifier,
+                        "address": config.get("address", "")
+                        if isinstance(config, dict)
+                        else "",
+                    }
+                )
+            if len(accounts) != 1:
+                return json.dumps(
+                    {
+                        "status": "select_account"
+                        if accounts
+                        else "no_readable_accounts",
+                        "accounts": accounts,
+                    }
+                )
+            identifier = accounts[0]["id"]
+            if not isinstance(identifier, str):
+                raise MailReadError("unavailable")
+            account = identifier
+        operation = "messages"
+        page = await _mail_operation(
+            ctx,
+            {
+                "operation": "messages",
+                "account": account,
+                "query": query,
+                "before": before,
+            },
+        )
+        return json.dumps(
+            {"status": "ok", "account": account, "page": page},
+            ensure_ascii=False,
+        )
+    except MailReadError as error:
+        return json.dumps({"status": error.reason, "operation": operation})
+
+
+async def read_email(
+    ctx: RunContext[Dependencies],
+    account: str,
+    message: str,
+    include_thread: bool = False,
+) -> str:
+    """Read the original collected message and optionally its thread.
+
+    Use the account and message identifiers from search_emails, not a GDR
+    tracking reference. Pass the returned reply_source to propose_email to
+    keep the reply in the original thread. Sending remains a user action.
+    """
+    try:
+        source = ReplySource(account=account, message=message)
+    except ValidationError:
+        raise ModelRetry(
+            "Use the account and message identifiers returned by search_emails."
+        ) from None
+    operation = "message"
+    try:
+        original = await _mail_operation(
+            ctx, {"operation": "message", **source.model_dump()}
+        )
+        result: dict[str, JsonValue] = {
+            "status": "ok",
+            "reply_source": source.model_dump(),
+            "message": original,
+        }
+        if include_thread:
+            operation = "thread"
+            result["thread"] = await _mail_operation(
+                ctx, {"operation": "thread", **source.model_dump()}
+            )
+        return json.dumps(result, ensure_ascii=False)
+    except MailReadError as error:
+        return json.dumps({"status": error.reason, "operation": operation})
 
 
 async def _reply_recipient(
