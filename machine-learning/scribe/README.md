@@ -256,3 +256,36 @@ Every output declares `requires_review: true` and
 resolve ambiguous identities or enable privacy-required plugin execution.
 A manual review is necessary before sharing the copy. Private source documents
 must never be committed as test fixtures or uploaded to CI.
+
+## Pseudonymized execution contexts
+
+A registered plugin can require a pseudonymized context. Scribe runs the pinned
+GLiNER multilingual detector on CPU and applies local rules for contact details and
+abbreviated names to supplied attachments when the corresponding specialist
+team is active. Chat messages and answers follow the ordinary path. Without
+the team, explicitly attached documents use the ordinary chat path. The chat
+model can still see names missed by the detector. The isolated reviewer
+retains its explicit attachment boundary.
+
+The project library keeps the authorized originals. Its search index contains
+only the projected text, with source identifiers and PDF page numbers. Private
+projects use full-text search without remote extraction, embeddings, or graph
+enrichment. Chat tools return projected snippets and opaque file identifiers.
+A PDF must contain readable text, and text files must be UTF-8. Each PDF is
+bounded to 16 MiB, 128 pages and 65,536 extracted characters. PDF pages with
+only images contribute no text. An unavailable detector or unreadable document
+fails preprocessing without substituting the original.
+
+Provision the model once as a deployment step. For the dashboard Compose stack,
+run from the repository root:
+
+```sh
+uv run --no-project machine-learning/scribe/tools/install_private_model.py .local/scribe-private-model
+```
+
+Compose mounts that directory read-only and defaults to a 5 GiB Scribe memory
+limit. Set `SCRIBE_PRIVATE_MODEL_HOST_DIR` to use a different host directory.
+On Kubernetes, mount the same provisioned assets read-only in the Scribe
+deployment overlay and set `SCRIBE_PRIVATE_MODEL_DIR` to the mount path.
+Only one automatic projection runs at a time. The worker loads local files
+with network downloads disabled.
