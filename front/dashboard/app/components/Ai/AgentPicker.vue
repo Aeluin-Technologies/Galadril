@@ -46,7 +46,7 @@ const scope = computed(() => (ui.temporary ? null : ui.projectId));
 const branch = computed(
   () =>
     projects.items.find((project) => project.id === scope.value)?.data
-      .executionContext ?? projects.items.find((project) => project.id === scope.value)?.data.litigationBranch,
+      .executionContext,
 );
 function skillMatchesBranch(id: string) {
   return executionCapabilityAllowed(id, branch.value, agents.catalog);

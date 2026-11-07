@@ -224,7 +224,6 @@ pub struct ProjectInput {
     pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_context: Option<String>,
-    pub litigation_branch: Option<String>,
 }
 
 fn project_context() -> String {
@@ -258,10 +257,9 @@ impl ProjectInput {
             "Invalid document context"
         );
         ensure!(
-            (input.execution_context.is_none() &&
-                input.litigation_branch.is_none()) ||
+            input.execution_context.is_none() ||
                 input.context_mode == "project",
-            "Legal projects require their own library"
+            "Project execution contexts require their own library"
         );
         ensure!(
             !input.shared ||
@@ -691,9 +689,8 @@ mod tests {
     }
 }
 #[test]
-fn legal_projects_require_project_context_and_reject_foreign_capabilities()
--> Result<()> {
-    let project = serde_json::json!({"name":"Case","icon":"folder","color":"#d97706","litigationBranch":"administratif"});
+fn registered_project_contexts_require_a_project_library() -> Result<()> {
+    let project = serde_json::json!({"name":"Case","icon":"folder","color":"#d97706","executionContext":"fixture.review"});
     assert!(ProjectInput::parse(project.clone()).is_ok());
     let mut personal = project;
     personal["contextMode"] = serde_json::json!("personal");

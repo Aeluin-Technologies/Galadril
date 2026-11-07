@@ -233,7 +233,7 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
             {
                 "prompt": "PRIVATE_PROMPT",
                 "capability": "a" * 64,
-                "litigation_branch": "administratif",
+                "execution_context": "law.administratif",
                 "team": configured,
                 "project_instructions": "PRIVATE_PROJECT",
                 "user_instructions": "FOREIGN_PERSONAL_CONTEXT",
@@ -245,10 +245,10 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
                 "defense_attachment_indices": [0],
             }
         )
-        for branch in (None, "judiciaire", "penal"):
+        for branch in (None, "law.judiciaire", "law.penal"):
             with pytest.raises(ValueError, match="execution context"):
                 runtime.select_model(
-                    request.model_copy(update={"litigation_branch": branch})
+                    request.model_copy(update={"execution_context": branch})
                 )
         mixed = configured.model_copy(
             update={

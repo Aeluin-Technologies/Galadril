@@ -883,7 +883,7 @@ class Runtime:
                     }
                 )
             ),
-            (request.execution_context or request.litigation_branch),
+            request.execution_context,
         )
         return self.select_model_options(alias, request.reasoning_effort)
 
@@ -947,7 +947,7 @@ class Runtime:
         self, request: RunRequest, alias: str
     ) -> list[AbstractToolset[Dependencies]]:
         """Each agent owns sessions while inheriting exactly the same tool selection."""
-        if (request.execution_context or request.litigation_branch) is not None:
+        if request.execution_context is not None:
             return [
                 FunctionToolset[Dependencies](
                     tools=[date_interval, read_file, document_search]
@@ -1166,7 +1166,7 @@ class Runtime:
             answerer=answerer,
             web_approval=approve_web,
             web_requires_approval=bool(
-                (request.execution_context or request.litigation_branch)
+                request.execution_context
                 or request.attachments
                 or request.graph_context
                 or any(message.attachments for message in request.history)
@@ -1222,9 +1222,7 @@ class Runtime:
             attributes={
                 "scribe.model.alias": alias,
                 "scribe.provider": self.settings.models[alias].provider,
-                "scribe.execution.context": (
-                    request.execution_context or request.litigation_branch
-                )
+                "scribe.execution.context": (request.execution_context)
                 or "none",
             },
         ):
@@ -1271,9 +1269,7 @@ class Runtime:
                         "outcomes array of up to four conditional consequences with the same label, detail and source fields. "
                         "Cite sources in surrounding Markdown."
                     )
-                    selected_context = (
-                        request.execution_context or request.litigation_branch
-                    )
+                    selected_context = request.execution_context
                     if selected_context is not None:
                         writing_mission += (
                             "\n"

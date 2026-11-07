@@ -72,7 +72,6 @@ fragment Project on PengoloProject {
     roles
     contextMode
     executionContext
-    litigationBranch
     instructions
   }
 }

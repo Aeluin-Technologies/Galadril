@@ -74,7 +74,6 @@ class RunRequest(BaseModel):
     team_id: CapabilityId | None = None
     team: TeamDefinition | None = None
     execution_context: CapabilityId | None = None
-    litigation_branch: str | None = Field(default=None, max_length=128)
     shared_attachment_indices: tuple[int, ...] = Field(
         default=(),
         max_length=8,
@@ -98,9 +97,11 @@ class RunRequest(BaseModel):
             raise ValueError("Extension IDs must be unique")
         if (
             self.execution_context is not None
-            or self.litigation_branch is not None
-        ) and self.graph_context is not None:
-            raise ValueError("Graph context is unavailable for legal projects")
+            and self.graph_context is not None
+        ):
+            raise ValueError(
+                "Graph context is unavailable for registered execution contexts"
+            )
         if len(set(self.shared_attachment_indices)) != len(
             self.shared_attachment_indices
         ) or any(

@@ -278,7 +278,6 @@ impl ChatData {
 #[graphql(name = "PengoloProjectData")]
 pub struct ProjectData {
     pub execution_context: Option<String>,
-    pub litigation_branch: Option<String>,
     #[serde(default)]
     pub instructions: String,
     pub name: String,
@@ -680,7 +679,7 @@ pub struct ProjectDeletionInput {
 #[graphql(name = "PengoloProjectInput")]
 pub struct ProjectInput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub litigation_branch: Option<String>,
+    pub execution_context: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     pub id: Option<String>,
@@ -732,6 +731,15 @@ mod tests {
 
     #[juniper::graphql_object]
     impl InputContractQuery {
+        fn project(input: ProjectInput) -> Option<String> {
+            serde_json::to_value(input)
+                .ok()
+                .and_then(|value| {
+                    crate::domain::pengolo::ProjectInput::parse(value).ok()
+                })
+                .and_then(|input| input.execution_context)
+        }
+
         fn send(input: SendInput) -> bool {
             serde_json::to_value(input).is_ok_and(|value| {
                 crate::domain::pengolo::SendInput::parse(value).is_ok_and(
@@ -755,6 +763,42 @@ mod tests {
             message.email_drafts == vec!["proposal"],
             "Email drafts must survive history decoding"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn project_mutation_accepts_the_execution_context_sent_by_pengolo()
+    -> anyhow::Result<()> {
+        let schema = juniper::RootNode::new(
+            InputContractQuery,
+            juniper::EmptyMutation::<()>::new(),
+            juniper::EmptySubscription::<()>::new(),
+        );
+        for context in [
+            serde_json::json!(null),
+            serde_json::json!("law.administratif"),
+        ] {
+            let variables =
+                serde_json::from_value(serde_json::json!({"input":{
+                    "name":"Investigation", "icon":"folder", "color":"#d97706",
+                    "contextMode":"project", "executionContext":context
+                }}))?;
+            let (result, errors) = juniper::execute_sync(
+                "query($input:PengoloProjectInput!) { project(input:$input) }",
+                None,
+                &schema,
+                &variables,
+                &(),
+            )?;
+            anyhow::ensure!(
+                errors.is_empty(),
+                "Typed project input resolution failed"
+            );
+            assert_eq!(
+                serde_json::to_value(result)?,
+                serde_json::json!({"project": context})
+            );
+        }
         Ok(())
     }
 

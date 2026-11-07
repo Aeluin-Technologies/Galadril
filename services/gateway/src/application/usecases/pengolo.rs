@@ -47,6 +47,18 @@ fn execution_context(project: &Record) -> Result<Option<String>> {
         .transpose()
 }
 
+/// Projects stored by the early legal preview retain their execution context.
+fn project_for_client(mut project: Record) -> Result<Record> {
+    let context = execution_context(&project)?;
+    if let Some(data) = project.data.as_object_mut() {
+        data.remove("litigationBranch");
+        if let Some(context) = context {
+            data.insert("executionContext".into(), Value::String(context));
+        }
+    }
+    Ok(project)
+}
+
 fn registered_context(
     catalog: &crate::domain::capabilities::CapabilityCatalog,
     value: Option<&str>,
@@ -965,7 +977,7 @@ impl PengoloService {
                         )
                         .await?;
                     if allowed {
-                        result.push(project);
+                        result.push(project_for_client(project)?);
                     } else if project.owner_id == actor.user {
                         denied_owned.push(project.id);
                     }
@@ -986,14 +998,8 @@ impl PengoloService {
         self.verify(actor).await?;
         let mut input = ProjectInput::parse(input)?;
         let catalog = self.agent.capabilities().await?;
-        input.execution_context = registered_context(
-            &catalog,
-            input
-                .execution_context
-                .as_deref()
-                .or(input.litigation_branch.as_deref()),
-        )?;
-        input.litigation_branch = None;
+        input.execution_context =
+            registered_context(&catalog, input.execution_context.as_deref())?;
         for role in &input.roles {
             ensure!(
                 self.iam.role_exists(actor.tenant, role).await?,
@@ -2721,6 +2727,18 @@ fn search_results(value: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_projection_preserves_the_legacy_context_under_the_generic_key()
+    -> Result<()> {
+        let project: Record = serde_json::from_value(json!({
+            "id": "project", "ownerId": "user", "revision": 1, "updatedAt": 0,
+            "data": {"executionContext": null, "litigationBranch": "administratif"}
+        }))?;
+        let result = project_for_client(project)?;
+        assert_eq!(result.data, json!({"executionContext": "administratif"}));
+        Ok(())
+    }
+
     #[test]
     fn web_results_report_bounded_public_origins() -> Result<()> {
         let value = search_results(json!({"results":[

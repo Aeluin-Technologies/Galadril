@@ -143,7 +143,6 @@ export interface ChatData {
 }
 export interface ProjectData {
   executionContext?: string | null;
-  litigationBranch?: string | null;
   instructions?: string;
   name: string;
   icon: string;

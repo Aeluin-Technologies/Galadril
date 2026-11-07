@@ -45,7 +45,7 @@ watch(
     shared.value = project?.data.shared ?? false;
     roles.value = project?.data.roles.join(", ") ?? "";
     contextMode.value = project?.data.contextMode ?? "project";
-    executionContext.value = project?.data.executionContext ?? project?.data.litigationBranch ?? "";
+    executionContext.value = project?.data.executionContext ?? "";
     instructions.value = project?.data.instructions ?? "";
     error.value = "";
     appearance.value = false;
