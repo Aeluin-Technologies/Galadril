@@ -190,6 +190,7 @@ spec:
         - /documents/extract
         - /documents/recognize
         - /documents/rank
+        - /documents/redact
         ports:
         - '8091'
     - operation:

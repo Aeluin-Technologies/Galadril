@@ -241,3 +241,10 @@ rust_test(
     srcs = ["src/application/usecases/agent_interactions.rs"],
     crate_root = "src/application/usecases/agent_interactions.rs",
 )
+
+rust_test(
+    name = "redaction_test",
+    srcs = ["src/domain/redaction.rs"],
+    crate_root = "src/domain/redaction.rs",
+    deps = crate_deps(["anyhow", "base64", "serde", "serde_json"]),
+)

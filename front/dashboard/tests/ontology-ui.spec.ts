@@ -64,6 +64,34 @@ for (const decision of [true, false, "unavailable"] as const) {
   });
 }
 
+test("official ontology labels follow the locale while tenant names stay literal", async ({
+  page,
+}) => {
+  await fixture(page);
+  const shell = await page.request.get("/login");
+  await page
+    .context()
+    .addCookies([
+      { name: "locale", value: "fr", url: new URL(shell.url()).origin },
+    ]);
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology");
+  await expect(
+    page.getByRole("link", { name: "Organization people", exact: true }),
+  ).toBeVisible({ timeout: 60000 });
+  await page
+    .getByRole("link", { name: "Courriel et documents", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Personne", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Personne", exact: true }),
+  ).toBeVisible();
+});
+
 test("plugin ontologies stay isolated until an explicit tenant participant mapping", async ({
   page,
 }, testInfo) => {

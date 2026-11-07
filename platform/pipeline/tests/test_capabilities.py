@@ -253,3 +253,75 @@ def test_rejects_ambiguous_or_unbounded_compatibility(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+def test_execution_profiles_use_registered_contexts_instead_of_plugin_names() -> (
+    None
+):
+    capability = Capability.model_validate(
+        {
+            **descriptor(),
+            "id": "fixture.skill.review",
+            "plugin_id": "fixture",
+            "kind": "skill",
+            "targets": ["scribe"],
+            "execution_profile": {
+                "requires_context": "fixture.private",
+                "isolation": "sealed",
+                "contexts": [
+                    {
+                        "id": "fixture.private",
+                        "name": "Private review",
+                        "aliases": ["legacy-private"],
+                    }
+                ],
+            },
+        }
+    )
+    catalog = CapabilityCatalog(capabilities=(capability,))
+    assert (
+        catalog.resolve_execution_context("legacy-private").id
+        == "fixture.private"
+    )
+    assert catalog.execution_allowed(capability.id, "fixture.private")
+    assert not catalog.execution_allowed(capability.id, None)
+    assert not catalog.execution_allowed(capability.id, "another.private")
+    assert not catalog.execution_allowed(
+        "fixture.skill.unknown", "fixture.private"
+    )
+    with pytest.raises(ValueError):
+        catalog.resolve_execution_context("unknown.private")
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"isolation": "invented"},
+        {
+            "requires_context": "other.private",
+            "contexts": [{"id": "other.private", "name": "Foreign"}],
+        },
+        {
+            "contexts": [
+                {
+                    "id": "fixture.private",
+                    "name": "Private",
+                    "privacy": "disable",
+                }
+            ]
+        },
+    ],
+)
+def test_execution_profiles_reject_unknown_policies_and_foreign_contexts(
+    profile: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        Capability.model_validate(
+            {
+                **descriptor(),
+                "id": "fixture.skill.review",
+                "plugin_id": "fixture",
+                "kind": "skill",
+                "execution_profile": profile,
+            }
+        )

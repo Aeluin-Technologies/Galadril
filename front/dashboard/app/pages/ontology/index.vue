@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TenantOntology, SemanticPackage } from "~/types/ontology";
 const api = useOntologyCatalog();
+const { packageLabel } = useOfficialOntologyLabels();
 const { session } = useAccount();
 const items = shallowRef<TenantOntology[]>([]),
   packages = shallowRef<SemanticPackage[]>([]);
@@ -148,7 +149,7 @@ onBeforeUnmount(() => {
               <NuxtLink
                 :to="{ path: '/ontology/new', query: { package: item.id } }"
                 class="font-medium text-primary-foreground hover:underline"
-                >{{ item.name }}</NuxtLink
+                >{{ packageLabel(item.id, item.name) }}</NuxtLink
               >
               <p class="mt-1 text-xs text-muted">
                 {{ item.plugin_id }} · {{ item.version }}

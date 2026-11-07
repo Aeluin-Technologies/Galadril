@@ -1304,6 +1304,14 @@
       },
       "websites": "Searched {count} websites"
     },
+    "litigation": {
+      "label": "Litigation branch",
+      "general": "General project",
+      "administratif": "Administrative litigation",
+      "judiciaire": "Civil litigation",
+      "penal": "Criminal proceedings",
+      "shareAttachments": "Share all current attachments with the independent defense specialist"
+    },
     "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
     "questions": {
       "custom": "Write my own answer",
@@ -1507,7 +1515,38 @@
       "fixedEffort": "This level is fixed for now."
     },
     "copyMessage": "Copy your message",
-    "actionCompleted": "Action completed"
+    "actionCompleted": "Action completed",
+    "execution": {
+      "label": "Specialist context",
+      "general": "General conversation",
+      "shareAttachments": "Share these attachments with the independent reviewer",
+      "privateProcessing": "With this team active, Pengolo masks names and contact details in attachments locally. Some details may remain. Attach a PDF with readable text or a UTF-8 text file."
+    },
+    "redaction": {
+      "title": "Redact a document",
+      "private": "The original is processed without adding it to the chat or library or sending it to a language model.",
+      "localDocument": "Local document",
+      "fileHelp": "PDF with readable text or TXT, up to 16 MB. The original stays unchanged.",
+      "choose": "Choose a file",
+      "chooseOne": "Choose one document at a time.",
+      "drop": "Drop a document to redact",
+      "emails": "Email addresses",
+      "phones": "Phone numbers",
+      "addresses": "Street addresses (French formats)",
+      "names": "Names to replace with initials",
+      "namesHelp": "One full name or alias per line. These names are used only for this operation.",
+      "custom": "Custom matching",
+      "pattern": "Additional pattern",
+      "patternHelp": "Optional RE2 regular expression, up to 512 characters. Matches are blacked out.",
+      "failed": "This document could not be safely redacted. Check the selected rules and the file; no partial copy is published.",
+      "completed": "Matches processed: {matches} · Pages: {pages}",
+      "review": "Only the selected rules were applied. Review every page before sharing this copy.",
+      "annotations": "Annotations and attachments were removed.",
+      "download": "Download redacted copy",
+      "preview": "Preview the copy",
+      "create": "Create redacted copy",
+      "working": "Redacting document"
+    }
   },
   "email": {
     "title": "Email accounts",
@@ -1848,6 +1887,21 @@
     "useIcon": "Use {name} icon"
   },
   "personalization": {
+    "documentProfile": {
+      "title": "Private document profile",
+      "help": "The compiler uses these encrypted details to fill in documents. They stay outside the chat. Saving replaces your previous profile.",
+      "save": "Save private profile",
+      "saved": "Private profile saved.",
+      "error": "The private profile could not be saved. Reload the settings and try again.",
+      "fields": {
+        "firstName": "First name",
+        "lastName": "Last name",
+        "address": "Postal address",
+        "title": "Title",
+        "email": "Email",
+        "capacity": "Capacity"
+      }
+    },
     "title": "Pengolo",
     "navigation": "Your style and preferences",
     "description": "Choose how Pengolo responds across your conversations.",

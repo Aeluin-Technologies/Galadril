@@ -9,6 +9,7 @@ import {
   ontologyPrimaryAction,
   withOntologyLink,
   sameOntologyDefinition,
+  officialOntologyResourceKey,
 } from "../app/utils/ontology.ts";
 import { ontologyCodeLines } from "../app/utils/ontology-code.ts";
 import {
@@ -16,6 +17,34 @@ import {
   withUpdatedOntologyLink,
   withoutOntologyLink,
 } from "../app/utils/ontology-edit.ts";
+
+test("official ontology labels exclude tenant and imported resources", () => {
+  const resource = {
+    resource_id: "law.brief",
+    kind: "object_type",
+    display_name: "Mémoire",
+    references: [],
+    attributes: {},
+  };
+  const packaged = {
+    ...resource,
+    attributes: { plugin_module: "law.ecritures" },
+  };
+  assert.equal(
+    officialOntologyResourceKey(resource, "law.contentieux"),
+    undefined,
+  );
+  assert.equal(officialOntologyResourceKey(packaged, undefined), undefined);
+  assert.equal(officialOntologyResourceKey(packaged, "utils.mail"), undefined);
+  assert.equal(
+    officialOntologyResourceKey(packaged, "law.contentieux"),
+    "officialOntologies.law_contentieux.resources.law_brief",
+  );
+  assert.equal(
+    officialOntologyResourceKey(resource, "law.contentieux", true),
+    "officialOntologies.law_contentieux.resources.law_brief",
+  );
+});
 test("object creation validates its definition and keeps existing resources immutable", () => {
   const document = { version: "1", resources: [] };
   const input = {

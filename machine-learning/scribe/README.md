@@ -227,3 +227,65 @@ tests ReBAC and Cedar ABAC, permits a root causal result with private inputs,
 and verifies completion and replay after closing the WebSocket. The fixture
 does not invent evidence; it combines real tool responses. This validates the
 integration and security contracts, not a particular model's answer quality.
+
+## Native document redaction
+
+Pengolo exposes **Redact a document** in its composer menu. The authenticated
+`POST /pengolo/files/redact` endpoint forwards bounded PDF or UTF-8 text bytes
+to Scribe's `POST /documents/redact`; the original is never added to a chat,
+library, index or object store. The response is a local downloadable copy.
+This path does not call a model, execute plugin code or grant storage authority.
+
+Rules are declarative literals, built-in email/French telephone patterns or
+RE2 expressions. Initials are a fixed transformation. There are at most sixteen
+rules, 4,096 matches, 128 PDF pages and 16 MiB of decoded input/output. Linux
+child processes have independent CPU, memory and wall-clock limits and receive
+no provider credentials. Metrics record outcomes and counts, never content.
+
+PDFium removes selected text objects and retains unselected glyphs at their
+original origins; public initials are inserted without paragraph reflow.
+PDF Oxide sanitizes metadata and garbage-collects the nonincremental output.
+Verification checks removed glyphs, retained content and extracted private text.
+Annotations and embedded files are removed. Images, forms, marked content,
+thumbnails, layers and unsupported text geometry are refused. Matching private
+text in a bookmark also refuses the operation rather than returning a partial
+copy. Scanned documents require a separate supported preprocessing path.
+
+Every output declares `requires_review: true` and
+`coverage: provided_rules_only`. These results do not certify anonymization,
+resolve ambiguous identities or enable privacy-required plugin execution.
+A manual review is necessary before sharing the copy. Private source documents
+must never be committed as test fixtures or uploaded to CI.
+
+## Pseudonymized execution contexts
+
+A registered plugin can require a pseudonymized context. Scribe runs the pinned
+GLiNER multilingual detector on CPU and applies local rules for contact details and
+abbreviated names to supplied attachments when the corresponding specialist
+team is active. Chat messages and answers follow the ordinary path. Without
+the team, explicitly attached documents use the ordinary chat path. The chat
+model can still see names missed by the detector. The isolated reviewer
+retains its explicit attachment boundary.
+
+The project library keeps the authorized originals. Its search index contains
+only the projected text, with source identifiers and PDF page numbers. Private
+projects use full-text search without remote extraction, embeddings, or graph
+enrichment. Chat tools return projected snippets and opaque file identifiers.
+A PDF must contain readable text, and text files must be UTF-8. Each PDF is
+bounded to 16 MiB, 128 pages and 65,536 extracted characters. PDF pages with
+only images contribute no text. An unavailable detector or unreadable document
+fails preprocessing without substituting the original.
+
+Provision the model once as a deployment step. For the dashboard Compose stack,
+run from the repository root:
+
+```sh
+uv run --no-project machine-learning/scribe/tools/install_private_model.py
+```
+
+Compose mounts that directory read-only and defaults to a 5 GiB Scribe memory
+limit. Set `SCRIBE_PRIVATE_MODEL_HOST_DIR` to use a different host directory.
+On Kubernetes, mount the same provisioned assets read-only in the Scribe
+deployment overlay and set `SCRIBE_PRIVATE_MODEL_DIR` to the mount path.
+Only one automatic projection runs at a time. The worker loads local files
+with network downloads disabled.

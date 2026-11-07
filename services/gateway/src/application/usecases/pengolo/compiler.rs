@@ -3,6 +3,7 @@ use galadril_document_compiler::delegation::{
     Action, AuthorizationRequest, Grant, TemplatePolicy,
 };
 use galadril_document_compiler::domain::{MAX_PDF_BYTES, Scope, validate_id};
+use galadril_document_compiler::tools::plugin_template_id;
 use sha2::Digest as _;
 
 use super::*;
@@ -42,19 +43,28 @@ impl PengoloService {
             .authorize_generation(&actor, &generation, temporary)
             .await?;
         let project = if let Some(id) = &generation.project_id {
-            let project = self.project(&actor, id).await?;
-            (project.data.get("contextMode").and_then(Value::as_str) !=
-                Some("personal"))
-            .then(|| id.clone())
+            Some(self.project(&actor, id).await?)
         } else {
             None
         };
-        let grant = Grant {
+        let execution = project
+            .as_ref()
+            .map(execution_context)
+            .transpose()?
+            .flatten();
+        let project = project
+            .filter(|project| {
+                project.data.get("contextMode").and_then(Value::as_str) !=
+                    Some("personal")
+            })
+            .map(|project| project.id);
+        let mut grant = Grant {
             tenant: tenant.clone(),
             actor: generation.owner_id.clone(),
             generation: generation.id.clone(),
             project,
             temporary_session: temporary.then(|| chat.id.clone()),
+            bindings: Default::default(),
         };
         let Some(policy) = request.template else {
             ensure!(
@@ -154,7 +164,7 @@ impl PengoloService {
         } else {
             let permission = match request.action {
                 Action::View => Permission::View,
-                Action::Use => Permission::Use,
+                Action::Use | Action::Bind => Permission::Use,
                 Action::Edit => Permission::Edit,
                 Action::Publish => Permission::Publish,
                 Action::Delete => Permission::Delete,
@@ -192,16 +202,47 @@ impl PengoloService {
                             .await?,
                         "Plugin no longer enabled"
                     );
-                    ensure!(
-                        self.agent
-                            .document_templates()
-                            .await?
-                            .iter()
-                            .any(|entry| entry.plugin_id == *plugin),
-                        "Plugin no longer installed"
-                    );
+                    let catalog = self.agent.document_templates().await?;
+                    let published = catalog
+                        .iter()
+                        .find(|entry| {
+                            entry.plugin_id == *plugin &&
+                                plugin_template_id(
+                                    actor.tenant,
+                                    plugin,
+                                    &entry.key,
+                                ) == policy.id
+                        })
+                        .context("Plugin template no longer installed")?;
+                    if let Some(expected) = &published.execution_context {
+                        let actual = execution
+                            .as_deref()
+                            .context("Template requires a project context")?;
+                        if actual != expected {
+                            let catalog = self.agent.capabilities().await?;
+                            ensure!(
+                                &catalog.resolve_execution_context(actual)?.id ==
+                                    expected,
+                                "Template is unavailable in this execution context"
+                            );
+                        }
+                    }
                 }
             }
+        }
+        if request.action == Action::Bind {
+            ensure!(
+                !policy.owner.is_empty() &&
+                    policy.scope == Scope::Plugin &&
+                    !temporary,
+                "Bindings require a published plugin template"
+            );
+            let project_id = grant
+                .project
+                .as_deref()
+                .context("Document bindings require a project")?;
+            grant.bindings =
+                self.bind_document(&actor, project_id, &policy.id).await?;
         }
         tracing::info!(event.name = "document_compiler.delegation.authorized");
         Ok(grant)
@@ -246,10 +287,13 @@ impl PengoloService {
             .authorize_generation(actor, generation, temporary)
             .await?;
         let mut project_id = generation.project_id.clone();
+        let mut private = false;
         if let Some(id) = &project_id {
             let project = self.project(actor, id).await?;
-            if project.data.get("contextMode").and_then(Value::as_str) ==
-                Some("personal")
+            private = execution_context(&project)?.is_some();
+            if private ||
+                project.data.get("contextMode").and_then(Value::as_str) ==
+                    Some("personal")
             {
                 project_id = None;
             }
@@ -296,7 +340,7 @@ impl PengoloService {
             expires_at: Some(now() + STAGING_TTL_MS),
             revision: 1,
             updated_at: now(),
-            data: json!({"name":name,"originalName":name,"mime":mime,"size":pdf.len(),"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),digest.get(..32).context("Invalid generated ID")?),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":checksum,"status":"uploading","temporarySession":session,"compilationJob":job,"artifactTtlMs":7_i64*24*60*60*1000}),
+            data: json!({"name":name,"originalName":name,"mime":mime,"size":pdf.len(),"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),digest.get(..32).context("Invalid generated ID")?),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":checksum,"status":"uploading","temporarySession":session,"compilerConfidential":private,"compilationJob":job,"artifactTtlMs":7_i64*24*60*60*1000}),
         };
         let file = self
             .store
@@ -411,9 +455,7 @@ impl PengoloService {
         compiler: &dyn crate::application::ports::document_compiler::DocumentCompiler,
         operation: galadril_document_compiler::tools::TemplateOperation,
     ) -> Result<Value> {
-        use galadril_document_compiler::tools::{
-            TemplateOperation, plugin_template_id,
-        };
+        use galadril_document_compiler::tools::TemplateOperation;
         let (tenant, generation, temporary, context) =
             self.compiler_actor(token).await?;
         let actor = Principal {
@@ -423,7 +465,43 @@ impl PengoloService {
         };
         self.authorize_generation(&actor, &generation, temporary)
             .await?;
+        let execution = if let Some(project_id) = &generation.project_id {
+            let project = self.project(&actor, project_id).await?;
+            execution_context(&project)?
+        } else {
+            None
+        };
+        let execution = match execution {
+            Some(execution) => registered_context(
+                &self.agent.capabilities().await?,
+                Some(&execution),
+            )?,
+            None => None,
+        };
+        if execution.is_some() {
+            ensure!(
+                matches!(
+                    &operation,
+                    TemplateOperation::List { .. } |
+                        TemplateOperation::Read { .. } |
+                        TemplateOperation::DocumentCase { .. } |
+                        TemplateOperation::Export { .. }
+                ),
+                "Template administration is unavailable inside specialized chats"
+            );
+        }
         match operation {
+            TemplateOperation::DocumentCase {
+                template_id,
+                fields,
+            } => {
+                let project = generation
+                    .project_id
+                    .as_deref()
+                    .context("Document case requires a project")?;
+                self.document_case(&actor, project, &template_id, fields)
+                    .await
+            },
             TemplateOperation::PluginCatalog => {
                 let mut items = Vec::new();
                 for item in self.agent.document_templates().await? {
@@ -478,6 +556,12 @@ impl PengoloService {
             },
             TemplateOperation::List { after } => {
                 for item in self.agent.document_templates().await? {
+                    if item.execution_context.is_some() &&
+                        item.execution_context != execution
+                    {
+                        continue;
+                    }
+
                     if !self
                         .auth
                         .is_authorized(
@@ -655,6 +739,7 @@ mod tests {
             generation: "run".into(),
             project: None,
             temporary_session: None,
+            bindings: Default::default(),
         };
         let mut policy = TemplatePolicy {
             id: "a".repeat(32),

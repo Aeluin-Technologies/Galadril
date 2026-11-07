@@ -38,7 +38,7 @@ from galadril_vision.common.config import VisionConfig
 
 async def main():
     registry = PluginRegistry.discover()
-    templates = registry.document_templates()
+    templates = [item for item in registry.document_templates() if item["plugin_id"] == "fixture"]
     assert len(templates) == 1
     assert templates[0]["plugin_id"] == "fixture"
     assert templates[0]["template"]["scope"] == "plugin"
@@ -71,8 +71,12 @@ async def main():
     assert await processor.process(command) == {"count":2,"tenant":"tenant"}
     async with httpx.AsyncClient() as http:
         runtime = Runtime(Settings(gateway_tools_url="http://gateway/internal/chat/tools",default_model="fixture.model.text"),http)
+        assert not runtime.plugins.unavailable, runtime.plugins.unavailable
         assert runtime.catalog.default_model == "fixture.model.text"
         assert {item.id for item in runtime.capabilities.capabilities}.issuperset({"fixture.model.text","fixture.skill.count","fixture.mcp.tools"})
+        law_skills = {item.capability.id for item in registry.skills() if item.capability.plugin_id == "law"}
+        assert law_skills
+        assert {item.id for item in runtime.teams.capabilities if item.plugin_id == "law"} == law_skills
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(runtime)),base_url="http://scribe") as api:
             catalog = await api.get("/pipeline-capabilities")
             assert {item["id"] for item in catalog.json()["capabilities"]}.issuperset({

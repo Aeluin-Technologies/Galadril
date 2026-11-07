@@ -196,6 +196,7 @@ test("real Pengolo generation survives browser reload", async ({
   await projectDialog
     .getByRole("button", { name: "Save project", exact: true })
     .click();
+  await expect(projectDialog).toBeHidden();
   const project = page
     .locator(".p-project")
     .filter({ hasText: "Browser shared investigation" });

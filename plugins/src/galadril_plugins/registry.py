@@ -34,6 +34,14 @@ class PluginExecutionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class UnavailablePlugin:
+    """Reports deployment faults without retaining exception messages or inputs."""
+
+    stage: str
+    error_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class PluginScope:
     """Pins plugin resources to the same trusted identity as built-in handlers."""
 
@@ -258,9 +266,11 @@ class PluginRegistry:
         "_factories",
         "_parameters",
         "_capabilities",
+        "_unavailable",
     )
 
     def __init__(self, manifests: Sequence[PluginManifest]) -> None:
+        self._unavailable: dict[str, UnavailablePlugin] = {}
         manifests = tuple(item.model_copy(deep=True) for item in manifests)
         self._manifests = {item.id: item for item in manifests}
         if len(self._manifests) != len(manifests) or len(manifests) > 32:
@@ -318,21 +328,166 @@ class PluginRegistry:
 
     @classmethod
     def discover(cls) -> PluginRegistry:
-        manifests = []
+        manifests: dict[str, PluginManifest] = {}
+        unavailable: dict[str, UnavailablePlugin] = {}
         root = files("galadril_plugins")
         for directory in sorted(root.iterdir(), key=lambda path: path.name):
             resource = directory.joinpath("plugin.json")
             if directory.is_dir() and resource.is_file():
-                data = resource.read_bytes()
-                if len(data) > 262144:
-                    raise ValueError("Plugin manifest exceeds limit")
-                manifest = PluginManifest.model_validate_json(data)
-                if manifest.id != directory.name:
-                    raise ValueError(
-                        "Plugin package and manifest identity disagree"
+                try:
+                    data = resource.read_bytes()
+                    if len(data) > 262144:
+                        raise ValueError("Plugin manifest exceeds limit")
+                    manifest = PluginManifest.model_validate_json(data)
+                    if manifest.id != directory.name:
+                        raise ValueError(
+                            "Plugin package and manifest identity disagree"
+                        )
+                    for capability in manifest.capabilities:
+                        compile_parameters(capability.parameters_schema)
+                    manifests[manifest.id] = manifest
+                except Exception as error:
+                    unavailable[directory.name] = UnavailablePlugin(
+                        "manifest", type(error).__name__
                     )
-                manifests.append(manifest)
-        return cls(manifests)
+        if len(manifests) + len(unavailable) > 32:
+            raise ValueError("Plugin inventory exceeds limit")
+        installed = dict(manifests)
+        ready: dict[str, PluginManifest] = {}
+        while manifests:
+            progressed = False
+            for identifier, manifest in tuple(manifests.items()):
+                if any(
+                    (dependency_manifest := installed.get(dependency)) is None
+                    or dependency_manifest.version != version
+                    for dependency, version in manifest.requires.items()
+                ):
+                    unavailable[identifier] = UnavailablePlugin(
+                        "dependency", "DependencyUnavailable"
+                    )
+                    del installed[identifier]
+                elif all(
+                    dependency in ready for dependency in manifest.requires
+                ):
+                    ready[identifier] = manifest
+                else:
+                    continue
+                del manifests[identifier]
+                progressed = True
+            if not progressed:
+                for identifier in manifests:
+                    unavailable[identifier] = UnavailablePlugin(
+                        "dependency", "DependencyCycle"
+                    )
+                break
+        registry = cls(tuple(ready.values()))
+        for identifier, fault in unavailable.items():
+            registry.mark_unavailable(
+                identifier, stage=fault.stage, error_type=fault.error_type
+            )
+        return registry
+
+    @property
+    def unavailable(self) -> Mapping[str, UnavailablePlugin]:
+        return MappingProxyType(self._unavailable)
+
+    def mark_unavailable(
+        self, plugin: str, *, stage: str, error_type: str
+    ) -> None:
+        """Quarantines an entire plugin so partially loaded siblings cannot execute."""
+        pending = [(plugin, UnavailablePlugin(stage, error_type))]
+        while pending:
+            identifier, fault = pending.pop()
+            if identifier in self._unavailable:
+                continue
+            self._unavailable[identifier] = fault
+            self._manifests.pop(identifier, None)
+            for dependent in self._manifests.values():
+                if identifier in dependent.requires or any(
+                    required.startswith(identifier + ".")
+                    for capability in dependent.capabilities
+                    for required in capability.compatibility.requires
+                ):
+                    pending.append(
+                        (
+                            dependent.id,
+                            UnavailablePlugin(
+                                "dependency", "DependencyUnavailable"
+                            ),
+                        )
+                    )
+            with trace.get_tracer("galadril.plugins").start_as_current_span(
+                "plugin.unavailable",
+                attributes={
+                    "plugin.id": identifier,
+                    "plugin.stage": fault.stage,
+                },
+                record_exception=False,
+                set_status_on_exception=False,
+            ) as span:
+                span.set_status(StatusCode.ERROR)
+                logger.warning(
+                    "plugin.unavailable",
+                    plugin_id=identifier,
+                    stage=fault.stage,
+                    error_type=fault.error_type,
+                )
+        available = {
+            item.id
+            for manifest in self._manifests.values()
+            for item in manifest.capabilities
+        }
+        self.catalog = CapabilityCatalog(
+            capabilities=tuple(
+                item
+                for item in self.catalog.capabilities
+                if item.id in available
+            )
+        )
+        self._capabilities = {
+            key: value
+            for key, value in self._capabilities.items()
+            if key in available
+        }
+        self._bindings = MappingProxyType(
+            {
+                key: value
+                for key, value in self._bindings.items()
+                if key in available
+            }
+        )
+        self._parameters = {
+            key: value
+            for key, value in self._parameters.items()
+            if key in available
+        }
+        self._factories = {
+            path: factory
+            for path, factory in self._factories.items()
+            if path.split(".")[1] not in self._unavailable
+        }
+
+    def _collect[T](
+        self, stage: str, collect: Callable[[PluginManifest], Sequence[T]]
+    ) -> tuple[T, ...]:
+        loaded: list[tuple[str, Sequence[T]]] = []
+        for manifest in tuple(self._manifests.values()):
+            if manifest.id in self._unavailable:
+                continue
+            try:
+                values = collect(manifest)
+            except Exception as error:
+                self.mark_unavailable(
+                    manifest.id, stage=stage, error_type=type(error).__name__
+                )
+            else:
+                loaded.append((manifest.id, values))
+        return tuple(
+            value
+            for identifier, values in loaded
+            if identifier not in self._unavailable
+            for value in values
+        )
 
     def services(self) -> tuple[tuple[str, str], ...]:
         """Lists deployable services without loading executable factories."""
@@ -550,23 +705,25 @@ class PluginRegistry:
                 if total > 2 * 1024 * 1024 or len(result) >= 32:
                     raise ValueError("Ontology package inventory exceeds limit")
                 package = OntologyPackage.model_validate_json(data)
-                if (
-                    not package.id.startswith(manifest.id + ".")
-                    or package.id in identifiers
-                ):
-                    raise ValueError("Invalid ontology package identity")
-                if not set(package.contracts).issubset(
-                    {item.id for item in manifest.capabilities}
-                ):
-                    raise ValueError("Unknown ontology capability")
-                identifiers.add(package.id)
-                result.append(
-                    {
-                        **package.model_dump(mode="json"),
-                        "plugin_id": manifest.id,
-                        "plugin_version": manifest.version,
-                    }
-                )
+                for view in (package,):
+                    if (
+                        len(result) >= 32
+                        or not view.id.startswith(manifest.id + ".")
+                        or view.id in identifiers
+                    ):
+                        raise ValueError("Invalid ontology package identity")
+                    if not set(view.contracts).issubset(
+                        {item.id for item in manifest.capabilities}
+                    ):
+                        raise ValueError("Unknown ontology capability")
+                    identifiers.add(view.id)
+                    result.append(
+                        {
+                            **view.model_dump(mode="json"),
+                            "plugin_id": manifest.id,
+                            "plugin_version": manifest.version,
+                        }
+                    )
         return result
 
     def document_templates(self) -> list[dict[str, JsonValue]]:
@@ -595,51 +752,71 @@ class PluginRegistry:
                         "project": None,
                     }
                 )
+                if template.execution_context is not None and not any(
+                    context.id == template.execution_context
+                    for capability in manifest.capabilities
+                    for context in capability.execution_profile.contexts
+                ):
+                    raise ValueError(
+                        "Template execution context is unavailable"
+                    )
                 result.append(
                     {
                         "plugin_id": str(manifest.id),
                         "plugin_version": manifest.version,
                         "key": resource,
+                        "execution_context": template.execution_context,
                         "template": template.wire(),
                     }
                 )
         return result
 
     def skills(self) -> tuple[PackagedSkill, ...]:
+        return self._collect("skills", self._skills)
+
+    @staticmethod
+    def _skills(manifest: PluginManifest) -> tuple[PackagedSkill, ...]:
         result = []
-        for manifest in self._manifests.values():
-            for capability in manifest.capabilities:
-                path = manifest.bindings[capability.id].skill
-                if path is not None:
-                    instructions = (
-                        files(f"galadril_plugins.{manifest.id}")
-                        .joinpath(path)
-                        .read_text(encoding="utf-8")
-                    )
-                    if (
-                        not instructions.strip()
-                        or len(instructions.encode()) > 32768
-                    ):
-                        raise ValueError(
-                            "Packaged Skill exceeds limit or is empty"
-                        )
-                    result.append(PackagedSkill(capability, instructions))
+        for capability in manifest.capabilities:
+            path = manifest.bindings[capability.id].skill
+            if path is not None:
+                instructions = (
+                    files(f"galadril_plugins.{manifest.id}")
+                    .joinpath(path)
+                    .read_text(encoding="utf-8")
+                )
+                if (
+                    not instructions.strip()
+                    or len(instructions.encode()) > 32768
+                ):
+                    raise ValueError("Packaged Skill exceeds limit or is empty")
+                result.append(PackagedSkill(capability, instructions))
         return tuple(result)
 
     def toolsets(self) -> tuple[tuple[Capability, Callable[[], object]], ...]:
+        return self._collect("tools", self._toolsets)
+
+    def _toolsets(
+        self, manifest: PluginManifest
+    ) -> tuple[tuple[Capability, Callable[[], object]], ...]:
         return tuple(
             (capability, cast(Callable[[], object], self._factory(path)))
-            for capability in self.catalog.capabilities
-            if (path := self._bindings[capability.id].scribe) is not None
+            for capability in manifest.capabilities
+            if (path := manifest.bindings[capability.id].scribe) is not None
         )
 
     def models(self) -> tuple[tuple[Capability, Callable[..., object]], ...]:
+        return self._collect("models", self._models)
+
+    def _models(
+        self, manifest: PluginManifest
+    ) -> tuple[tuple[Capability, Callable[..., object]], ...]:
         return tuple(
             (capability, self._factory(path))
-            for capability in self.catalog.capabilities
+            for capability in manifest.capabilities
             if CapabilityTarget.SCRIBE in capability.targets
             and capability.kind is CapabilityKind.MODEL
-            and (path := self._bindings[capability.id].model) is not None
+            and (path := manifest.bindings[capability.id].model) is not None
         )
 
     def service(self, plugin: str, name: str) -> Callable[..., object]:

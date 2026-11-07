@@ -48,6 +48,36 @@ class Compatibility(BaseModel):
         return self
 
 
+class ExecutionContext(BaseModel):
+    """A registered context narrows host access without granting new authority."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: CapabilityId
+    name: str = Field(min_length=1, max_length=128)
+    aliases: tuple[str, ...] = Field(default=(), max_length=8)
+    instructions: str = Field(default="", max_length=8192)
+    privacy: Literal["standard", "pseudonymized"] = "standard"
+
+    @model_validator(mode="after")
+    def bounded_aliases(self) -> ExecutionContext:
+        if len(set(self.aliases)) != len(self.aliases) or any(
+            not alias
+            or len(alias) > 128
+            or not alias.isascii()
+            or not all(c.isalnum() or c in "._-" for c in alias)
+            for alias in self.aliases
+        ):
+            raise ValueError("Invalid execution context aliases")
+        return self
+
+
+class ExecutionProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    contexts: tuple[ExecutionContext, ...] = Field(default=(), max_length=8)
+    requires_context: CapabilityId | None = None
+    isolation: Literal["standard", "sealed"] = "standard"
+
+
 class Capability(BaseModel):
     """Keeps plugin identity separate from configurable infrastructure secrets."""
 
@@ -60,6 +90,9 @@ class Capability(BaseModel):
     )
     execution: Literal["registered", "declared"] = "registered"
     compatibility: Compatibility = Field(default_factory=Compatibility)
+    execution_profile: ExecutionProfile = Field(
+        default_factory=ExecutionProfile
+    )
     kind: CapabilityKind
     targets: tuple[CapabilityTarget, ...] = Field(min_length=1, max_length=2)
     name: str = Field(min_length=1, max_length=128)
@@ -84,6 +117,28 @@ class Capability(BaseModel):
     @model_validator(mode="after")
     def coherent_metadata(self) -> Capability:
         """Rejects ambiguous ownership and schemas unsuitable for configuration forms."""
+        if self.execution_profile != ExecutionProfile():
+            if self.origin != "plugin" or self.plugin_id is None:
+                raise ValueError(
+                    "Execution profiles require registered plugin provenance"
+                )
+            if any(
+                not context.id.startswith(self.plugin_id + ".")
+                for context in self.execution_profile.contexts
+            ):
+                raise ValueError("Execution context must belong to its plugin")
+            if (
+                self.execution_profile.requires_context is not None
+                and not self.execution_profile.requires_context.startswith(
+                    self.plugin_id + "."
+                )
+            ):
+                raise ValueError("Execution context must belong to its plugin")
+            if (
+                self.execution_profile.isolation == "sealed"
+                and self.kind != CapabilityKind.SKILL
+            ):
+                raise ValueError("Sealed execution requires a Skill")
         if self.origin == "plugin":
             if (
                 self.plugin_id is None
@@ -135,7 +190,40 @@ class CapabilityCatalog(BaseModel):
             raise ValueError("Capability IDs must be unique")
         if len(self.model_dump_json().encode()) > 262144:
             raise ValueError("Capability catalog exceeds limit")
+        contexts: dict[str, ExecutionContext] = {}
+        aliases: dict[str, str] = {}
+        for item in self.capabilities:
+            for context in item.execution_profile.contexts:
+                if context.id in contexts and contexts[context.id] != context:
+                    raise ValueError(
+                        "Conflicting execution context definitions"
+                    )
+                contexts[context.id] = context
+                for alias in (context.id, *context.aliases):
+                    if alias in aliases and aliases[alias] != context.id:
+                        raise ValueError("Ambiguous execution context alias")
+                    aliases[alias] = context.id
+        if any(
+            item.execution_profile.requires_context is not None
+            and item.execution_profile.requires_context not in contexts
+            for item in self.capabilities
+        ):
+            raise ValueError("Unregistered execution context")
         return self
+
+    def resolve_execution_context(self, value: str) -> ExecutionContext:
+        for item in self.capabilities:
+            for context in item.execution_profile.contexts:
+                if value == context.id or value in context.aliases:
+                    return context
+        raise ValueError("Unknown execution context")
+
+    def execution_allowed(self, identifier: str, context: str | None) -> bool:
+        return any(
+            item.id == identifier
+            and item.execution_profile.requires_context == context
+            for item in self.capabilities
+        )
 
     def validate_selection(
         self,

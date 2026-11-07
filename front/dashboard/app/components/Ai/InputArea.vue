@@ -20,9 +20,12 @@ import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
-import { modelDisplayName } from "~/utils/pengolo";
+import { modelDisplayName, sealedSkill } from "~/utils/pengolo";
 const props = defineProps<{ busy?: boolean }>();
-const emit = defineEmits<{ submit: []; stop: [] }>();
+const emit = defineEmits<{
+  submit: [shareWithIsolatedReviewers: boolean];
+  stop: [];
+}>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
 const modelLabel = computed(
@@ -62,7 +65,35 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
 const agents = usePengoloAgents();
 const teams = useSpecialistTeams();
+const shareWithIsolatedReviewers = ref(false);
+const canShareWithIsolatedReviewers = computed(
+  () =>
+    ui.files.length > 0 &&
+    agents.items.some(
+      (agent) =>
+        agent.data.readOnly &&
+        agents.selected.includes(agent.id) &&
+        agent.data.skillIds.some((id) => sealedSkill(id, agents.catalog)),
+    ),
+);
+watch(
+  [
+    () => ui.projectId,
+    () => ui.files.map((file) => file.id),
+    () => agents.selected.slice(),
+  ],
+  () => {
+    shareWithIsolatedReviewers.value = false;
+  },
+);
+function submit() {
+  emit(
+    "submit",
+    canShareWithIsolatedReviewers.value && shareWithIsolatedReviewers.value,
+  );
+}
 const agentPicker = ref(false);
+const redaction = ref(false);
 const documentProject = computed(() =>
   ui.temporary ||
   projects.items.find((project) => project.id === ui.projectId)?.data
@@ -106,12 +137,19 @@ async function upload(event: Event) {
 
 function submitPrompt() {
   if (!props.busy && ui.prompt.trim() && models.selected && !library.uploading)
-    emit("submit");
+    submit();
 }
 </script>
 
 <template>
-  <form :class="['p-composer', { expanded }]" @submit.prevent="emit('submit')">
+  <AiRedaction v-model:open="redaction" />
+  <form :class="['p-composer', { expanded }]" @submit.prevent="submitPrompt">
+    <UiCheckbox
+      v-if="canShareWithIsolatedReviewers"
+      v-model="shareWithIsolatedReviewers"
+      :label="$t('pengolo.execution.shareAttachments')"
+      :disabled="busy"
+    />
     <div v-if="ui.graphContext || ui.files.length" class="p-file-chips">
       <span v-if="ui.graphContext" class="p-chip" role="status">
         <ShareIcon aria-hidden="true" />{{ ui.graphContext.kind }} ·
@@ -155,6 +193,20 @@ function submitPrompt() {
             role="menu"
             @keydown.esc="menu = false"
           >
+            <UiButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              align="start"
+              class="w-full"
+              @click="
+                redaction = true;
+                menu = false;
+              "
+              ><PaperClipIcon aria-hidden="true" />{{
+                $t("pengolo.redaction.title")
+              }}</UiButton
+            >
             <UiButton
               variant="ghost"
               type="button"

@@ -185,12 +185,16 @@ impl ConversationAgent for ScribeAgent {
             response.status().is_success(),
             "Document inference unavailable"
         );
+        let limit = match operation {
+            crate::application::ports::conversation_agent::DocumentOperation::Redact => crate::domain::redaction::MAX_WIRE_BYTES,
+            _ => 8_388_608,
+        };
         let mut response = response.bytes_stream();
         let mut body = Vec::new();
         while let Some(chunk) = response.next().await {
             let chunk = chunk?;
             anyhow::ensure!(
-                body.len() + chunk.len() <= 8_388_608,
+                body.len() + chunk.len() <= limit,
                 "Document inference response exceeds limit"
             );
             body.extend_from_slice(&chunk);

@@ -325,6 +325,7 @@ manifest:
     pandas: pandas
     pathspec: pathspec
     patsy: patsy
+    pdf_oxide: pdf_oxide
     pgvector: pgvector
     platformdirs: platformdirs
     pluggy: pluggy
@@ -377,6 +378,7 @@ manifest:
     qdldl: qdldl
     rapidocr: rapidocr
     ray: ray
+    re2: google_re2
     referencing: referencing
     regex: regex
     requests: requests
@@ -463,4 +465,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 3c9f49850773d7b449818431e8af68d8490774e4783f25b6576b7876c5704d80
+integrity: 6ed428dae5eec83f48f4e59b3c73e38341a9472b9028e6f5194b272e19eb7525

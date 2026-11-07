@@ -558,6 +558,7 @@ async def _assert_public_api_inventory(
         "emailOperation",
         "updatePengoloOpenai",
         "updatePengoloPreferences",
+        "savePengoloDocumentProfile",
         "answerPengoloQuestion",
         "sendPengolo",
         "cancelPengolo",

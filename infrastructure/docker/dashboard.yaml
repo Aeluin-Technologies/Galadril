@@ -134,6 +134,7 @@ services:
       SCRIBE_CHATGPT_CREDENTIALS_PATH: /var/lib/galadril/chatgpt/private/accounts.sqlite
       SCRIBE_WEB_SEARCH_PROVIDER: ${SCRIBE_WEB_SEARCH_PROVIDER:-gateway}
       SCRIBE_PYTHON_SANDBOX_SOCKET: ${SCRIBE_PYTHON_SANDBOX_SOCKET:-}
+      SCRIBE_PRIVATE_MODEL_DIR: /run/galadril-private-model
       SCRIBE_DOCUMENT_MODEL_CACHE: /var/lib/galadril/models
       SCRIBE_DOCUMENT_EMBEDDING_COMPUTE_TYPE: ${SCRIBE_DOCUMENT_EMBEDDING_COMPUTE_TYPE:-bf16}
       OMP_NUM_THREADS: ${SCRIBE_INFERENCE_THREADS:-2}
@@ -152,6 +153,10 @@ services:
     volumes:
       - scribe-models:/var/lib/galadril/models
       - scribe-chatgpt:/var/lib/galadril/chatgpt
+      - type: bind
+        source: ${SCRIBE_PRIVATE_MODEL_HOST_DIR:-../../.local/scribe-private-model}
+        target: /run/galadril-private-model
+        read_only: true
       - type: bind
         source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/service-key
         target: /run/galadril-utils/service-key

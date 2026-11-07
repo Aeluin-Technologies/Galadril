@@ -133,6 +133,10 @@ pub fn create_router(
             "/provisioning/local-organizations",
             post(crate::adapters::inbound::sso::provision_local),
         )
+        .route(
+            crate::domain::redaction::NATIVE_REDACTION_PATH,
+            post(pengolo_redact),
+        )
         .route("/pengolo/files/{id}", get(pengolo_file))
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
@@ -147,13 +151,27 @@ pub fn create_router(
         .layer(middleware::from_fn(trace_context))
 }
 
+fn request_body_limit(
+    limits: GraphqlLimits,
+    request: &Request<axum::body::Body>,
+) -> usize {
+    if request.method() == axum::http::Method::POST &&
+        request.uri().path() ==
+            crate::domain::redaction::NATIVE_REDACTION_PATH
+    {
+        crate::domain::redaction::MAX_WIRE_BYTES
+    } else {
+        limits.max_body_bytes
+    }
+}
+
 /// Rejects declared oversized bodies before allocating a JSON buffer.
 async fn enforce_content_length(
     Extension(limits): Extension<GraphqlLimits>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    let maximum = limits.max_body_bytes;
+    let maximum = request_body_limit(limits, &request);
     let oversized = request
         .headers()
         .get(header::CONTENT_LENGTH)
@@ -304,6 +322,86 @@ fn file_content_security_policy(mime: &str) -> &'static str {
         "frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
     } else {
         "default-src 'none'; frame-ancestors 'self'; sandbox"
+    }
+}
+
+/// Private originals bypass chat persistence, indexing, model providers and
+/// object storage.
+async fn pengolo_redact(
+    Extension(services): Extension<Arc<GatewayServices>>,
+    claims: Claims,
+    request: Request<axum::body::Body>,
+) -> Response {
+    static ADMISSION: tokio::sync::Semaphore =
+        tokio::sync::Semaphore::const_new(2);
+    if let Err(status) = validate_session(&services, &claims).await {
+        return status.into_response();
+    }
+    if !request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| {
+            value.trim().eq_ignore_ascii_case("application/json")
+        })
+    {
+        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
+    }
+    let Ok(_permit) = ADMISSION.try_acquire() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
+    let body = match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        axum::body::to_bytes(
+            request.into_body(),
+            crate::domain::redaction::MAX_WIRE_BYTES,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(body)) => body,
+        Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
+    };
+    let input = match serde_json::from_slice::<
+        crate::domain::redaction::RedactionInput,
+    >(&body)
+    {
+        Ok(input) => input,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, "Invalid redaction request")
+                .into_response();
+        },
+    };
+    drop(body);
+    let context = policy_context(
+        &claims,
+        uuid::Uuid::new_v4().simple().to_string(),
+        current_trace_id(),
+    );
+    let actor = crate::application::usecases::pengolo::Principal {
+        tenant: &claims.tenant_id,
+        user: &claims.sub,
+        context: &context,
+    };
+    match services.pengolo.native_redaction(&actor, input).await {
+        Ok(result) => (
+            [
+                (header::CACHE_CONTROL, "private, no-store, max-age=0"),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            ],
+            Json(result),
+        )
+            .into_response(),
+        Err(_) => {
+            tracing::warn!(event.name = "pengolo.redaction.refused");
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Document redaction unavailable or refused",
+            )
+                .into_response()
+        },
     }
 }
 
@@ -662,6 +760,32 @@ fn current_trace_id() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_redaction_body_limit_does_not_expand_graphql_or_other_file_routes()
+    -> anyhow::Result<()> {
+        let limits = GraphqlLimits {
+            max_body_bytes: 1024,
+            max_depth: 8,
+        };
+        for (method, path, expected) in [
+            (
+                "POST",
+                crate::domain::redaction::NATIVE_REDACTION_PATH,
+                crate::domain::redaction::MAX_WIRE_BYTES,
+            ),
+            ("GET", crate::domain::redaction::NATIVE_REDACTION_PATH, 1024),
+            ("POST", "/graphql", 1024),
+            ("POST", "/pengolo/files/other", 1024),
+        ] {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .body(axum::body::Body::empty())?;
+            assert_eq!(request_body_limit(limits, &request), expected);
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn graphql_websocket_negotiates_the_requested_transport_protocol()
     -> anyhow::Result<()> {

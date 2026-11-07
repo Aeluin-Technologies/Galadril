@@ -299,10 +299,11 @@ class TrustBoundaryTest(unittest.TestCase):
         self.assertIn("exact: /capabilities", scribe)
         self.assertIn("exact: /pipeline-capabilities", scribe)
         self.assertIn(
-            "^/documents/(?:parse|embed|extract|recognize|rank)$", scribe
+            "^/documents/(?:parse|embed|extract|recognize|rank|redact)$", scribe
         )
         self.assertIn("exact: /teams", scribe)
         ambient = (ROOT.parent / "kubernetes/security.yaml").read_text()
+        self.assertIn("- /documents/redact", ambient)
         self.assertIn("- /generations/{*}/answers", ambient)
         self.assertIn("- /openai/accounts", ambient)
         for name in ("scribe", "gateway", "local"):

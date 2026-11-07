@@ -16,6 +16,7 @@ defineProps<{
   packages: SemanticPackage[];
   ontologies: TenantOntology[];
   types: OntologyResource[];
+  resourceLabel: (resource: OntologyResource) => string;
   id: string;
   selected: string;
   busy: boolean;
@@ -67,7 +68,7 @@ const emit = defineEmits<{
       variant="ghost"
       align="start"
       v-for="r in types.filter((r) =>
-        r.display_name.toLowerCase().includes(search.toLowerCase()),
+        resourceLabel(r).toLowerCase().includes(search.toLowerCase()),
       )"
       :key="r.resource_id"
       class="mt-1 w-full"
@@ -75,7 +76,7 @@ const emit = defineEmits<{
       @click="emit('select', r.resource_id)"
     >
       <CubeIcon aria-hidden="true" class="mr-2 h-4 w-4 shrink-0" />{{
-        r.display_name
+        resourceLabel(r)
       }}
     </UiButton>
   </aside>

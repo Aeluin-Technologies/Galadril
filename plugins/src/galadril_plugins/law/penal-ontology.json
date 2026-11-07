@@ -1,0 +1,5109 @@
+{
+  "id": "law.penal",
+  "name": "Criminal proceedings",
+  "version": "0.3.0",
+  "ontologies": [
+    {
+      "id": "law.procedure",
+      "version": "0.3.0",
+      "resources": [
+        {
+          "resource_id": "law.case",
+          "kind": "object_type",
+          "display_name": "Litigation case",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.proceeding",
+          "kind": "object_type",
+          "display_name": "Proceeding",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.court",
+          "kind": "object_type",
+          "display_name": "Court",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.party",
+          "kind": "object_type",
+          "display_name": "Party",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.case.proceedings",
+          "kind": "link_type",
+          "display_name": "Proceedings in the case",
+          "references": [
+            "law.case",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.proceeding",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.court",
+          "kind": "link_type",
+          "display_name": "Court seised",
+          "references": [
+            "law.proceeding",
+            "law.court"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.court",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.claimants",
+          "kind": "link_type",
+          "display_name": "Claimants",
+          "references": [
+            "law.proceeding",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.defendants",
+          "kind": "link_type",
+          "display_name": "Defendants",
+          "references": [
+            "law.proceeding",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.appeals",
+          "kind": "link_type",
+          "display_name": "Challenge to the decision in the proceeding",
+          "references": [
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding",
+            "min_count": 0,
+            "legacy_projection": true,
+            "superseded_by": [
+              "law.review_challenge.challenged_decision"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding.related",
+          "kind": "link_type",
+          "display_name": "Related proceeding",
+          "references": [
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.joined",
+          "kind": "link_type",
+          "display_name": "Proceeding joined by decision",
+          "references": [
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.number",
+          "kind": "property",
+          "owner_id": "law.proceeding",
+          "value_type": "string",
+          "display_name": "Numéro de rôle",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.court.name",
+          "kind": "property",
+          "owner_id": "law.court",
+          "value_type": "string",
+          "display_name": "Official name",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.court.postal_address",
+          "kind": "property",
+          "owner_id": "law.court",
+          "value_type": "string",
+          "display_name": "Public registry address",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.party.name",
+          "kind": "property",
+          "owner_id": "law.party",
+          "value_type": "string",
+          "display_name": "Party name or identifier",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.party.public_postal_address",
+          "kind": "property",
+          "owner_id": "law.party",
+          "display_name": "Confirmed public postal address",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.litigation_kind",
+          "kind": "object_type",
+          "display_name": "Litigation category",
+          "references": [],
+          "attributes": {
+            "access_scope": "reference"
+          }
+        },
+        {
+          "resource_id": "law.litigation_kind.code",
+          "kind": "property",
+          "display_name": "Code",
+          "owner_id": "law.litigation_kind",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.litigation_kind.broader",
+          "kind": "link_type",
+          "display_name": "Broader category",
+          "references": [
+            "law.litigation_kind"
+          ],
+          "attributes": {
+            "source_type": "law.litigation_kind",
+            "target_type": "law.litigation_kind",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.litigation_kinds",
+          "kind": "link_type",
+          "display_name": "Litigation categories",
+          "references": [
+            "law.proceeding",
+            "law.litigation_kind"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.litigation_kind",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.procedure",
+          "kind": "property",
+          "display_name": "Procedure",
+          "owner_id": "law.proceeding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "ordinaire",
+              "refere",
+              "acceleree",
+              "incident",
+              "execution",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding.degree",
+          "kind": "property",
+          "display_name": "Degree",
+          "owner_id": "law.proceeding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "premier_degre",
+              "second_degre",
+              "hors_degre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding.jurisdiction_capacity",
+          "kind": "property",
+          "display_name": "Jurisdictional capacity",
+          "owner_id": "law.proceeding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "premier_ressort",
+              "premier_et_dernier_ressort",
+              "dernier_ressort",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding.petitions",
+          "kind": "link_type",
+          "display_name": "Requêtes introductives",
+          "references": [
+            "law.proceeding",
+            "law.petition"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.petition",
+            "min_count": 0,
+            "inverse_of": "law.filing.proceeding"
+          }
+        },
+        {
+          "resource_id": "law.proceeding.review_challenges",
+          "kind": "link_type",
+          "display_name": "Remedies exercised",
+          "references": [
+            "law.proceeding",
+            "law.review_challenge"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.review_challenge",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.closures",
+          "kind": "link_type",
+          "display_name": "Successive records of the end of the proceeding",
+          "references": [
+            "law.proceeding",
+            "law.proceeding_closure"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding_closure",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.adjudicative_role",
+          "kind": "property",
+          "display_name": "Role of the court",
+          "owner_id": "law.proceeding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "premier_jugement",
+              "appel",
+              "cassation",
+              "renvoi",
+              "execution",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.case.closures",
+          "kind": "link_type",
+          "display_name": "Successive records of case closure",
+          "references": [
+            "law.case",
+            "law.case_closure"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.case_closure",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.court.judicial",
+          "kind": "object_type",
+          "display_name": "Court of the ordre judiciaire",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.court"
+            ],
+            "access_scope": "reference"
+          }
+        },
+        {
+          "resource_id": "law.court.judicial.kind",
+          "kind": "property",
+          "display_name": "Category of court in the ordre judiciaire",
+          "owner_id": "law.court.judicial",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "tribunal_judiciaire",
+              "cour_appel",
+              "cour_cassation",
+              "cour_assises",
+              "cour_criminelle_departementale",
+              "autre"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "law.ecritures",
+      "version": "0.3.0",
+      "resources": [
+        {
+          "resource_id": "law.filing",
+          "kind": "object_type",
+          "display_name": "Written submission",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.petition",
+          "kind": "object_type",
+          "display_name": "Requête introductive",
+          "references": [
+            "law.filing"
+          ],
+          "attributes": {
+            "extends": [
+              "law.filing"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.brief",
+          "kind": "object_type",
+          "display_name": "Mémoire",
+          "references": [
+            "law.filing"
+          ],
+          "attributes": {
+            "extends": [
+              "law.filing"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.exhibit",
+          "kind": "object_type",
+          "display_name": "Exhibit",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.case.petition",
+          "kind": "link_type",
+          "display_name": "Designated requête introductive",
+          "references": [
+            "law.case",
+            "law.petition"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.petition",
+            "min_count": 0,
+            "max_count": 1,
+            "legacy_projection": true,
+            "semantic_role": "designated_opening_petition",
+            "superseded_by": [
+              "law.proceeding.petitions"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.case.briefs",
+          "kind": "link_type",
+          "display_name": "Mémoires",
+          "references": [
+            "law.case",
+            "law.brief"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.brief",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.case.exhibits",
+          "kind": "link_type",
+          "display_name": "Exhibits",
+          "references": [
+            "law.case",
+            "law.exhibit"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.exhibit",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding in which the submission was filed",
+          "references": [
+            "law.filing",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.filing.exhibits",
+          "kind": "link_type",
+          "display_name": "Exhibits",
+          "references": [
+            "law.filing",
+            "law.exhibit"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.exhibit",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.brief.responds_to",
+          "kind": "link_type",
+          "display_name": "Filing answered by the mémoire",
+          "references": [
+            "law.brief",
+            "law.filing"
+          ],
+          "attributes": {
+            "source_type": "law.brief",
+            "target_type": "law.filing",
+            "min_count": 0,
+            "max_count": 1,
+            "legacy_projection": true,
+            "superseded_by": [
+              "law.reply_version.answers"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.filing.filed_on",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "value_type": "date",
+          "display_name": "Filing date",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.petition.subject",
+          "kind": "property",
+          "owner_id": "law.petition",
+          "value_type": "string",
+          "display_name": "Subject",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.petition.facts",
+          "kind": "property",
+          "owner_id": "law.petition",
+          "value_type": "string",
+          "display_name": "Facts and procedural history",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "legacy_projection": true,
+            "superseded_by": [
+              "law.filing.assertions"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.petition.discussion",
+          "kind": "property",
+          "owner_id": "law.petition",
+          "value_type": "string",
+          "display_name": "Discussion",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "legacy_projection": true,
+            "superseded_by": [
+              "law.position_version.filing"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.petition.relief",
+          "kind": "property",
+          "owner_id": "law.petition",
+          "value_type": "string",
+          "display_name": "Conclusions",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "legacy_projection": true,
+            "superseded_by": [
+              "law.claim_version.point",
+              "law.position_version.filing"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.brief.kind",
+          "kind": "property",
+          "owner_id": "law.brief",
+          "value_type": "string",
+          "display_name": "Type of mémoire",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "complementaire",
+              "replique",
+              "defense",
+              "recapitulatif",
+              "observations",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.brief.body",
+          "kind": "property",
+          "owner_id": "law.brief",
+          "value_type": "string",
+          "display_name": "Text of the mémoire",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.exhibit.title",
+          "kind": "property",
+          "owner_id": "law.exhibit",
+          "value_type": "string",
+          "display_name": "Exhibit title",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.exhibit.source_ref",
+          "kind": "property",
+          "owner_id": "law.exhibit",
+          "value_type": "string",
+          "display_name": "Opaque source identifier",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.case.filings",
+          "kind": "link_type",
+          "display_name": "Filings",
+          "references": [
+            "law.case",
+            "law.filing"
+          ],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.filing",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.submitted_by",
+          "kind": "link_type",
+          "display_name": "Filing parties",
+          "references": [
+            "law.filing",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.document_versions",
+          "kind": "link_type",
+          "display_name": "Preserved versions of the filing",
+          "references": [
+            "law.filing",
+            "law.document_version"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.document_version",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.assertions",
+          "kind": "link_type",
+          "display_name": "Assertions",
+          "references": [
+            "law.filing",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.assertion",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.exhibit_submissions",
+          "kind": "link_type",
+          "display_name": "Exhibits produced with the filing",
+          "references": [
+            "law.filing",
+            "law.exhibit_submission"
+          ],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.exhibit_submission",
+            "min_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "law.evenements",
+      "version": "0.3.0",
+      "resources": [
+        {
+          "resource_id": "law.procedural_event",
+          "kind": "event_type",
+          "display_name": "Procedural event",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.procedural_event.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.procedural_event",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.procedural_event",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.procedural_event.evidence",
+          "kind": "link_type",
+          "display_name": "Evidence",
+          "references": [
+            "law.procedural_event",
+            "law.exhibit"
+          ],
+          "attributes": {
+            "source_type": "law.procedural_event",
+            "target_type": "law.exhibit",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.procedural_event.kind",
+          "kind": "property",
+          "owner_id": "law.procedural_event",
+          "value_type": "string",
+          "display_name": "Type of procedural event",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "depot",
+              "notification",
+              "communication",
+              "cloture",
+              "audience",
+              "decision",
+              "jonction"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.procedural_event.occurred_at",
+          "kind": "property",
+          "owner_id": "law.procedural_event",
+          "value_type": "datetime",
+          "display_name": "Observed date and time",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.procedural_event.source_ref",
+          "kind": "property",
+          "owner_id": "law.procedural_event",
+          "value_type": "string",
+          "display_name": "Opaque source identifier",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "law.temporal_event",
+          "kind": "event_type",
+          "display_name": "Dateable event",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "abstract": true
+          }
+        },
+        {
+          "resource_id": "law.temporal_event.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.temporal_event",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.temporal_event.event_date",
+          "kind": "property",
+          "display_name": "Event date",
+          "owner_id": "law.temporal_event",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.temporal_event.event_instant",
+          "kind": "property",
+          "display_name": "Event timestamp with offset",
+          "owner_id": "law.temporal_event",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.temporal_event.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.temporal_event",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.temporal_event",
+            "target_type": "law.passage",
+            "min_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "law.faits",
+      "resources": [
+        {
+          "resource_id": "law.material_event",
+          "kind": "event_type",
+          "display_name": "Material event",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.material_event.label",
+          "kind": "property",
+          "display_name": "Label",
+          "owner_id": "law.material_event",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.material_event.participants",
+          "kind": "link_type",
+          "display_name": "Participants",
+          "references": [
+            "law.material_event",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.material_event",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.assertion",
+          "kind": "object_type",
+          "display_name": "Attributed factual assertion",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.assertion.statement",
+          "kind": "property",
+          "display_name": "Atomic factual assertion",
+          "owner_id": "law.assertion",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.assertion.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.assertion",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.assertion.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.assertion",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.assertion",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.assertion.about",
+          "kind": "link_type",
+          "display_name": "Events addressed",
+          "references": [
+            "law.assertion",
+            "law.material_event"
+          ],
+          "attributes": {
+            "source_type": "law.assertion",
+            "target_type": "law.material_event",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.assertion.attributed_to",
+          "kind": "link_type",
+          "display_name": "Attributed author",
+          "references": [
+            "law.assertion",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.assertion",
+            "target_type": "law.party",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.assertion.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.assertion",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.assertion",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.assertion.revises",
+          "kind": "link_type",
+          "display_name": "Earlier assertion restated",
+          "references": [
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.assertion",
+            "target_type": "law.assertion",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment",
+          "kind": "object_type",
+          "display_name": "Attributed assessment of evidence",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.status",
+          "kind": "property",
+          "display_name": "Status",
+          "owner_id": "law.proof_assessment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "allegue",
+              "conteste",
+              "non_conteste",
+              "corrobore",
+              "etabli",
+              "non_etabli",
+              "incertain",
+              "ecarte"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.proof_assessment",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.author_kind",
+          "kind": "property",
+          "display_name": "Source of assessment",
+          "owner_id": "law.proof_assessment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "partie",
+              "rapport_expertise",
+              "revue_humaine",
+              "proposition_assistee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.assertion",
+          "kind": "link_type",
+          "display_name": "Assertion",
+          "references": [
+            "law.proof_assessment",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.proof_assessment",
+            "target_type": "law.assertion",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.proof_assessment",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.proof_assessment",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.evidence_relations",
+          "kind": "link_type",
+          "display_name": "Evidence relations considered",
+          "references": [
+            "law.proof_assessment",
+            "law.evidence_relation"
+          ],
+          "attributes": {
+            "source_type": "law.proof_assessment",
+            "target_type": "law.evidence_relation",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.proof_assessment"
+          ],
+          "attributes": {
+            "source_type": "law.proof_assessment",
+            "target_type": "law.proof_assessment",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.material_event.observation_status",
+          "kind": "property",
+          "display_name": "Documentation status",
+          "owner_id": "law.material_event",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "mentionne",
+              "observe",
+              "documente"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.review_status",
+          "kind": "property",
+          "display_name": "Review status",
+          "owner_id": "law.proof_assessment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "proposee",
+              "verifiee",
+              "ecartee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proof_assessment.attributed_to",
+          "kind": "link_type",
+          "display_name": "Attributed author",
+          "references": [
+            "law.proof_assessment",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.proof_assessment",
+            "target_type": "law.party",
+            "min_count": 0,
+            "max_count": 1
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.normes",
+      "resources": [
+        {
+          "resource_id": "law.legal_source",
+          "kind": "object_type",
+          "display_name": "Legal source",
+          "references": [],
+          "attributes": {
+            "access_scope": "source_verified_public"
+          }
+        },
+        {
+          "resource_id": "law.legal_source.reference",
+          "kind": "property",
+          "display_name": "Reference",
+          "owner_id": "law.legal_source",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.legal_source.kind",
+          "kind": "property",
+          "display_name": "Type of legal source",
+          "owner_id": "law.legal_source",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "constitution",
+              "traite",
+              "droit_union",
+              "loi",
+              "ordonnance",
+              "reglement",
+              "principe_general",
+              "convention",
+              "jurisprudence",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.legal_source.dispositions",
+          "kind": "link_type",
+          "display_name": "Identified legal provisions",
+          "references": [
+            "law.legal_source",
+            "law.provision"
+          ],
+          "attributes": {
+            "source_type": "law.legal_source",
+            "target_type": "law.provision",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.legal_source.decision",
+          "kind": "link_type",
+          "display_name": "Published judicial decision underlying the source",
+          "references": [
+            "law.legal_source",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.legal_source",
+            "target_type": "law.judicial_decision",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.provision",
+          "kind": "object_type",
+          "display_name": "Identified legal provision",
+          "references": [],
+          "attributes": {
+            "access_scope": "source_verified_public"
+          }
+        },
+        {
+          "resource_id": "law.provision.citation",
+          "kind": "property",
+          "display_name": "Citation",
+          "owner_id": "law.provision",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.provision.source",
+          "kind": "link_type",
+          "display_name": "Source",
+          "references": [
+            "law.provision",
+            "law.legal_source"
+          ],
+          "attributes": {
+            "source_type": "law.provision",
+            "target_type": "law.legal_source",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.provision_version",
+          "kind": "object_type",
+          "display_name": "Version of a legal provision",
+          "references": [],
+          "attributes": {
+            "access_scope": "source_verified_public",
+            "immutable_observation": true
+          }
+        },
+        {
+          "resource_id": "law.provision_version.valid_from",
+          "kind": "property",
+          "display_name": "Valid from, inclusive",
+          "owner_id": "law.provision_version",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.provision_version.valid_until",
+          "kind": "property",
+          "display_name": "Valid until, exclusive",
+          "owner_id": "law.provision_version",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.provision_version.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.provision_version",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.provision_version.provision",
+          "kind": "link_type",
+          "display_name": "Provision",
+          "references": [
+            "law.provision_version",
+            "law.provision"
+          ],
+          "attributes": {
+            "source_type": "law.provision_version",
+            "target_type": "law.provision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.provision_version.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.provision_version",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.provision_version",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.provision_version.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.provision_version"
+          ],
+          "attributes": {
+            "source_type": "law.provision_version",
+            "target_type": "law.provision_version",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.legal_rule",
+          "kind": "object_type",
+          "display_name": "Formulated rule of law",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.legal_rule.statement",
+          "kind": "property",
+          "display_name": "Statement",
+          "owner_id": "law.legal_rule",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.legal_rule.basis_passages",
+          "kind": "link_type",
+          "display_name": "Passages establishing the basis",
+          "references": [
+            "law.legal_rule",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.legal_rule",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.legal_rule.provision_versions",
+          "kind": "link_type",
+          "display_name": "Versions of legal provisions",
+          "references": [
+            "law.legal_rule",
+            "law.provision_version"
+          ],
+          "attributes": {
+            "source_type": "law.legal_rule",
+            "target_type": "law.provision_version",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.legal_rule.interpretations",
+          "kind": "link_type",
+          "display_name": "Judicial interpretations relied on",
+          "references": [
+            "law.legal_rule",
+            "law.judicial_interpretation"
+          ],
+          "attributes": {
+            "source_type": "law.legal_rule",
+            "target_type": "law.judicial_interpretation",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.judicial_interpretation",
+          "kind": "object_type",
+          "display_name": "Attributed judicial interpretation",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.judicial_interpretation.kind",
+          "kind": "property",
+          "display_name": "Type of judicial interpretation",
+          "owner_id": "law.judicial_interpretation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "precise",
+              "confirme",
+              "distingue",
+              "inflechit",
+              "abandonne",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_interpretation.ground",
+          "kind": "link_type",
+          "display_name": "Interpretive motif",
+          "references": [
+            "law.judicial_interpretation",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_interpretation",
+            "target_type": "law.judicial_ground",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_interpretation.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.judicial_interpretation",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_interpretation",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.judicial_interpretation.provision_versions",
+          "kind": "link_type",
+          "display_name": "Versions of legal provisions",
+          "references": [
+            "law.judicial_interpretation",
+            "law.provision_version"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_interpretation",
+            "target_type": "law.provision_version",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.norm_relation",
+          "kind": "object_type",
+          "display_name": "Reasoned relationship between legal provisions",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.norm_relation.kind",
+          "kind": "property",
+          "display_name": "Relationship within the scope examined",
+          "owner_id": "law.norm_relation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "superiorite",
+              "priorite",
+              "derogation",
+              "compatibilite",
+              "incompatibilite",
+              "renvoi"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.norm_relation.source",
+          "kind": "link_type",
+          "display_name": "Source",
+          "references": [
+            "law.norm_relation",
+            "law.provision_version"
+          ],
+          "attributes": {
+            "source_type": "law.norm_relation",
+            "target_type": "law.provision_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.norm_relation.target",
+          "kind": "link_type",
+          "display_name": "Target",
+          "references": [
+            "law.norm_relation",
+            "law.provision_version"
+          ],
+          "attributes": {
+            "source_type": "law.norm_relation",
+            "target_type": "law.provision_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.norm_relation.basis",
+          "kind": "link_type",
+          "display_name": "Passages establishing the relationship",
+          "references": [
+            "law.norm_relation",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.norm_relation",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.norm_relation.context",
+          "kind": "link_type",
+          "display_name": "Context",
+          "references": [
+            "law.norm_relation",
+            "law.legal_issue"
+          ],
+          "attributes": {
+            "source_type": "law.norm_relation",
+            "target_type": "law.legal_issue",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.rule_application",
+          "kind": "object_type",
+          "display_name": "Contextual assessment of a rule's applicability",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.rule_application.outcome",
+          "kind": "property",
+          "display_name": "Assessed applicability",
+          "owner_id": "law.rule_application",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "proposee",
+              "applicable",
+              "inapplicable",
+              "indeterminee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.rule_application.review_status",
+          "kind": "property",
+          "display_name": "Review status",
+          "owner_id": "law.rule_application",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "proposee",
+              "verifiee",
+              "contestee",
+              "ecartee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.rule_application.as_of",
+          "kind": "property",
+          "display_name": "Assessment date",
+          "owner_id": "law.rule_application",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.rule_application.rule",
+          "kind": "link_type",
+          "display_name": "Rule",
+          "references": [
+            "law.rule_application",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.rule_application",
+            "target_type": "law.legal_rule",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.rule_application.issue",
+          "kind": "link_type",
+          "display_name": "Issue",
+          "references": [
+            "law.rule_application",
+            "law.legal_issue"
+          ],
+          "attributes": {
+            "source_type": "law.rule_application",
+            "target_type": "law.legal_issue",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.rule_application.premises",
+          "kind": "link_type",
+          "display_name": "Factual premises to verify",
+          "references": [
+            "law.rule_application",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.rule_application",
+            "target_type": "law.assertion",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.rule_application.basis",
+          "kind": "link_type",
+          "display_name": "Passages supporting the applicability assessment",
+          "references": [
+            "law.rule_application",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.rule_application",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.qualification.rule_applications",
+          "kind": "link_type",
+          "display_name": "Rule applicability assessments",
+          "references": [
+            "law.qualification",
+            "law.rule_application"
+          ],
+          "attributes": {
+            "source_type": "law.qualification",
+            "target_type": "law.rule_application",
+            "min_count": 0
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.moyens",
+      "resources": [
+        {
+          "resource_id": "law.legal_issue",
+          "kind": "object_type",
+          "display_name": "Legal issue",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.legal_issue.statement",
+          "kind": "property",
+          "display_name": "Statement",
+          "owner_id": "law.legal_issue",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.legal_issue.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.legal_issue",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.legal_issue",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.legal_issue.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.legal_issue",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.legal_issue",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.qualification",
+          "kind": "object_type",
+          "display_name": "Attributed legal qualification",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.qualification.statement",
+          "kind": "property",
+          "display_name": "Statement",
+          "owner_id": "law.qualification",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.qualification.status",
+          "kind": "property",
+          "display_name": "Status",
+          "owner_id": "law.qualification",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "proposee",
+              "discutee",
+              "verifiee",
+              "ecartee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.qualification.assertions",
+          "kind": "link_type",
+          "display_name": "Assertions",
+          "references": [
+            "law.qualification",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.qualification",
+            "target_type": "law.assertion",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.qualification.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.qualification",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.qualification",
+            "target_type": "law.legal_rule",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.qualification.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.qualification",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.qualification",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.qualification.issue",
+          "kind": "link_type",
+          "display_name": "Issue",
+          "references": [
+            "law.qualification",
+            "law.legal_issue"
+          ],
+          "attributes": {
+            "source_type": "law.qualification",
+            "target_type": "law.legal_issue",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.legal_cause",
+          "kind": "object_type",
+          "display_name": "Cause juridique",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.legal_cause.kind",
+          "kind": "property",
+          "display_name": "Category of cause juridique",
+          "owner_id": "law.legal_cause",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "responsabilite",
+              "contrat",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.legal_cause.litigation_kind",
+          "kind": "link_type",
+          "display_name": "Litigation kind",
+          "references": [
+            "law.legal_cause",
+            "law.litigation_kind"
+          ],
+          "attributes": {
+            "source_type": "law.legal_cause",
+            "target_type": "law.litigation_kind",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.submission_point",
+          "kind": "object_type",
+          "display_name": "Stable identity of a point in dispute",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "abstract": true
+          }
+        },
+        {
+          "resource_id": "law.submission_point.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.submission_point",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.submission_point",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim",
+          "kind": "object_type",
+          "display_name": "Prétention",
+          "references": [
+            "law.submission_point"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.submission_point"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.plea",
+          "kind": "object_type",
+          "display_name": "Moyen",
+          "references": [
+            "law.submission_point"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.submission_point"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.argument",
+          "kind": "object_type",
+          "display_name": "Argument",
+          "references": [
+            "law.submission_point"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.submission_point"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.objection",
+          "kind": "object_type",
+          "display_name": "Objection",
+          "references": [
+            "law.submission_point"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.submission_point"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.reply",
+          "kind": "object_type",
+          "display_name": "Reply to an objection",
+          "references": [
+            "law.submission_point"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.submission_point"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.position_version",
+          "kind": "object_type",
+          "display_name": "Formulation of a point in a written submission",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "abstract": true,
+            "immutable_observation": true
+          }
+        },
+        {
+          "resource_id": "law.position_version.state",
+          "kind": "property",
+          "display_name": "State",
+          "owner_id": "law.position_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "introduit",
+              "maintenu",
+              "modifie",
+              "complete",
+              "retire",
+              "abandonne"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.position_version.statement",
+          "kind": "property",
+          "display_name": "Statement",
+          "owner_id": "law.position_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.position_version.filing",
+          "kind": "link_type",
+          "display_name": "Written submission containing this formulation",
+          "references": [
+            "law.position_version",
+            "law.filing"
+          ],
+          "attributes": {
+            "source_type": "law.position_version",
+            "target_type": "law.filing",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.position_version.passages",
+          "kind": "link_type",
+          "display_name": "Exact passages in the submission",
+          "references": [
+            "law.position_version",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.position_version",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.position_version.previous",
+          "kind": "link_type",
+          "display_name": "Previous version",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "source_type": "law.position_version",
+            "target_type": "law.position_version",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.position_version.issue",
+          "kind": "link_type",
+          "display_name": "Issue",
+          "references": [
+            "law.position_version",
+            "law.legal_issue"
+          ],
+          "attributes": {
+            "source_type": "law.position_version",
+            "target_type": "law.legal_issue",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_version",
+          "kind": "object_type",
+          "display_name": "Version of a prétention",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.position_version"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.claim_version.point",
+          "kind": "link_type",
+          "display_name": "Stable identity of the point",
+          "references": [
+            "law.claim_version",
+            "law.claim"
+          ],
+          "attributes": {
+            "source_type": "law.claim_version",
+            "target_type": "law.claim",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.plea_version",
+          "kind": "object_type",
+          "display_name": "Version of a moyen",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.position_version"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.plea_version.point",
+          "kind": "link_type",
+          "display_name": "Stable identity of the point",
+          "references": [
+            "law.plea_version",
+            "law.plea"
+          ],
+          "attributes": {
+            "source_type": "law.plea_version",
+            "target_type": "law.plea",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.argument_version",
+          "kind": "object_type",
+          "display_name": "Version of an argument",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.position_version"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.argument_version.point",
+          "kind": "link_type",
+          "display_name": "Stable identity of the point",
+          "references": [
+            "law.argument_version",
+            "law.argument"
+          ],
+          "attributes": {
+            "source_type": "law.argument_version",
+            "target_type": "law.argument",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.objection_version",
+          "kind": "object_type",
+          "display_name": "Version of an objection",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.position_version"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.objection_version.point",
+          "kind": "link_type",
+          "display_name": "Stable identity of the point",
+          "references": [
+            "law.objection_version",
+            "law.objection"
+          ],
+          "attributes": {
+            "source_type": "law.objection_version",
+            "target_type": "law.objection",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.reply_version",
+          "kind": "object_type",
+          "display_name": "Version of a reply",
+          "references": [
+            "law.position_version"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.position_version"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.reply_version.point",
+          "kind": "link_type",
+          "display_name": "Stable identity of the point",
+          "references": [
+            "law.reply_version",
+            "law.reply"
+          ],
+          "attributes": {
+            "source_type": "law.reply_version",
+            "target_type": "law.reply",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_version.relief_kind",
+          "kind": "property",
+          "display_name": "Relief requested",
+          "owner_id": "law.claim_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "annulation",
+              "reformation",
+              "condamnation_indemnitaire",
+              "injonction",
+              "astreinte",
+              "suspension",
+              "constat",
+              "rejet",
+              "frais",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.claim_version.rank",
+          "kind": "property",
+          "display_name": "Rank",
+          "owner_id": "law.claim_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "principal",
+              "subsidiaire",
+              "reconventionnel",
+              "accessoire"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.plea_version.claims",
+          "kind": "link_type",
+          "display_name": "Prétentions supported",
+          "references": [
+            "law.plea_version",
+            "law.claim_version"
+          ],
+          "attributes": {
+            "source_type": "law.plea_version",
+            "target_type": "law.claim_version",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea_version.cause",
+          "kind": "link_type",
+          "display_name": "Cause juridique stated in the moyen",
+          "references": [
+            "law.plea_version",
+            "law.legal_cause"
+          ],
+          "attributes": {
+            "source_type": "law.plea_version",
+            "target_type": "law.legal_cause",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.plea_version.kind",
+          "kind": "property",
+          "display_name": "Type of moyen",
+          "owner_id": "law.plea_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "incompetence",
+              "forme",
+              "procedure",
+              "erreur_droit",
+              "erreur_fait",
+              "qualification_faits",
+              "appreciation",
+              "responsabilite",
+              "violation_contractuelle",
+              "recevabilite",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.plea_version.qualifications",
+          "kind": "link_type",
+          "display_name": "Legal qualifications",
+          "references": [
+            "law.plea_version",
+            "law.qualification"
+          ],
+          "attributes": {
+            "source_type": "law.plea_version",
+            "target_type": "law.qualification",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea_version.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.plea_version",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.plea_version",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.argument_version.supports",
+          "kind": "link_type",
+          "display_name": "Supports",
+          "references": [
+            "law.argument_version",
+            "law.position_version"
+          ],
+          "attributes": {
+            "source_type": "law.argument_version",
+            "target_type": "law.position_version",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.argument_version.assertions",
+          "kind": "link_type",
+          "display_name": "Assertions",
+          "references": [
+            "law.argument_version",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.argument_version",
+            "target_type": "law.assertion",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.argument_version.qualifications",
+          "kind": "link_type",
+          "display_name": "Legal qualifications",
+          "references": [
+            "law.argument_version",
+            "law.qualification"
+          ],
+          "attributes": {
+            "source_type": "law.argument_version",
+            "target_type": "law.qualification",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.objection_version.target",
+          "kind": "link_type",
+          "display_name": "Target",
+          "references": [
+            "law.objection_version",
+            "law.position_version"
+          ],
+          "attributes": {
+            "source_type": "law.objection_version",
+            "target_type": "law.position_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.objection_version.assertions",
+          "kind": "link_type",
+          "display_name": "Assertions",
+          "references": [
+            "law.objection_version",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.objection_version",
+            "target_type": "law.assertion",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.objection_version.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.objection_version",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.objection_version",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.reply_version.answers",
+          "kind": "link_type",
+          "display_name": "Answers",
+          "references": [
+            "law.reply_version",
+            "law.objection_version"
+          ],
+          "attributes": {
+            "source_type": "law.reply_version",
+            "target_type": "law.objection_version",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.reply_version.arguments",
+          "kind": "link_type",
+          "display_name": "Arguments",
+          "references": [
+            "law.reply_version",
+            "law.argument_version"
+          ],
+          "attributes": {
+            "source_type": "law.reply_version",
+            "target_type": "law.argument_version",
+            "min_count": 0
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.preuves",
+      "resources": [
+        {
+          "resource_id": "law.document",
+          "kind": "object_type",
+          "display_name": "Document with stable identity",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.document.kind",
+          "kind": "property",
+          "display_name": "Type of document",
+          "owner_id": "law.document",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "ecriture",
+              "piece",
+              "decision_administrative",
+              "decision_juridictionnelle",
+              "publication",
+              "notification",
+              "rapport",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.provenance",
+          "kind": "object_type",
+          "display_name": "Capture provenance",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.provenance.origin",
+          "kind": "property",
+          "display_name": "Origin",
+          "owner_id": "law.provenance",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "telerecours",
+              "source_officielle",
+              "depot_utilisateur",
+              "courriel",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.provenance.source_ref",
+          "kind": "property",
+          "display_name": "Opaque source identifier",
+          "owner_id": "law.provenance",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.provenance.captured_at",
+          "kind": "property",
+          "display_name": "Captured at",
+          "owner_id": "law.provenance",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.provenance.public_uri",
+          "kind": "property",
+          "display_name": "Verified public source URI",
+          "owner_id": "law.provenance",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.document_version",
+          "kind": "object_type",
+          "display_name": "Immutable document version",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope",
+            "immutable_observation": true
+          }
+        },
+        {
+          "resource_id": "law.document_version.sha256",
+          "kind": "property",
+          "display_name": "Content SHA-256 digest",
+          "owner_id": "law.document_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.document_version.version_label",
+          "kind": "property",
+          "display_name": "Version label",
+          "owner_id": "law.document_version",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.document_version.document",
+          "kind": "link_type",
+          "display_name": "Document",
+          "references": [
+            "law.document_version",
+            "law.document"
+          ],
+          "attributes": {
+            "source_type": "law.document_version",
+            "target_type": "law.document",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.document_version.provenance",
+          "kind": "link_type",
+          "display_name": "Provenance",
+          "references": [
+            "law.document_version",
+            "law.provenance"
+          ],
+          "attributes": {
+            "source_type": "law.document_version",
+            "target_type": "law.provenance",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.document_version.previous",
+          "kind": "link_type",
+          "display_name": "Previous version",
+          "references": [
+            "law.document_version"
+          ],
+          "attributes": {
+            "source_type": "law.document_version",
+            "target_type": "law.document_version",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.passage",
+          "kind": "object_type",
+          "display_name": "Passage anchored in an immutable version",
+          "references": [],
+          "attributes": {
+            "access_scope": "inherits_source_scope"
+          }
+        },
+        {
+          "resource_id": "law.passage.locator_kind",
+          "kind": "property",
+          "display_name": "Locator system",
+          "owner_id": "law.passage",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "page_paragraphe",
+              "article_alinea",
+              "caracteres",
+              "horodatage",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.passage.page",
+          "kind": "property",
+          "display_name": "Page",
+          "owner_id": "law.passage",
+          "value_type": "integer",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.passage.section_label",
+          "kind": "property",
+          "display_name": "Article, paragraph or alinéa shown in the source",
+          "owner_id": "law.passage",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.passage.start",
+          "kind": "property",
+          "display_name": "Inclusive start offset",
+          "owner_id": "law.passage",
+          "value_type": "integer",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.passage.end",
+          "kind": "property",
+          "display_name": "Exclusive end offset",
+          "owner_id": "law.passage",
+          "value_type": "integer",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.passage.document_version",
+          "kind": "link_type",
+          "display_name": "Document version",
+          "references": [
+            "law.passage",
+            "law.document_version"
+          ],
+          "attributes": {
+            "source_type": "law.passage",
+            "target_type": "law.document_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.exhibit.document",
+          "kind": "link_type",
+          "display_name": "Document",
+          "references": [
+            "law.exhibit",
+            "law.document"
+          ],
+          "attributes": {
+            "source_type": "law.exhibit",
+            "target_type": "law.document",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.exhibit_submission",
+          "kind": "object_type",
+          "display_name": "Production of an exhibit with a written submission",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.exhibit_submission.label",
+          "kind": "property",
+          "display_name": "Reference on the bordereau de pièces",
+          "owner_id": "law.exhibit_submission",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.exhibit_submission.exhibit",
+          "kind": "link_type",
+          "display_name": "Exhibit",
+          "references": [
+            "law.exhibit_submission",
+            "law.exhibit"
+          ],
+          "attributes": {
+            "source_type": "law.exhibit_submission",
+            "target_type": "law.exhibit",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.exhibit_submission.filing",
+          "kind": "link_type",
+          "display_name": "Written submission producing the exhibit",
+          "references": [
+            "law.exhibit_submission",
+            "law.filing"
+          ],
+          "attributes": {
+            "source_type": "law.exhibit_submission",
+            "target_type": "law.filing",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.exhibit_submission.document_version",
+          "kind": "link_type",
+          "display_name": "Document version",
+          "references": [
+            "law.exhibit_submission",
+            "law.document_version"
+          ],
+          "attributes": {
+            "source_type": "law.exhibit_submission",
+            "target_type": "law.document_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation",
+          "kind": "object_type",
+          "display_name": "Attributed and revisable evidence relation",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.kind",
+          "kind": "property",
+          "display_name": "How the passage bears on the assertion",
+          "owner_id": "law.evidence_relation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "etaye",
+              "contredit",
+              "contextualise",
+              "ne_permet_pas_de_trancher"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.review_status",
+          "kind": "property",
+          "display_name": "Review status",
+          "owner_id": "law.evidence_relation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "proposee",
+              "verifiee",
+              "contestee",
+              "ecartee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.evidence_relation",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.assertion",
+          "kind": "link_type",
+          "display_name": "Assertion",
+          "references": [
+            "law.evidence_relation",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.evidence_relation",
+            "target_type": "law.assertion",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.passage",
+          "kind": "link_type",
+          "display_name": "Passage",
+          "references": [
+            "law.evidence_relation",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.evidence_relation",
+            "target_type": "law.passage",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.attributed_to",
+          "kind": "link_type",
+          "display_name": "Attributed author",
+          "references": [
+            "law.evidence_relation",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.evidence_relation",
+            "target_type": "law.party",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.source_passages",
+          "kind": "link_type",
+          "display_name": "Source passages",
+          "references": [
+            "law.evidence_relation",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.evidence_relation",
+            "target_type": "law.passage",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.evidence_relation.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.evidence_relation"
+          ],
+          "attributes": {
+            "source_type": "law.evidence_relation",
+            "target_type": "law.evidence_relation",
+            "min_count": 0,
+            "max_count": 1
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.decisions",
+      "resources": [
+        {
+          "resource_id": "law.judicial_decision",
+          "kind": "object_type",
+          "display_name": "Judicial decision",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.kind",
+          "kind": "property",
+          "display_name": "Form of judicial decision",
+          "owner_id": "law.judicial_decision",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "jugement",
+              "ordonnance",
+              "arret",
+              "decision",
+              "avis"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.reference",
+          "kind": "property",
+          "display_name": "Reference",
+          "owner_id": "law.judicial_decision",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.issued_on",
+          "kind": "property",
+          "display_name": "Date the decision was rendered",
+          "owner_id": "law.judicial_decision",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.judicial_decision",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.document_versions",
+          "kind": "link_type",
+          "display_name": "Document versions",
+          "references": [
+            "law.judicial_decision",
+            "law.document_version"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.document_version",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.grounds",
+          "kind": "link_type",
+          "display_name": "Motifs",
+          "references": [
+            "law.judicial_decision",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.judicial_ground",
+            "min_count": 0,
+            "inverse_min_count": 1,
+            "inverse_max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.disposition",
+          "kind": "link_type",
+          "display_name": "Dispositif",
+          "references": [
+            "law.judicial_decision",
+            "law.disposition"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.disposition",
+            "min_count": 0,
+            "max_count": 1,
+            "inverse_min_count": 1,
+            "inverse_max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_ground",
+          "kind": "object_type",
+          "display_name": "Motif of the decision",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.judicial_ground.ordinal",
+          "kind": "property",
+          "display_name": "Ordinal",
+          "owner_id": "law.judicial_ground",
+          "value_type": "integer",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_ground.passages",
+          "kind": "link_type",
+          "display_name": "Passages",
+          "references": [
+            "law.judicial_ground",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_ground",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_ground.rules",
+          "kind": "link_type",
+          "display_name": "Rules",
+          "references": [
+            "law.judicial_ground",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_ground",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.judicial_ground.qualifications",
+          "kind": "link_type",
+          "display_name": "Legal qualifications",
+          "references": [
+            "law.judicial_ground",
+            "law.qualification"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_ground",
+            "target_type": "law.qualification",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.judicial_finding",
+          "kind": "object_type",
+          "display_name": "Factual finding recorded by the court",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.judicial_finding.outcome",
+          "kind": "property",
+          "display_name": "Outcome",
+          "owner_id": "law.judicial_finding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "retenu",
+              "non_etabli",
+              "ecarte",
+              "sans_incidence",
+              "non_tranche"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_finding.assertion",
+          "kind": "link_type",
+          "display_name": "Assertion",
+          "references": [
+            "law.judicial_finding",
+            "law.assertion"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_finding",
+            "target_type": "law.assertion",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_finding.ground",
+          "kind": "link_type",
+          "display_name": "Motif expressing the finding",
+          "references": [
+            "law.judicial_finding",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_finding",
+            "target_type": "law.judicial_ground",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_finding.evidence_relations",
+          "kind": "link_type",
+          "display_name": "Evidence relations considered",
+          "references": [
+            "law.judicial_finding",
+            "law.evidence_relation"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_finding",
+            "target_type": "law.evidence_relation",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling",
+          "kind": "object_type",
+          "display_name": "Court's treatment of a moyen",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling.outcome",
+          "kind": "property",
+          "display_name": "Recorded outcome for the moyen",
+          "owner_id": "law.plea_ruling",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "accueilli",
+              "ecarte",
+              "inoperant",
+              "irrecevable",
+              "non_examine",
+              "reserve"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.plea_ruling",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.plea_ruling",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling.plea",
+          "kind": "link_type",
+          "display_name": "Version of the moyen considered",
+          "references": [
+            "law.plea_ruling",
+            "law.plea_version"
+          ],
+          "attributes": {
+            "source_type": "law.plea_ruling",
+            "target_type": "law.plea_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling.grounds",
+          "kind": "link_type",
+          "display_name": "Motifs",
+          "references": [
+            "law.plea_ruling",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.plea_ruling",
+            "target_type": "law.judicial_ground",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea_ruling.passages",
+          "kind": "link_type",
+          "display_name": "Passages",
+          "references": [
+            "law.plea_ruling",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.plea_ruling",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling",
+          "kind": "object_type",
+          "display_name": "Court's treatment of a prétention",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling.outcome",
+          "kind": "property",
+          "display_name": "Recorded outcome for the prétention",
+          "owner_id": "law.claim_ruling",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "accueillie",
+              "partiellement_accueillie",
+              "rejetee",
+              "irrecevable",
+              "non_lieu",
+              "desistement",
+              "reserve"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.claim_ruling",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.claim_ruling",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling.claim",
+          "kind": "link_type",
+          "display_name": "Version of the prétention considered",
+          "references": [
+            "law.claim_ruling",
+            "law.claim_version"
+          ],
+          "attributes": {
+            "source_type": "law.claim_ruling",
+            "target_type": "law.claim_version",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling.items",
+          "kind": "link_type",
+          "display_name": "Articles of the dispositif",
+          "references": [
+            "law.claim_ruling",
+            "law.disposition_item"
+          ],
+          "attributes": {
+            "source_type": "law.claim_ruling",
+            "target_type": "law.disposition_item",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.claim_ruling.grounds",
+          "kind": "link_type",
+          "display_name": "Motifs",
+          "references": [
+            "law.claim_ruling",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.claim_ruling",
+            "target_type": "law.judicial_ground",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.disposition",
+          "kind": "object_type",
+          "display_name": "Dispositif of the judicial decision",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.disposition.items",
+          "kind": "link_type",
+          "display_name": "Articles of the dispositif",
+          "references": [
+            "law.disposition",
+            "law.disposition_item"
+          ],
+          "attributes": {
+            "source_type": "law.disposition",
+            "target_type": "law.disposition_item",
+            "min_count": 1,
+            "inverse_min_count": 1,
+            "inverse_max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.disposition_item",
+          "kind": "object_type",
+          "display_name": "Article of the dispositif",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.disposition_item.ordinal",
+          "kind": "property",
+          "display_name": "Position in the dispositif",
+          "owner_id": "law.disposition_item",
+          "value_type": "integer",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "minimum": 1
+          }
+        },
+        {
+          "resource_id": "law.disposition_item.label",
+          "kind": "property",
+          "display_name": "Label",
+          "owner_id": "law.disposition_item",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.disposition_item.passages",
+          "kind": "link_type",
+          "display_name": "Passages",
+          "references": [
+            "law.disposition_item",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.disposition_item",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.disposition_item.effects",
+          "kind": "link_type",
+          "display_name": "Effects",
+          "references": [
+            "law.disposition_item",
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "source_type": "law.disposition_item",
+            "target_type": "law.dispositive_effect",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.disposition_item.supporting_grounds",
+          "kind": "link_type",
+          "display_name": "Supporting motifs",
+          "references": [
+            "law.disposition_item",
+            "law.judicial_ground"
+          ],
+          "attributes": {
+            "source_type": "law.disposition_item",
+            "target_type": "law.judicial_ground",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect",
+          "kind": "object_type",
+          "display_name": "Effect expressly ordered in the dispositif",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "abstract": false
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect.kind",
+          "kind": "property",
+          "display_name": "Type of effect ordered",
+          "owner_id": "law.dispositive_effect",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "annulation",
+              "reformation",
+              "rejet",
+              "condamnation",
+              "injonction",
+              "astreinte",
+              "suspension",
+              "non_lieu",
+              "desistement",
+              "renvoi",
+              "expertise",
+              "sursis",
+              "frais",
+              "notification",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect.effective_on",
+          "kind": "property",
+          "display_name": "Express effective date",
+          "owner_id": "law.dispositive_effect",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect.extent",
+          "kind": "property",
+          "display_name": "Extent",
+          "owner_id": "law.dispositive_effect",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "totale",
+              "partielle",
+              "conditionnelle",
+              "indeterminee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect.decisions",
+          "kind": "link_type",
+          "display_name": "Decisions",
+          "references": [
+            "law.dispositive_effect",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.dispositive_effect",
+            "target_type": "law.judicial_decision",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.dispositive_effect.parties",
+          "kind": "link_type",
+          "display_name": "Parties",
+          "references": [
+            "law.dispositive_effect",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.dispositive_effect",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.decision_status_observation",
+          "kind": "event_type",
+          "display_name": "Observation of enforceability and remedies",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.decision_status_observation.enforceability",
+          "kind": "property",
+          "display_name": "Observed enforceability",
+          "owner_id": "law.decision_status_observation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "executoire",
+              "suspendue",
+              "non_executoire",
+              "incertain"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.decision_status_observation.review_status",
+          "kind": "property",
+          "display_name": "Review status",
+          "owner_id": "law.decision_status_observation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "ouverte",
+              "exercee",
+              "epuisee",
+              "aucune",
+              "incertain"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.decision_status_observation.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.decision_status_observation",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.decision_status_observation",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.decision_status_observation.legal_basis",
+          "kind": "link_type",
+          "display_name": "Legal basis",
+          "references": [
+            "law.decision_status_observation",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.decision_status_observation",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.review_challenge",
+          "kind": "object_type",
+          "display_name": "Remedy exercised against a decision",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.kind",
+          "kind": "property",
+          "display_name": "Type of remedy exercised",
+          "owner_id": "law.review_challenge",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "appel",
+              "cassation",
+              "opposition",
+              "tierce_opposition",
+              "revision",
+              "rectification",
+              "recours_interpretation",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.challenged_decision",
+          "kind": "link_type",
+          "display_name": "Decision challenged",
+          "references": [
+            "law.review_challenge",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.review_challenge",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.petition",
+          "kind": "link_type",
+          "display_name": "Requête exercising this remedy",
+          "references": [
+            "law.review_challenge",
+            "law.petition"
+          ],
+          "attributes": {
+            "source_type": "law.review_challenge",
+            "target_type": "law.petition",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.review_challenge",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.review_challenge",
+            "target_type": "law.proceeding",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.legal_basis",
+          "kind": "link_type",
+          "display_name": "Legal basis",
+          "references": [
+            "law.review_challenge",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.review_challenge",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding_closure",
+          "kind": "event_type",
+          "display_name": "Sourced record of the end of a proceeding",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding_closure.kind",
+          "kind": "property",
+          "display_name": "Recorded manner of closure",
+          "owner_id": "law.proceeding_closure",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "jugement_au_fond",
+              "rejet_procedural",
+              "non_lieu",
+              "desistement",
+              "renvoi",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.proceeding_closure.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.proceeding_closure",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding_closure",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding_closure.disposition",
+          "kind": "link_type",
+          "display_name": "Dispositif",
+          "references": [
+            "law.proceeding_closure",
+            "law.disposition"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding_closure",
+            "target_type": "law.disposition",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding_closure.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.proceeding_closure"
+          ],
+          "attributes": {
+            "source_type": "law.proceeding_closure",
+            "target_type": "law.proceeding_closure",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.case_closure",
+          "kind": "event_type",
+          "display_name": "Sourced record of case closure",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.case_closure.case",
+          "kind": "link_type",
+          "display_name": "Case",
+          "references": [
+            "law.case_closure",
+            "law.case"
+          ],
+          "attributes": {
+            "source_type": "law.case_closure",
+            "target_type": "law.case",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.case_closure.proceeding_closures",
+          "kind": "link_type",
+          "display_name": "Closures of the relevant proceedings",
+          "references": [
+            "law.case_closure",
+            "law.proceeding_closure"
+          ],
+          "attributes": {
+            "source_type": "law.case_closure",
+            "target_type": "law.proceeding_closure",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.case_closure.basis",
+          "kind": "link_type",
+          "display_name": "Passages documenting case closure",
+          "references": [
+            "law.case_closure",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.case_closure",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.case_closure.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.case_closure"
+          ],
+          "attributes": {
+            "source_type": "law.case_closure",
+            "target_type": "law.case_closure",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_route",
+          "kind": "object_type",
+          "display_name": "Remedy mentioned or considered",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.review_route.kind",
+          "kind": "property",
+          "display_name": "Type of remedy considered",
+          "owner_id": "law.review_route",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "appel",
+              "cassation",
+              "opposition",
+              "tierce_opposition",
+              "revision",
+              "rectification",
+              "recours_interpretation",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.review_route.status",
+          "kind": "property",
+          "display_name": "Status",
+          "owner_id": "law.review_route",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "mentionnee",
+              "proposee",
+              "verifiee",
+              "ecartee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.review_route.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.review_route",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.review_route",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_route.court",
+          "kind": "link_type",
+          "display_name": "Destination court, if identified",
+          "references": [
+            "law.review_route",
+            "law.court"
+          ],
+          "attributes": {
+            "source_type": "law.review_route",
+            "target_type": "law.court",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_route.deadline",
+          "kind": "link_type",
+          "display_name": "Deadline",
+          "references": [
+            "law.review_route",
+            "law.deadline"
+          ],
+          "attributes": {
+            "source_type": "law.review_route",
+            "target_type": "law.deadline",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_route.basis",
+          "kind": "link_type",
+          "display_name": "Passages mentioning or supporting this remedy",
+          "references": [
+            "law.review_route",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.review_route",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.review_challenge.route",
+          "kind": "link_type",
+          "display_name": "Route",
+          "references": [
+            "law.review_challenge",
+            "law.review_route"
+          ],
+          "attributes": {
+            "source_type": "law.review_challenge",
+            "target_type": "law.review_route",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.decision_scope",
+          "kind": "object_type",
+          "display_name": "Attributed legal scope of a decision",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.kind",
+          "kind": "property",
+          "display_name": "Dimension of legal scope examined",
+          "owner_id": "law.decision_scope",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "parties",
+              "tiers",
+              "temporelle",
+              "autorite_chose_jugee",
+              "interpretation",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.status",
+          "kind": "property",
+          "display_name": "Status",
+          "owner_id": "law.decision_scope",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "prononcee",
+              "proposee",
+              "verifiee",
+              "contestee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.valid_from",
+          "kind": "property",
+          "display_name": "Observed start of temporal scope",
+          "owner_id": "law.decision_scope",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.valid_until",
+          "kind": "property",
+          "display_name": "Observed exclusive end of temporal scope",
+          "owner_id": "law.decision_scope",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.decision_scope",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.decision_scope",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.effects",
+          "kind": "link_type",
+          "display_name": "Effects",
+          "references": [
+            "law.decision_scope",
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "source_type": "law.decision_scope",
+            "target_type": "law.dispositive_effect",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.parties",
+          "kind": "link_type",
+          "display_name": "Parties",
+          "references": [
+            "law.decision_scope",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.decision_scope",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.legal_basis",
+          "kind": "link_type",
+          "display_name": "Legal basis",
+          "references": [
+            "law.decision_scope",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.decision_scope",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.decision_scope.basis",
+          "kind": "link_type",
+          "display_name": "Passages documenting the scope",
+          "references": [
+            "law.decision_scope",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.decision_scope",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision_event",
+          "kind": "event_type",
+          "display_name": "Event concerning a judicial decision",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision_event.kind",
+          "kind": "property",
+          "display_name": "Type of event concerning the decision",
+          "owner_id": "law.judicial_decision_event",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "prononce",
+              "mise_a_disposition",
+              "notification",
+              "signification",
+              "rectification"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision_event.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.judicial_decision_event",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision_event",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision_event.recipients",
+          "kind": "link_type",
+          "display_name": "Recipients",
+          "references": [
+            "law.judicial_decision_event",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.judicial_decision_event",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.delais",
+      "resources": [
+        {
+          "resource_id": "law.deadline",
+          "kind": "object_type",
+          "display_name": "Case-specific time limit",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.deadline.kind",
+          "kind": "property",
+          "display_name": "Purpose of the time limit",
+          "owner_id": "law.deadline",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "recours_contentieux",
+              "appel",
+              "cassation",
+              "production",
+              "instruction",
+              "execution",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.deadline.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding",
+          "references": [
+            "law.deadline",
+            "law.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.deadline",
+            "target_type": "law.proceeding",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline.subject",
+          "kind": "link_type",
+          "display_name": "Subject",
+          "references": [
+            "law.deadline",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.deadline",
+            "target_type": "law.party",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline.trigger_events",
+          "kind": "link_type",
+          "display_name": "Potential triggering events",
+          "references": [
+            "law.deadline",
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "source_type": "law.deadline",
+            "target_type": "law.temporal_event",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.deadline.legal_basis",
+          "kind": "link_type",
+          "display_name": "Legal basis",
+          "references": [
+            "law.deadline",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.deadline",
+            "target_type": "law.legal_rule",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment",
+          "kind": "object_type",
+          "display_name": "Event and claimed effect on a time limit",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.kind",
+          "kind": "property",
+          "display_name": "Effect claimed on the time limit",
+          "owner_id": "law.deadline_adjustment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "interruption",
+              "suspension",
+              "reprise",
+              "prorogation",
+              "report",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.valid_from",
+          "kind": "property",
+          "display_name": "Valid from, inclusive",
+          "owner_id": "law.deadline_adjustment",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.valid_until",
+          "kind": "property",
+          "display_name": "Valid until, exclusive",
+          "owner_id": "law.deadline_adjustment",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.deadline",
+          "kind": "link_type",
+          "display_name": "Deadline",
+          "references": [
+            "law.deadline_adjustment",
+            "law.deadline"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_adjustment",
+            "target_type": "law.deadline",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.event",
+          "kind": "link_type",
+          "display_name": "Event",
+          "references": [
+            "law.deadline_adjustment",
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_adjustment",
+            "target_type": "law.temporal_event",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline_adjustment.legal_basis",
+          "kind": "link_type",
+          "display_name": "Legal basis",
+          "references": [
+            "law.deadline_adjustment",
+            "law.legal_rule"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_adjustment",
+            "target_type": "law.legal_rule",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment",
+          "kind": "object_type",
+          "display_name": "Dated assessment of a deadline",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "immutable_observation": true
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.due_on",
+          "kind": "property",
+          "display_name": "Proposed or assessed due date",
+          "owner_id": "law.deadline_assessment",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.review_status",
+          "kind": "property",
+          "display_name": "Review status",
+          "owner_id": "law.deadline_assessment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "hypothese",
+              "documentee",
+              "verifiee",
+              "contredite",
+              "indeterminee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.opposability",
+          "kind": "property",
+          "display_name": "Assessed opposabilité",
+          "owner_id": "law.deadline_assessment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "opposable",
+              "inopposable",
+              "indeterminee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.recorded_at",
+          "kind": "property",
+          "display_name": "Record timestamp",
+          "owner_id": "law.deadline_assessment",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.deadline",
+          "kind": "link_type",
+          "display_name": "Deadline",
+          "references": [
+            "law.deadline_assessment",
+            "law.deadline"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_assessment",
+            "target_type": "law.deadline",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.triggers",
+          "kind": "link_type",
+          "display_name": "Triggering events relied on",
+          "references": [
+            "law.deadline_assessment",
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_assessment",
+            "target_type": "law.temporal_event",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.adjustments",
+          "kind": "link_type",
+          "display_name": "Adjustments",
+          "references": [
+            "law.deadline_assessment",
+            "law.deadline_adjustment"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_assessment",
+            "target_type": "law.deadline_adjustment",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.basis",
+          "kind": "link_type",
+          "display_name": "Passages verifying the premises of the assessment",
+          "references": [
+            "law.deadline_assessment",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_assessment",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.deadline_assessment.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.deadline_assessment"
+          ],
+          "attributes": {
+            "source_type": "law.deadline_assessment",
+            "target_type": "law.deadline_assessment",
+            "min_count": 0,
+            "max_count": 1
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.execution",
+      "resources": [
+        {
+          "resource_id": "law.injunction",
+          "kind": "object_type",
+          "display_name": "Injonction ordered by the court",
+          "references": [
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.dispositive_effect"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.penalty_payment",
+          "kind": "object_type",
+          "display_name": "Astreinte ordered by the court",
+          "references": [
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.dispositive_effect"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.penalty_payment.rate",
+          "kind": "property",
+          "display_name": "Rate or amount of the astreinte",
+          "owner_id": "law.penalty_payment",
+          "value_type": "decimal",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.penalty_payment.currency",
+          "kind": "property",
+          "display_name": "Currency of the astreinte",
+          "owner_id": "law.penalty_payment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.penalty_payment.unit",
+          "kind": "property",
+          "display_name": "Unit for liquidation of the astreinte",
+          "owner_id": "law.penalty_payment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "jour",
+              "semaine",
+              "mois",
+              "constat",
+              "forfait",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.obligation",
+          "kind": "object_type",
+          "display_name": "Obligation arising from the dispositif",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.obligation.kind",
+          "kind": "property",
+          "display_name": "Conduct required",
+          "owner_id": "law.obligation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "faire",
+              "ne_pas_faire",
+              "payer",
+              "reexaminer",
+              "edicter",
+              "abroger",
+              "communiquer",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.obligation.description",
+          "kind": "property",
+          "display_name": "Description",
+          "owner_id": "law.obligation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.obligation.effect",
+          "kind": "link_type",
+          "display_name": "Effect",
+          "references": [
+            "law.obligation",
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "source_type": "law.obligation",
+            "target_type": "law.dispositive_effect",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.obligation.debtors",
+          "kind": "link_type",
+          "display_name": "Debtors",
+          "references": [
+            "law.obligation",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.obligation",
+            "target_type": "law.party",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.obligation.beneficiaries",
+          "kind": "link_type",
+          "display_name": "Identified beneficiaries",
+          "references": [
+            "law.obligation",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.obligation",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.obligation.deadline",
+          "kind": "link_type",
+          "display_name": "Deadline",
+          "references": [
+            "law.obligation",
+            "law.deadline"
+          ],
+          "attributes": {
+            "source_type": "law.obligation",
+            "target_type": "law.deadline",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.penalty_payment.obligations",
+          "kind": "link_type",
+          "display_name": "Obligations secured by the astreinte",
+          "references": [
+            "law.penalty_payment",
+            "law.obligation"
+          ],
+          "attributes": {
+            "source_type": "law.penalty_payment",
+            "target_type": "law.obligation",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.execution_observation",
+          "kind": "event_type",
+          "display_name": "Sourced observation of compliance",
+          "references": [
+            "law.temporal_event"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.temporal_event"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.execution_observation.status",
+          "kind": "property",
+          "display_name": "Status",
+          "owner_id": "law.execution_observation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "en_attente",
+              "partielle",
+              "complete",
+              "inexecution",
+              "contestee",
+              "indeterminee"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.execution_observation.obligation",
+          "kind": "link_type",
+          "display_name": "Obligation",
+          "references": [
+            "law.execution_observation",
+            "law.obligation"
+          ],
+          "attributes": {
+            "source_type": "law.execution_observation",
+            "target_type": "law.obligation",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.execution_observation.evidence",
+          "kind": "link_type",
+          "display_name": "Passages documenting compliance",
+          "references": [
+            "law.execution_observation",
+            "law.passage"
+          ],
+          "attributes": {
+            "source_type": "law.execution_observation",
+            "target_type": "law.passage",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.execution_observation.supersedes",
+          "kind": "link_type",
+          "display_name": "Earlier observation revised",
+          "references": [
+            "law.execution_observation"
+          ],
+          "attributes": {
+            "source_type": "law.execution_observation",
+            "target_type": "law.execution_observation",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.execution_proceeding",
+          "kind": "object_type",
+          "display_name": "Enforcement proceeding",
+          "references": [
+            "law.proceeding"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.proceeding"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.execution_proceeding.decision",
+          "kind": "link_type",
+          "display_name": "Decision",
+          "references": [
+            "law.execution_proceeding",
+            "law.judicial_decision"
+          ],
+          "attributes": {
+            "source_type": "law.execution_proceeding",
+            "target_type": "law.judicial_decision",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.execution_proceeding.obligations",
+          "kind": "link_type",
+          "display_name": "Obligations",
+          "references": [
+            "law.execution_proceeding",
+            "law.obligation"
+          ],
+          "attributes": {
+            "source_type": "law.execution_proceeding",
+            "target_type": "law.obligation",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation",
+          "kind": "object_type",
+          "display_name": "Liquidation d’astreinte",
+          "references": [
+            "law.dispositive_effect"
+          ],
+          "attributes": {
+            "access_scope": "case_restricted",
+            "extends": [
+              "law.dispositive_effect"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation.amount",
+          "kind": "property",
+          "display_name": "Amount determined on liquidation",
+          "owner_id": "law.penalty_liquidation",
+          "value_type": "decimal",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation.currency",
+          "kind": "property",
+          "display_name": "Currency of the amount determined",
+          "owner_id": "law.penalty_liquidation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation.period_start",
+          "kind": "property",
+          "display_name": "Start of the liquidation period",
+          "owner_id": "law.penalty_liquidation",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation.period_end",
+          "kind": "property",
+          "display_name": "End of the liquidation period",
+          "owner_id": "law.penalty_liquidation",
+          "value_type": "date",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.penalty_liquidation.penalty",
+          "kind": "link_type",
+          "display_name": "Astreinte liquidated",
+          "references": [
+            "law.penalty_liquidation",
+            "law.penalty_payment"
+          ],
+          "attributes": {
+            "source_type": "law.penalty_liquidation",
+            "target_type": "law.penalty_payment",
+            "min_count": 1,
+            "max_count": 1
+          }
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "id": "law.penal",
+      "version": "0.3.0",
+      "resources": [
+        {
+          "resource_id": "law.penal.proceeding",
+          "kind": "object_type",
+          "display_name": "Criminal proceeding",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.proceeding"
+            ],
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.penal.proceeding.court",
+          "kind": "link_type",
+          "display_name": "Court hearing the criminal case",
+          "references": [
+            "law.penal.proceeding",
+            "law.court.judicial"
+          ],
+          "attributes": {
+            "source_type": "law.penal.proceeding",
+            "target_type": "law.court.judicial",
+            "min_count": 1,
+            "max_count": 1,
+            "projection_of": "law.proceeding.court"
+          }
+        },
+        {
+          "resource_id": "law.penal.proceeding.formation",
+          "kind": "property",
+          "display_name": "Criminal formation hearing the case",
+          "owner_id": "law.penal.proceeding",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": [
+              "tribunal_police",
+              "tribunal_correctionnel",
+              "tribunal_pour_enfants",
+              "cour_criminelle_departementale",
+              "cour_assises",
+              "chambre_instruction",
+              "chambre_appels_correctionnels",
+              "chambre_criminelle",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.penal.citation",
+          "kind": "object_type",
+          "display_name": "Citation pénale",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.filing"
+            ],
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.penal.requisitions",
+          "kind": "object_type",
+          "display_name": "Written réquisitions of the ministère public",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.filing"
+            ],
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.penal.proceeding.prosecutors",
+          "kind": "link_type",
+          "display_name": "Ministère public",
+          "references": [
+            "law.penal.proceeding",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.penal.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.penal.proceeding.prosecuted_parties",
+          "kind": "link_type",
+          "display_name": "Persons prosecuted",
+          "references": [
+            "law.penal.proceeding",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.penal.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.penal.proceeding.civil_parties",
+          "kind": "link_type",
+          "display_name": "Constituted parties civiles",
+          "references": [
+            "law.penal.proceeding",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.penal.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.penal.charge",
+          "kind": "object_type",
+          "display_name": "Chef de poursuite",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.submission_point"
+            ],
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.penal.charge.proceeding",
+          "kind": "link_type",
+          "display_name": "Proceeding in which the chef de poursuite is brought",
+          "references": [
+            "law.penal.charge",
+            "law.penal.proceeding"
+          ],
+          "attributes": {
+            "source_type": "law.penal.charge",
+            "target_type": "law.penal.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.penal.charge.prosecuted_party",
+          "kind": "link_type",
+          "display_name": "Person prosecuted on this count",
+          "references": [
+            "law.penal.charge",
+            "law.party"
+          ],
+          "attributes": {
+            "source_type": "law.penal.charge",
+            "target_type": "law.party",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.penal.charge.qualifications",
+          "kind": "link_type",
+          "display_name": "Legal qualifications",
+          "references": [
+            "law.penal.charge",
+            "law.qualification"
+          ],
+          "attributes": {
+            "source_type": "law.penal.charge",
+            "target_type": "law.qualification",
+            "min_count": 1
+          }
+        },
+        {
+          "resource_id": "law.penal.sentence",
+          "kind": "object_type",
+          "display_name": "Peine imposed by the court",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.dispositive_effect"
+            ],
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.penal.civil_claim",
+          "kind": "object_type",
+          "display_name": "Civil prétention before the criminal court",
+          "references": [],
+          "attributes": {
+            "extends": [
+              "law.claim"
+            ],
+            "access_scope": "case_restricted"
+          }
+        }
+      ]
+    }
+  ],
+  "contracts": {}
+}

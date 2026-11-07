@@ -5,19 +5,22 @@ import { usePengoloAgents, type Specialist } from "~/stores/usePengoloAgents";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { ScaleIcon, UserGroupIcon, CheckIcon } from "@heroicons/vue/24/outline";
+import { usePengoloProjects } from "~/stores/usePengoloProjects";
+import { compatibleAgent, executionCapabilityAllowed, sealedSkill } from "~/utils/pengolo";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const agents = usePengoloAgents();
 const models = usePengoloModels();
 const ui = usePengoloUi();
+const projects = usePengoloProjects();
 const name = ref("");
 const mission = ref("");
 const skillIds = ref<string[]>([]);
 const projectOnly = ref(false);
 const editing = ref<Specialist | null>(null);
 const mode = ref<"select" | "manage" | "edit">("select");
-const teams = useSpecialistTeams();
+const teams = useSpecialistTeams(compatible);
 const skillOptions = computed(() =>
   skills.value.map((skill) => ({
     value: skill.id,
@@ -32,9 +35,22 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const skills = computed(() =>
-  agents.catalog.filter((item) => item.kind === "SKILL"),
+  agents.catalog.filter(
+    (item) =>
+      item.kind === "SKILL" &&
+      !sealedSkill(item.id, agents.catalog) &&
+      skillMatchesBranch(item.id),
+  ),
 );
 const scope = computed(() => (ui.temporary ? null : ui.projectId));
+const branch = computed(
+  () =>
+    projects.items.find((project) => project.id === scope.value)?.data
+      .executionContext,
+);
+function skillMatchesBranch(id: string) {
+  return executionCapabilityAllowed(id, branch.value, agents.catalog);
+}
 watch(
   () => props.open,
   async (open) => {
@@ -51,13 +67,20 @@ watch(
     }
   },
 );
+function compatible(agent: Specialist) {
+  return (
+    (!branch.value || agent.data.readOnly || agent.projectId === scope.value) &&
+    agent.data.skillIds.every(skillMatchesBranch) &&
+    compatibleAgent(agent, scope.value, models.selected, agents.catalog)
+  );
+}
 function edit(agent: Specialist | null) {
   mode.value = "edit";
   editing.value = agent;
   name.value = agent?.data.name ?? "";
   mission.value = agent?.data.mission ?? "";
   skillIds.value = [...(agent?.data.skillIds ?? [])];
-  projectOnly.value = !!agent?.projectId;
+  projectOnly.value = !!branch.value || !!agent?.projectId;
 }
 async function save() {
   if (saving.value) return;
@@ -162,6 +185,7 @@ async function remove(agent: Specialist) {
             />
           </span>
         </UiButton>
+        <p v-if="teams.usesPrivateProcessing(team)" class="text-sm text-muted">{{ $t("pengolo.execution.privateProcessing") }}</p>
         <details class="p-team-members">
           <summary>
             {{

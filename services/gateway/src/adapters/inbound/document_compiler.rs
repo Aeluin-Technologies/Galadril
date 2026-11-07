@@ -4,10 +4,14 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode};
-use galadril_document_compiler::delegation::{AuthorizationRequest, Grant};
+use galadril_document_compiler::delegation::{
+    Action, AuthorizationRequest, Grant,
+};
 
 use crate::application::usecases::chat_tools::ChatTools;
-use crate::application::usecases::pengolo::PengoloService;
+use crate::application::usecases::pengolo::{
+    PengoloService, compiler_binding_key_matches,
+};
 
 pub async fn authorize(
     Extension(service): Extension<Arc<PengoloService>>,
@@ -15,6 +19,14 @@ pub async fn authorize(
     headers: HeaderMap,
     Json(request): Json<AuthorizationRequest>,
 ) -> Result<Json<Grant>, (StatusCode, &'static str)> {
+    if request.action == Action::Bind &&
+        !headers
+            .get("x-galadril-compiler-binding")
+            .and_then(|header| header.to_str().ok())
+            .is_some_and(compiler_binding_key_matches)
+    {
+        return Err((StatusCode::FORBIDDEN, "Binding authorization denied"));
+    }
     let mut headers = headers.get_all("authorization").iter();
     let token = headers
         .next()

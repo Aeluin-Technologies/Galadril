@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use galadril_document_compiler::delegation::{AuthorizationRequest, Grant};
+use galadril_document_compiler::delegation::{
+    Action, AuthorizationRequest, Grant,
+};
 
 use crate::ports::Authorizer;
 
@@ -48,18 +50,23 @@ impl Authorizer for Gateway {
         capability: &str,
         request: AuthorizationRequest,
     ) -> Result<Grant> {
-        let mut response = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(capability)
-            .json(&request)
-            .send()
-            .await?;
+        let binding = request.action == Action::Bind;
+        let mut outbound =
+            self.client.post(&self.endpoint).bearer_auth(capability);
+        if binding {
+            let key = std::env::var("DOCUMENT_COMPILER_BINDING_KEY")?;
+            ensure!(key.len() == 64, "Invalid compiler binding key");
+            let mut header = reqwest::header::HeaderValue::from_str(&key)?;
+            header.set_sensitive(true);
+            outbound = outbound.header("x-galadril-compiler-binding", header);
+        }
+        let mut response = outbound.json(&request).send().await?;
         ensure!(response.status().is_success(), "Delegation denied");
         let mut bytes = Vec::with_capacity(1024);
         while let Some(chunk) = response.chunk().await? {
             ensure!(
-                bytes.len() + chunk.len() <= 4096,
+                bytes.len() + chunk.len() <=
+                    if binding { 16384 } else { 4096 },
                 "Delegation response exceeds limit"
             );
             bytes.extend_from_slice(&chunk);

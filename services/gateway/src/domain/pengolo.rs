@@ -8,7 +8,6 @@ pub const MAX_FILE_BYTES: i64 = 25 * 1024 * 1024;
 pub const STAGING_TTL_MS: i64 = 60 * 60 * 1000;
 pub const NORMAL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 pub const TEMPORARY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
-
 /// Bounds preferences before they enter provider context or durable storage.
 pub fn validate_instructions(value: &str) -> Result<()> {
     ensure!(
@@ -78,6 +77,9 @@ pub struct SendInput {
     pub temporary: bool,
     #[serde(default)]
     pub with_library: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(alias = "shareWithDefense")]
+    pub share_with_isolated_reviewers: bool,
 }
 
 impl SendInput {
@@ -220,6 +222,8 @@ pub struct ProjectInput {
     pub context_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<String>,
 }
 
 fn project_context() -> String {
@@ -251,6 +255,11 @@ impl ProjectInput {
         ensure!(
             matches!(input.context_mode.as_str(), "personal" | "project"),
             "Invalid document context"
+        );
+        ensure!(
+            input.execution_context.is_none() ||
+                input.context_mode == "project",
+            "Project execution contexts require their own library"
         );
         ensure!(
             !input.shared ||
@@ -317,6 +326,7 @@ impl OutputEvent {
                         "document_search" |
                         "evidence" |
                         "date_interval" |
+                        "consult_specialist" |
                         "run_python" |
                         "mcp"
                 ),
@@ -661,4 +671,29 @@ mod tests {
         assert!(!file_available("uploading", 101, 100));
         assert!(file_available("ready", 101, 100));
     }
+
+    #[test]
+    fn compilation_archives_are_downloadable_without_accepting_other_formats()
+    {
+        assert!(
+            validate_upload("memoire.zip", "application/zip", 1024).is_ok()
+        );
+        assert!(
+            super::validate_file_prefix("application/zip", b"PK\x03\x04data")
+                .is_ok()
+        );
+        assert!(
+            super::validate_file_prefix("application/zip", b"<html>").is_err()
+        );
+        assert!(validate_upload("payload.html", "text/html", 1024).is_err());
+    }
+}
+#[test]
+fn registered_project_contexts_require_a_project_library() -> Result<()> {
+    let project = serde_json::json!({"name":"Case","icon":"folder","color":"#d97706","executionContext":"fixture.review"});
+    assert!(ProjectInput::parse(project.clone()).is_ok());
+    let mut personal = project;
+    personal["contextMode"] = serde_json::json!("personal");
+    assert!(ProjectInput::parse(personal).is_err());
+    Ok(())
 }

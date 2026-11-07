@@ -1,5 +1,9 @@
 import { ontologyGraph } from "~/utils/ontology-graph";
-import type { OntologyWorkspace, OntologyCommand } from "~/types/ontology";
+import type {
+  OntologyWorkspace,
+  OntologyCommand,
+  OntologyResource,
+} from "~/types/ontology";
 import type {
   SemanticDocument,
   SemanticPackage,
@@ -14,6 +18,7 @@ import type { OntologyTypeDraft } from "~/utils/ontology-edit";
 
 export function useOntologyWorkspace(ontologyId?: string) {
   const { t } = useI18n();
+  const officialLabels = useOfficialOntologyLabels();
   const route = useRoute();
   const api = useOntologyCatalog();
   const packages = ref<SemanticPackage[]>([]),
@@ -193,7 +198,22 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const targetTypes = computed(
     () => target.value?.resources.filter((r) => r.kind === "object_type") ?? [],
   );
-  const graph = computed(() => ontologyGraph(document.value, selected.value));
+  function resourceLabel(resource: OntologyResource) {
+    return officialLabels.resourceLabel(
+      resource,
+      document.value?.plugin_origin?.package_id ?? selectedPackage.value?.id,
+      !artifact.value && !!selectedPackage.value,
+    );
+  }
+  const displayTitle = computed(() => {
+    const source = selectedPackage.value;
+    return source && name.value === source.name
+      ? officialLabels.packageLabel(source.id, name.value)
+      : name.value;
+  });
+  const graph = computed(() =>
+    ontologyGraph(document.value, selected.value, resourceLabel),
+  );
   const graphNodes = computed(() => graph.value.nodes);
   const graphEdges = computed(() => graph.value.edges);
   function checkpoint() {
@@ -540,6 +560,8 @@ export function useOntologyWorkspace(ontologyId?: string) {
     document,
     id,
     name,
+    displayTitle,
+    resourceLabel,
     revision,
     targetId,
     targetRevision,

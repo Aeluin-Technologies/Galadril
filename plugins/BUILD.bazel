@@ -8,7 +8,7 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 py_library(
     name = "galadril_plugins",
     srcs = glob(["src/**/*.py"]),
-    data = glob(["src/**/*.json", "src/**/*.md"], allow_empty = True),
+    data = glob(["src/**/*.json", "src/**/*.md", "src/**/*.tex", "src/**/*.cls"], allow_empty = True),
     imports = ["src"],
     visibility = ["//visibility:public"],
     deps = [
@@ -66,4 +66,20 @@ platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"],
 oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
 oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-plugins", visibility = ["//visibility:public"])
 
-filegroup(name="ontology_packages", srcs=["src/galadril_plugins/utils/mail-ontology.json"], visibility=["//visibility:public"])
+filegroup(
+    name = "ontology_packages",
+    srcs = [
+        "src/galadril_plugins/law/contentieux-ontology.json",
+        "src/galadril_plugins/utils/mail-ontology.json",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "law_latex_sources",
+    srcs = glob([
+        "src/galadril_plugins/law/latex/*.cls",
+        "src/galadril_plugins/law/latex/*.tex",
+    ]),
+    visibility = ["//plugins/tests:__pkg__"],
+)

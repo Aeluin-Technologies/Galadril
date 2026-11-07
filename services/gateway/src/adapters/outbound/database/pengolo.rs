@@ -175,7 +175,13 @@ impl PengoloStore for PgPengoloStore {
         )
         .await?;
         current.revision += 1;
-        if !temporary {
+        if !temporary &&
+            current
+                .data
+                .get("compilerConfidential")
+                .and_then(Value::as_bool) !=
+                Some(true)
+        {
             sqlx::query("INSERT INTO retrieval_jobs(tenant_id,source_id,source_checksum) VALUES($1,$2,$3) ON CONFLICT(tenant_id,source_id) DO UPDATE SET source_checksum=EXCLUDED.source_checksum,attempts=0,next_attempt=0,lease=NULL,lease_expires=0,work_revision=NULL,progress='{\"stage\":\"queued\",\"percent\":0}'::jsonb")
                 .bind(tenant).bind(&current.id).bind(current.data.get("checksum").and_then(Value::as_str).context("Missing file checksum")?).execute(&mut *tx).await?;
         }
@@ -2295,17 +2301,22 @@ mod tests {
                 .execute(&mut *tx).await?;
         }
         tx.commit().await?;
-        let store = PgPengoloStore::new(database);
+        let store = PgPengoloStore::new(database.clone());
         let objects = DelayedObjects::default();
-        for temporary in [false, true] {
+        for (temporary, private, confidential, id) in [
+            (false, false, false, "a"),
+            (true, false, false, "c"),
+            (false, true, false, "b"),
+            (false, false, true, "d"),
+        ] {
             let record = Record {
-                id: "a".repeat(32),
+                id: id.repeat(32),
                 owner_id: "actor".into(),
                 project_id: None,
                 expires_at: Some(now() + 60000),
                 revision: 1,
                 updated_at: 0,
-                data: json!({"name":"proof.txt","mime":"text/plain","size":5,"key":"tenant_a/actor/pengolo/proof","stagingKey":"tenant_a/actor/pengolo/staged","stagingExpiresAt":now()+60000,"checksum":"checksum","status":"uploading"}),
+                data: json!({"name":"proof.txt","mime":"text/plain","size":5,"key":"tenant_a/actor/pengolo/proof","stagingKey":"tenant_a/actor/pengolo/staged","stagingExpiresAt":now()+60000,"checksum":"checksum","status":"uploading","privateContext":private,"compilerConfidential":confidential}),
             };
             let record =
                 store.reserve_file("tenant_a", &record, temporary).await?;
@@ -2332,6 +2343,16 @@ mod tests {
             let promoted = store
                 .promote_file("tenant_a", &record, temporary, &file, &objects)
                 .await?;
+            let mut tx = database.tenant("tenant_a").await?;
+            let enqueued: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM retrieval_jobs WHERE tenant_id = $1 AND source_id = $2)",
+            )
+            .bind("tenant_a")
+            .bind(&record.id)
+            .fetch_one(&mut *tx)
+            .await?;
+            assert_eq!(enqueued, !temporary && !confidential);
+            tx.commit().await?;
             let persisted = store
                 .get("tenant_a", Collection::File, &record.id, temporary)
                 .await?

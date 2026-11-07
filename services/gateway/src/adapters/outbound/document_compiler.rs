@@ -90,6 +90,7 @@ impl DocumentCompiler for CompilerClient {
     ) -> Result<Value> {
         let mut client = self.client.clone();
         match operation {
+            TemplateOperation::DocumentCase { .. } |
             TemplateOperation::PluginCatalog |
             TemplateOperation::EnablePlugin { .. } |
             TemplateOperation::Export { .. } => {

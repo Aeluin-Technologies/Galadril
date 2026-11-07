@@ -142,6 +142,7 @@ export interface ChatData {
   };
 }
 export interface ProjectData {
+  executionContext?: string | null;
   instructions?: string;
   name: string;
   icon: string;
