@@ -1517,10 +1517,11 @@
     "copyMessage": "Copy your message",
     "actionCompleted": "Action completed",
     "execution": {
+      "advanced": "Advanced",
       "label": "Specialist context",
       "general": "General conversation",
       "shareAttachments": "Share these attachments with the independent reviewer",
-      "privateProcessing": "With this team active, Pengolo masks names and contact details in attachments locally. Some details may remain. Attach a PDF with readable text or a UTF-8 text file."
+      "privateProcessing": "Attached PDFs are pseudonymized to limit disclosure of personal data."
     },
     "redaction": {
       "title": "Redact a document",

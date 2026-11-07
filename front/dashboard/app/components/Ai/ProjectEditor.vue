@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { t } = useI18n();
 
+import { onClickOutside } from "@vueuse/core";
 import { ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { projectIcon, projectIcons } from "~/utils/project-icons";
@@ -21,6 +22,10 @@ const contextMode = ref<"project" | "personal">("project");
 const executionContext = ref<string>("");
 const instructions = ref("");
 const appearance = ref(false);
+const appearancePanel = ref<HTMLElement | null>(null);
+onClickOutside(appearancePanel, () => { appearance.value = false; }, {
+  ignore: ["[data-project-appearance-trigger]"],
+});
 const colors = [
   "#d97706",
   "#ef4444",
@@ -107,6 +112,7 @@ async function save() {
         <div class="p-name-field">
           <UiButton
             variant="ghost"
+            data-project-appearance-trigger
             type="button"
             :aria-label="$t('pengolo.copy.customize_project_appearance')"
             :aria-expanded="appearance"
@@ -125,7 +131,7 @@ async function save() {
             :placeholder="$t('pengolo.copy.project_name')"
           />
         </div>
-        <div v-if="appearance" class="p-appearance-picker">
+        <div v-if="appearance" ref="appearancePanel" class="p-appearance-picker" @keydown.esc.stop="appearance = false">
           <div class="p-color-grid">
             <UiButton
               variant="ghost"
@@ -188,7 +194,9 @@ async function save() {
           )
         }}</small></label
       >
-      <label>
+      <details class="text-sm">
+        <summary class="cursor-pointer text-muted">{{ $t("pengolo.execution.advanced") }}</summary>
+      <label class="mt-3">
         {{ $t("pengolo.execution.label") }}
         <UiSelect
           v-model="executionContext"
@@ -216,6 +224,7 @@ async function save() {
               : []),
           ]"
       /></label>
+      </details>
       <p v-if="!executionContext" class="p-muted">
         {{
           $t(
@@ -225,6 +234,7 @@ async function save() {
       </p>
       <p v-if="error" role="alert" class="p-error">{{ error }}</p>
       <UiTextarea
+        class="p-project-instructions"
         v-model="instructions"
         :label="$t('personalization.projectLabel')"
         :help="
@@ -235,7 +245,7 @@ async function save() {
           )
         "
         maxlength="2000"
-        rows="5"
+        rows="3"
       />
     </form>
     <template #footer

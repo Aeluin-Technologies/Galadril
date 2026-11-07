@@ -38,10 +38,11 @@
       }
     },
     "execution": {
+      "advanced": "Avancé",
       "label": "Contexte des spécialistes",
       "general": "Conversation générale",
       "shareAttachments": "Communiquer ces pièces jointes à l’agent indépendant",
-      "privateProcessing": "Avec cette équipe activée, Pengolo masque localement les noms et les coordonnées dans les pièces jointes. Certaines données peuvent rester visibles. Joignez un PDF avec du texte lisible ou un fichier texte UTF-8."
+      "privateProcessing": "Les PDF joints sont pseudonymisés pour limiter la divulgation de données personnelles."
     },
     "litigation": {
       "label": "Branche du contentieux",

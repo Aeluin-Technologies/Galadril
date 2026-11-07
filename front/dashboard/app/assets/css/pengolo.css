@@ -544,12 +544,16 @@
   overflow: auto;
 }
 .p-composer-prefix {
-  display: inline;
+  float: left;
+  height: 24px;
 }
 .p-composer-editor {
   overflow-wrap: anywhere;
 }
 .p-active-tool {
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
   vertical-align: middle;
   flex-shrink: 0;
 }
@@ -766,7 +770,11 @@
   width: 12px;
 }
 .p-appearance-picker {
-  position: relative;
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  max-width: 100%;
   background: var(--p-menu);
   border: 1px solid var(--p-line);
   border-radius: 16px;
@@ -1299,4 +1307,12 @@
   .p-copy-confirmed svg {
     animation: none;
   }
+}
+
+.p-project-instructions :is(label, p) {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.p-project-instructions textarea {
+  min-height: 80px;
 }
