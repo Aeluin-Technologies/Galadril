@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
       data-ui="dialog"
       :class="
         placement === 'right'
-          ? 'fixed inset-y-0 right-0 m-0 ml-auto h-dvh max-h-dvh w-full max-w-xl rounded-none'
+          ? 'fixed inset-y-0 right-0 z-[70] m-0 ml-auto h-dvh max-h-dvh w-full max-w-xl rounded-none'
           : [
               size === 'wide' ? 'max-w-6xl' : 'max-w-lg',
               'm-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] rounded-dialog',

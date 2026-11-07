@@ -2225,6 +2225,23 @@ test("specialist report citations open an authorized panel on the right", async 
   });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Rapport vérifiable.");
+  const heading = panel.getByRole("heading", {
+    name: "Specialist report",
+    exact: true,
+  });
+  await expect
+    .poll(() =>
+      heading.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      }),
+    )
+    .toBe(true);
   await expect(
     panel.locator("img,iframe,audio,video,object,embed"),
   ).toHaveCount(0);
@@ -2236,6 +2253,11 @@ test("specialist report citations open an authorized panel on the right", async 
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(citation).toBeFocused();
+  await citation.click();
+  await panel
+    .getByRole("button", { name: "Close report", exact: true })
+    .click();
+  await expect(panel).toBeHidden();
 });
 
 test("colored task cards keep model wording and animate their checked state", async ({
