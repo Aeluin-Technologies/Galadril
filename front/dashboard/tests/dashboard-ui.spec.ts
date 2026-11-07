@@ -571,7 +571,7 @@ test("workspace preserves search hierarchy, navigation alignment and composer la
     exact: true,
   });
   const composer = page.locator(".p-composer");
-  const promptBox = await prompt.boundingBox();
+  const promptBox = await page.locator(".p-composer-entry").boundingBox();
   const composerBox = await composer.boundingBox();
   expect(
     promptBox && composerBox && promptBox.width > composerBox.width * 0.5,
@@ -858,13 +858,13 @@ test("Pengolo keeps removable web search inside the prompt row", async ({
   await prompt.press("ArrowLeft");
   await prompt.press("Backspace");
   await expect(remove).toHaveCount(0);
-  await expect(prompt).toHaveValue("Compare public sources");
+  await expect(prompt).toHaveText("Compare public sources");
   await enable();
   await prompt.press("ControlOrMeta+A");
   await prompt.press("ArrowLeft");
   await prompt.press("Delete");
   await expect(remove).toHaveCount(0);
-  await expect(prompt).toHaveValue("Compare public sources");
+  await expect(prompt).toHaveText("Compare public sources");
   await enable();
   await page.mouse.move(0, 0);
   await page.locator(".p-composer").screenshot({
@@ -923,7 +923,14 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   await expect(model).toHaveCSS("font-size", "14px");
   const promptBox = await prompt.boundingBox();
   const modelBox = await model.boundingBox();
-  expect(Math.abs((promptBox?.y ?? 0) - (modelBox?.y ?? 100))).toBeLessThan(8);
+  expect(promptBox && modelBox).toBeTruthy();
+  expect(
+    Math.abs(
+      promptBox!.y +
+        promptBox!.height / 2 -
+        (modelBox!.y + modelBox!.height / 2),
+    ),
+  ).toBeLessThan(3);
   await expect(
     page.locator(".p-composer").getByText("Medium", { exact: true }),
   ).toHaveCount(0);
@@ -957,20 +964,38 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
     .width;
   expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth - 8);
-  await expect
-    .poll(() =>
-      prompt.evaluate((el) => parseFloat(getComputedStyle(el).textIndent)),
-    )
-    .toBeGreaterThan(80);
+  const lines = await prompt.evaluate((element) =>
+    Array.from(element.getClientRects(), (rect) => ({
+      x: rect.x,
+      width: rect.width,
+    })),
+  );
+  const toolLine = await page.locator(".p-tool-label").evaluate((element) => {
+    const text = Array.from(element.childNodes).find(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+    );
+    if (!text) throw new Error("Missing tool label");
+    const range = document.createRange();
+    range.selectNode(text);
+    return range.getBoundingClientRect().y;
+  });
+  const promptLine = await prompt.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return range.getClientRects()[0]?.y;
+  });
+  expect(promptLine).toBeDefined();
+  expect(Math.abs(toolLine - promptLine!)).toBeLessThan(2);
+  expect(lines.length).toBeGreaterThan(1);
+  expect(lines[1]!.x).toBeLessThan(lines[0]!.x - 80);
   await expect
     .poll(async () => (await prompt.boundingBox())?.height ?? 0)
     .toBeGreaterThan(100);
   expect((await model.boundingBox())?.y ?? 0).toBeGreaterThan(
     (await prompt.boundingBox())?.y ?? Infinity,
   );
-  await prompt.evaluate((el) => {
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event("scroll"));
+  await page.locator(".p-composer-entry").evaluate((element) => {
+    element.scrollTop = 0;
   });
   await page.locator(".p-composer").screenshot({
     path: info.outputPath("expanded-composer-desktop.png"),
@@ -2031,4 +2056,92 @@ test("Pengolo redacts local documents without storing originals in the chat or l
     .getByRole("link", { name: "Download redacted copy", exact: true })
     .click();
   expect((await download).suggestedFilename()).toBe("redacted-document.pdf");
+});
+
+test("active chats have one uniform fill", async ({ page }) => {
+  const record = chatFixture("fixture");
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const row = page.locator(".p-chat-row.active");
+  const selected = row.locator("button[aria-current=page]");
+  await expect(row).toHaveCSS(
+    "background-color",
+    await selected.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    ),
+  );
+  await selected.hover();
+  await expect(row).toHaveCSS(
+    "background-color",
+    await selected.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    ),
+  );
+});
+
+test("prompt tools follow a single editable scroll surface", async ({
+  page,
+}) => {
+  await mockDashboard(page);
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Web search", exact: true }).click();
+  await prompt.fill("A prompt that wraps with its tool. ".repeat(200));
+  await prompt.press("ControlOrMeta+End");
+  await expect
+    .poll(() =>
+      page
+        .locator(".p-composer-entry")
+        .evaluate((element) => element.scrollTop),
+    )
+    .toBeGreaterThan(0);
+});
+
+test("prompt pastes plain text, keeps newlines and copies without tool labels", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockDashboard(page);
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Web search", exact: true }).click();
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  await prompt.fill("First line");
+  await prompt.press("End");
+  await prompt.press("Shift+Enter");
+  await prompt.pressSequentially("Second line");
+  await expect(prompt).toContainText("Second line");
+  await prompt.press("ControlOrMeta+A");
+  await prompt.press("ControlOrMeta+C");
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("First line\nSecond line");
+  expect(copied).not.toContain("Web search");
+  await prompt.evaluate((element) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", "<b>literal</b>");
+    clipboard.setData(
+      "text/html",
+      '<img src=x onerror="window.unexpectedPaste=true">',
+    );
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: clipboard,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(prompt.locator("img,b")).toHaveCount(0);
 });

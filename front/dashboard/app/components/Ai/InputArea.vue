@@ -60,13 +60,6 @@ function chooseModel(id: string) {
 const library = usePengoloLibrary();
 const uploads = usePengoloFileUpload();
 const menu = ref(false);
-const webToolElement = ref<HTMLElement | null>(null);
-const { width: webToolWidth } = useElementSize(webToolElement);
-const promptScrollTop = ref(0);
-function syncPromptScroll(event: Event) {
-  if (event.target instanceof HTMLTextAreaElement)
-    promptScrollTop.value = event.target.scrollTop;
-}
 const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
@@ -142,37 +135,15 @@ async function upload(event: Event) {
   await uploads.attach(files);
 }
 
-function keydown(event: KeyboardEvent) {
-  const input = event.target;
-  if (
-    !props.busy &&
-    !event.isComposing &&
-    ui.webEnabled &&
-    (event.key === "Backspace" || event.key === "Delete") &&
-    input instanceof HTMLTextAreaElement &&
-    input.selectionStart === 0 &&
-    input.selectionEnd === 0
-  ) {
-    event.preventDefault();
-    ui.webEnabled = false;
-    return;
-  }
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-    event.preventDefault();
-    if (
-      !props.busy &&
-      ui.prompt.trim() &&
-      models.selected &&
-      !library.uploading
-    )
-      submit();
-  }
+function submitPrompt() {
+  if (!props.busy && ui.prompt.trim() && models.selected && !library.uploading)
+    submit();
 }
 </script>
 
 <template>
   <AiRedaction v-model:open="redaction" />
-  <form :class="['p-composer', { expanded }]" @submit.prevent="submit">
+  <form :class="['p-composer', { expanded }]" @submit.prevent="submitPrompt">
     <UiCheckbox
       v-if="canShareWithIsolatedReviewers"
       v-model="shareWithIsolatedReviewers"
@@ -303,13 +274,16 @@ function keydown(event: KeyboardEvent) {
           </div></Transition
         >
       </div>
-      <div class="p-composer-entry">
-        <span
-          v-if="ui.webEnabled"
-          ref="webToolElement"
-          class="p-composer-prefix"
-          :style="{ transform: `translateY(-${promptScrollTop}px)` }"
-        >
+      <AiPromptEditor
+        v-model="ui.prompt"
+        :label="$t('pengolo.copy.message_pengolo')"
+        :placeholder="$t('pengolo.copy.ask_pengolo')"
+        :disabled="busy"
+        :has-prefix="ui.webEnabled"
+        @remove-prefix="ui.webEnabled = false"
+        @submit="submitPrompt"
+      >
+        <template #prefix>
           <UiButton
             variant="ghost"
             class="p-active-tool"
@@ -326,23 +300,8 @@ function keydown(event: KeyboardEvent) {
               {{ $t("pengolo.copy.web_search") }}
             </span>
           </UiButton>
-        </span>
-        <UiTextarea
-          :style="{
-            textIndent: ui.webEnabled ? `${webToolWidth + 8}px` : undefined,
-          }"
-          @scroll="syncPromptScroll"
-          variant="composer"
-          autosize
-          v-model="ui.prompt"
-          :aria-label="$t('pengolo.copy.message_pengolo')"
-          :placeholder="$t('pengolo.copy.ask_pengolo')"
-          rows="1"
-          maxlength="32768"
-          :disabled="busy"
-          @keydown="keydown"
-        />
-      </div>
+        </template>
+      </AiPromptEditor>
     </div>
     <div class="p-composer-actions">
       <input
