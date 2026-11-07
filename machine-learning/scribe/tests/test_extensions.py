@@ -61,8 +61,8 @@ def settings() -> Settings:
 def descriptor() -> Capability:
     return Capability.model_validate(
         {
-            "id": "law.algorithm.timeline",
-            "plugin_id": "law",
+            "id": "fixture.algorithm.timeline",
+            "plugin_id": "fixture",
             "plugin_version": "1.0.0",
             "kind": "algorithm",
             "targets": ["pipeline", "scribe"],
@@ -141,7 +141,7 @@ async def test_selected_algorithm_uses_native_tool_loop_and_private_catalog() ->
         runtime = Runtime(
             settings(),
             client,
-            model=TestModel(call_tools=["law_algorithm_timeline_build"]),
+            model=TestModel(call_tools=["fixture_algorithm_timeline_build"]),
             extensions=(extension,),
         )
         async with httpx.AsyncClient(
@@ -204,7 +204,7 @@ async def test_unknown_extension_is_rejected_before_admission() -> None:
                     json={
                         "prompt": "Run",
                         "capability": "a" * 64,
-                        "tool_ids": ["law.algorithm.missing"],
+                        "tool_ids": ["fixture.algorithm.missing"],
                         **extra,
                     },
                 )
@@ -215,8 +215,8 @@ async def test_unknown_extension_is_rejected_before_admission() -> None:
 
 def test_request_rejects_duplicate_or_unbounded_selection() -> None:
     for values in [
-        ("law.algorithm.timeline",) * 2,
-        tuple(f"law.algorithm.t{i}" for i in range(33)),
+        ("fixture.algorithm.timeline",) * 2,
+        tuple(f"fixture.algorithm.t{i}" for i in range(33)),
     ]:
         with pytest.raises(ValidationError):
             RunRequest(prompt="Run", capability="a" * 64, tool_ids=values)
@@ -250,8 +250,12 @@ async def test_registry_rejects_colliding_normalized_tool_prefixes() -> None:
     def factory() -> FunctionToolset:
         return FunctionToolset()
 
-    first = descriptor().model_copy(update={"id": "law.algorithm.time-line"})
-    second = descriptor().model_copy(update={"id": "law.algorithm.time_line"})
+    first = descriptor().model_copy(
+        update={"id": "fixture.algorithm.time-line"}
+    )
+    second = descriptor().model_copy(
+        update={"id": "fixture.algorithm.time_line"}
+    )
     async with httpx.AsyncClient() as client:
         with pytest.raises(ValueError, match="prefix"):
             Runtime(
@@ -293,7 +297,7 @@ async def test_extension_tool_timeout_cancels_the_native_call(
         runtime = Runtime(
             settings(),
             client,
-            model=_failure_aware_model(("law_algorithm_timeline_build",)),
+            model=_failure_aware_model(("fixture_algorithm_timeline_build",)),
             extensions=(ToolExtension(descriptor(), factory),),
         )
         chunks = [
@@ -347,7 +351,7 @@ async def test_native_pydantic_approval_survives_extension_wrappers(
 
     registry = ToolRegistry((ToolExtension(descriptor(), factory),))
     agent = Agent(
-        TestModel(call_tools=["law_algorithm_timeline_build"]),
+        TestModel(call_tools=["fixture_algorithm_timeline_build"]),
         deps_type=Dependencies,
         output_type=[str, DeferredToolRequests],
         toolsets=registry.toolsets((descriptor().id,)),
@@ -395,7 +399,7 @@ async def test_runtime_without_approval_resume_never_executes_protected_tools() 
         runtime = Runtime(
             settings(),
             client,
-            model=TestModel(call_tools=["law_algorithm_timeline_build"]),
+            model=TestModel(call_tools=["fixture_algorithm_timeline_build"]),
             extensions=(ToolExtension(descriptor(), factory),),
         )
         chunks = [
@@ -584,8 +588,8 @@ async def test_plugin_failure_preserves_other_tools_without_repeating_actions() 
             client,
             model=_failure_aware_model(
                 (
-                    "law_algorithm_timeline_failed",
-                    "law_algorithm_timeline_continued",
+                    "fixture_algorithm_timeline_failed",
+                    "fixture_algorithm_timeline_continued",
                 )
             ),
             extensions=(extension,),

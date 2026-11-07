@@ -271,7 +271,7 @@ async function changeMode(selected: string) {
     switchingMode.value = false;
   }
 }
-async function send() {
+async function send(shareWithIsolatedReviewers = false) {
   if (busy.value || !ui.prompt.trim() || !models.selected) return;
   ui.error = "";
   try {
@@ -282,6 +282,7 @@ async function send() {
       modelAlias: models.selected,
       agentIds: usePengoloAgents().selected,
       fileIds: ui.files.map((file) => file.id),
+      ...(shareWithIsolatedReviewers ? { shareWithIsolatedReviewers: true } : {}),
       graphContext: ui.graphContext,
       webSearch: ui.webEnabled,
       temporary: ui.temporary,

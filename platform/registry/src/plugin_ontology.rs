@@ -168,6 +168,64 @@ pub fn materialize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legal_package_materializes_with_filing_and_proceeding_dependencies()
+    -> Result<()> {
+        let package: Value = serde_json::from_str(include_str!(
+            "../../../plugins/src/galadril_plugins/law/contentieux-ontology.json"
+        ))?;
+        let ontology = materialize(&package, None, &BTreeMap::new())?;
+        let selected = slice_ontology(
+            &ontology,
+            &[
+                "law.case.petition".into(),
+                "law.proceeding.suspends".into(),
+                "law.evidence_relation.passage".into(),
+                "law.qualification.rule_applications".into(),
+                "law.claim_ruling.items".into(),
+                "law.case_closure.proceeding_closures".into(),
+                "law.suspension_effect.request".into(),
+                "law.deadline_adjustment.event".into(),
+                "law.obligation.effect".into(),
+                "law.administratif.proceeding.court".into(),
+                "law.judiciaire.proceeding.court".into(),
+                "law.penal.proceeding.court".into(),
+                "law.penal.charge.qualifications".into(),
+            ],
+            &[],
+            true,
+        )?;
+        let resources = selected
+            .get("resources")
+            .and_then(Value::as_array)
+            .context("Missing legal resource closure")?;
+        for id in [
+            "law.case",
+            "law.proceeding",
+            "law.filing",
+            "law.petition.facts",
+            "law.petition.relief",
+            "law.passage.locator_kind",
+            "law.rule_application.review_status",
+            "law.disposition_item.ordinal",
+            "law.proceeding_closure",
+            "law.claim_version",
+            "law.temporal_event.recorded_at",
+            "law.dispositive_effect",
+            "law.court.name",
+            "law.administratif.court.kind",
+            "law.court.judicial.kind",
+            "law.penal.proceeding.formation",
+            "law.submission_point",
+        ] {
+            assert!(resources.iter().any(|item| {
+                item.get("resource_id").and_then(Value::as_str) == Some(id)
+            }));
+        }
+        Ok(())
+    }
+
     #[test]
     fn module_provenance_and_order_are_stable_without_mutating_the_package()
     -> Result<()> {

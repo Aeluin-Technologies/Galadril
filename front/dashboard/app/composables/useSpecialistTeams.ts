@@ -12,7 +12,9 @@ interface SpecialistTeam {
   members: Specialist[];
 }
 
-export function useSpecialistTeams() {
+export function useSpecialistTeams(
+  isCompatible: (agent: Specialist) => boolean = () => true,
+) {
   const { t } = useI18n();
   const agents = usePengoloAgents();
   const models = usePengoloModels();
@@ -21,7 +23,8 @@ export function useSpecialistTeams() {
     const groups = new Map<string, SpecialistTeam>();
     for (const agent of agents.items) {
       const plugin = agent.data.pluginId || null;
-      const id = plugin ? `plugin:${plugin}` : `personal:${agent.id}`;
+      const context = agent.data.skillIds.map(id => agents.catalog.find(item => item.id === id)?.executionProfile?.requiresContext).find(Boolean);
+      const id = plugin ? `plugin:${plugin}:${context ?? "default"}` : `personal:${agent.id}`;
       let team = groups.get(id);
       if (!team) {
         team = {
@@ -50,14 +53,19 @@ export function useSpecialistTeams() {
       team.members.some((member) => agents.selected.includes(member.id)),
     ),
   );
+  function needsPreprocessing(team: SpecialistTeam) {
+    return team.members.some(member => member.data.skillIds.some(id => agents.catalog.find(item => item.id === id)?.executionProfile?.contexts.some(context => context.id === agents.catalog.find(item => item.id === id)?.executionProfile?.requiresContext && context.privacy !== 'standard')));
+  }
   function selected(team: SpecialistTeam) {
     return team.members.every((member) => agents.selected.includes(member.id));
   }
   function available(team: SpecialistTeam) {
     const project = ui.temporary ? null : ui.projectId;
     return (
-      team.members.every((member) =>
-        compatibleAgent(member, project, models.selected, agents.catalog),
+      team.members.every(
+        (member) =>
+          isCompatible(member) &&
+          compatibleAgent(member, project, models.selected, agents.catalog),
       ) &&
       new Set([...agents.selected, ...team.members.map((member) => member.id)])
         .size <= 8
@@ -71,5 +79,5 @@ export function useSpecialistTeams() {
       agents.selected = [...new Set([...agents.selected, ...ids])];
     }
   }
-  return { teams, activeTeams, selected, available, toggle };
+  return { teams, activeTeams, selected, available, toggle, needsPreprocessing };
 }

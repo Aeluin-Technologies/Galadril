@@ -15,7 +15,7 @@ async function mockDashboard(
   overrides: Record<string, unknown> = {},
 ) {
   const shell = await page.request.get("/login");
-  for (const path of ["/pengolo", "/pengolo/*", "/settings/sso"])
+  for (const path of ["/pengolo", "/pengolo?*", "/pengolo/*", "/settings/sso"])
     await page.route(`**${path}`, (route) =>
       route.request().isNavigationRequest()
         ? route.fulfill({ response: shell })
@@ -1164,6 +1164,22 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     },
   ];
   await mockDashboard(page, [], {
+    pengoloProjects: [
+      {
+        id: "legal-project",
+        ownerId: "ui-user",
+        revision: 1,
+        data: {
+          name: "Case",
+          icon: "folder",
+          color: "#d97706",
+          shared: false,
+          roles: [],
+          contextMode: "project",
+          executionContext: "law.administratif",
+        },
+      },
+    ],
     pengoloAgents: roles.map((role, index) => ({
       id: String(index).repeat(32),
       ownerId: "",
@@ -1179,6 +1195,21 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
         execution: "REGISTERED",
         name: role.name,
         description: role.mission,
+        executionProfile: {
+          requiresContext: role.pluginId === "law" ? "law.administratif" : null,
+          isolation: "standard",
+          contexts:
+            role.pluginId === "law"
+              ? [
+                  {
+                    id: "law.administratif",
+                    name: "Contentieux administratif",
+                    aliases: ["administratif"],
+                    privacy: "standard",
+                  },
+                ]
+              : [],
+        },
         compatibility: { allowedModels: [], requires: [] },
       })),
     },
@@ -1209,6 +1240,12 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     name: "Law — Contentieux administratif",
     exact: true,
   });
+  await expect(choose).toBeDisabled();
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await page.goto("/pengolo?project=legal-project");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Specialist teams" }).click();
+  await expect(choose).toBeEnabled();
   await choose.click();
   await expect(choose).toHaveAttribute("aria-pressed", "true");
   await choose.click();
@@ -1927,6 +1964,98 @@ test("completed reasoning is consolidated above the answer with verified search 
   expect(directIcons).toEqual([]);
   await expect(article).not.toContainText("↳");
   await expect(article.getByText("Thinking", { exact: true })).toHaveCount(0);
+});
+
+test("Pengolo redacts local documents without storing originals in the chat or library", async ({
+  page,
+}, info) => {
+  await mockDashboard(page);
+  const storedRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/graphql"))
+      storedRequests.push(request.postData() ?? "");
+  });
+  let nativeRequests = 0;
+  await page.route("**/pengolo/files/redact", async (route) => {
+    nativeRequests++;
+    const payload = route.request().postDataJSON() as {
+      mime: string;
+      rules: Array<{
+        kind: string;
+        pattern?: string;
+        replacement_mode?: string;
+      }>;
+    };
+    expect(payload.mime).toBe("application/pdf");
+    expect(payload.rules).toContainEqual({
+      kind: "literal",
+      pattern: "Synthetic Person",
+      replacement_mode: "initials",
+    });
+    await route.fulfill({
+      json: {
+        mime: "application/pdf",
+        content_base64: btoa("%PDF-1.7 redacted-copy"),
+        match_count: 3,
+        pages: 1,
+        requires_review: true,
+        layout_preserved: true,
+        coverage: "provided_rules_only",
+        warnings: [],
+      },
+    });
+  });
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page
+    .getByRole("menuitem", { name: "Redact a document", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Redact a document",
+    exact: true,
+  });
+  await dialog.getByLabel("Local document", { exact: true }).setInputFiles({
+    name: "private-source.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.7 PRIVATE_SENTINEL"),
+  });
+  await dialog
+    .getByRole("textbox", {
+      name: "Names to replace with initials",
+      exact: true,
+    })
+    .fill("Synthetic Person");
+  await dialog
+    .getByRole("button", { name: "Create redacted copy", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("link", { name: "Download redacted copy", exact: true }),
+  ).toBeVisible();
+  await expect(dialog).toContainText("3");
+  expect(nativeRequests).toBe(1);
+  expect(storedRequests.join("\n")).not.toMatch(
+    /PRIVATE_SENTINEL|Synthetic Person|private-source|beginPengoloUpload|finishPengoloUpload/,
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Message Pengolo", exact: true }),
+  ).toBeEmpty();
+  expect(
+    await page.evaluate(() => JSON.stringify(Object.entries(localStorage))),
+  ).not.toContain("Synthetic Person");
+  await dialog.screenshot({
+    path: info.outputPath("native-redaction-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.screenshot({
+    path: info.outputPath("native-redaction-mobile.png"),
+    animations: "disabled",
+  });
+  const download = page.waitForEvent("download");
+  await dialog
+    .getByRole("link", { name: "Download redacted copy", exact: true })
+    .click();
+  expect((await download).suggestedFilename()).toBe("redacted-document.pdf");
 });
 
 test("active chats have one uniform fill", async ({ page }) => {

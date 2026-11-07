@@ -3,6 +3,19 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "plugin_isolation_test",
+    srcs = ["test_plugin_isolation.py"],
+    main = "test_plugin_isolation.py",
+    legacy_create_init = False,
+    deps = [
+        "//plugins:galadril_plugins",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "utils_history_test",
     srcs = ["test_utils_history.py"],
     main = "test_utils_history.py",
@@ -175,7 +188,7 @@ py_test(
     name = "document_templates_test",
     srcs = ["test_document_templates.py"],
     main = "test_document_templates.py",
-    data = [":fixture_bundle"],
+    data = [":fixture_bundle", "//plugins:law_latex_sources"],
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )

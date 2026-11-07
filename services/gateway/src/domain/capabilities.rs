@@ -50,6 +50,45 @@ pub struct Compatibility {
     pub requires: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    #[default]
+    Standard,
+    Sealed,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Privacy {
+    #[default]
+    Standard,
+    Pseudonymized,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionContext {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
+    pub privacy: Privacy,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionProfile {
+    #[serde(default)]
+    pub contexts: Vec<ExecutionContext>,
+    pub requires_context: Option<String>,
+    #[serde(default)]
+    pub isolation: Isolation,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capability {
@@ -62,6 +101,8 @@ pub struct Capability {
     pub execution: CapabilityExecution,
     #[serde(default)]
     pub compatibility: Compatibility,
+    #[serde(default)]
+    pub execution_profile: ExecutionProfile,
     pub kind: CapabilityKind,
     pub targets: Vec<CapabilityTarget>,
     pub name: String,
@@ -88,6 +129,128 @@ fn valid_segment(value: &str) -> bool {
 }
 
 impl CapabilityCatalog {
+    pub fn resolve_execution_context(
+        &self,
+        value: &str,
+    ) -> Result<&ExecutionContext> {
+        self.capabilities
+            .iter()
+            .flat_map(|item| &item.execution_profile.contexts)
+            .find(|context| {
+                context.id == value ||
+                    context.aliases.iter().any(|alias| alias == value)
+            })
+            .context("Unknown execution context")
+    }
+
+    pub fn execution_allowed(&self, id: &str, context: Option<&str>) -> bool {
+        self.capabilities.iter().any(|item| {
+            item.id == id &&
+                item.execution_profile.requires_context.as_deref() ==
+                    context
+        })
+    }
+
+    pub fn sealed_capability(&self, id: &str) -> bool {
+        self.capabilities.iter().any(|item| {
+            item.id == id &&
+                item.execution_profile.isolation == Isolation::Sealed
+        })
+    }
+
+    fn validate_execution_profiles(&self) -> Result<()> {
+        let mut contexts =
+            std::collections::HashMap::<&str, &ExecutionContext>::new();
+        let mut aliases = std::collections::HashMap::<&str, &str>::new();
+        for item in &self.capabilities {
+            let profile = &item.execution_profile;
+            ensure!(
+                profile.contexts.len() <= 8,
+                "Too many execution contexts"
+            );
+            if profile != &ExecutionProfile::default() {
+                ensure!(
+                    item.origin == CapabilityOrigin::Plugin,
+                    "Execution profiles require plugin provenance"
+                );
+            }
+            ensure!(
+                profile.isolation != Isolation::Sealed ||
+                    item.kind == CapabilityKind::Skill,
+                "Sealed execution requires a Skill"
+            );
+            for context in &profile.contexts {
+                ensure!(
+                    context.id.len() <= 128 &&
+                        context.id.contains('.') &&
+                        context.id.split('.').all(valid_segment) &&
+                        item.plugin_id.as_deref().is_some_and(|plugin| {
+                            context
+                                .id
+                                .strip_prefix(plugin)
+                                .is_some_and(|suffix| suffix.starts_with('.'))
+                        }),
+                    "Invalid execution context namespace"
+                );
+                ensure!(
+                    !context.name.is_empty() &&
+                        context.name.chars().count() <= 128 &&
+                        context.aliases.len() <= 8 &&
+                        context.instructions.chars().count() <= 8192,
+                    "Execution context exceeds limits"
+                );
+                if let Some(existing) = contexts.insert(&context.id, context) {
+                    ensure!(
+                        existing == context,
+                        "Conflicting execution context definitions"
+                    );
+                }
+                let mut local = HashSet::new();
+                for alias in &context.aliases {
+                    ensure!(
+                        !alias.is_empty() &&
+                            alias.len() <= 128 &&
+                            alias
+                                .bytes()
+                                .all(|c| c.is_ascii_alphanumeric() ||
+                                    matches!(c, b'.' | b'_' | b'-')) &&
+                            local.insert(alias),
+                        "Invalid execution context alias"
+                    );
+                }
+                for alias in
+                    std::iter::once(&context.id).chain(&context.aliases)
+                {
+                    if let Some(existing) = aliases.insert(alias, &context.id)
+                    {
+                        ensure!(
+                            existing == context.id,
+                            "Ambiguous execution context alias"
+                        );
+                    }
+                }
+            }
+        }
+        ensure!(
+            contexts.len() <= 128,
+            "Too many registered execution contexts"
+        );
+        for item in &self.capabilities {
+            if let Some(required) = &item.execution_profile.requires_context {
+                ensure!(
+                    contexts.contains_key(required.as_str()) &&
+                        item.plugin_id.as_deref().is_some_and(|plugin| {
+                            required
+                                .strip_prefix(plugin)
+                                .is_some_and(|suffix| suffix.starts_with('.'))
+                        }),
+                    "Unregistered execution context"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Rejects malformed deployment metadata before it enters public
     /// discovery.
     pub fn parse(bytes: &[u8]) -> Result<Self> {
@@ -226,6 +389,7 @@ impl CapabilityCatalog {
                 );
             }
         }
+        catalog.validate_execution_profiles()?;
         Ok(catalog)
     }
 }
@@ -371,4 +535,27 @@ mod contribution_tests {
         }
         Ok(())
     }
+}
+
+#[test]
+fn execution_profiles_resolve_registered_contexts_without_domain_names()
+-> Result<()> {
+    let item = serde_json::json!({"id":"fixture.skill.audit","plugin_id":"fixture","plugin_version":"1","kind":"skill","targets":["scribe"],"name":"Audit","description":"Independent review","parameters_schema":{"type":"object"},"execution_profile":{"requires_context":"fixture.case","isolation":"sealed","contexts":[{"id":"fixture.case","name":"Case","aliases":["legacy-case"]}]}});
+    let catalog = CapabilityCatalog::parse(&serde_json::to_vec(
+        &serde_json::json!({"schema_version":1,"capabilities":[item]}),
+    )?)?;
+    ensure!(
+        catalog.resolve_execution_context("legacy-case")?.id == "fixture.case"
+    );
+    ensure!(
+        catalog.execution_allowed("fixture.skill.audit", Some("fixture.case"))
+    );
+    ensure!(!catalog.execution_allowed("fixture.skill.audit", None));
+    ensure!(
+        !catalog
+            .execution_allowed("fixture.skill.unknown", Some("fixture.case"))
+    );
+    ensure!(catalog.sealed_capability("fixture.skill.audit"));
+    ensure!(catalog.resolve_execution_context("other.case").is_err());
+    Ok(())
 }

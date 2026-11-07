@@ -164,6 +164,7 @@ pub trait ConversationAgent: Send + Sync {
 
 #[derive(Clone, Copy)]
 pub enum DocumentOperation {
+    Redact,
     Parse,
     Embed,
     Extract,
@@ -174,6 +175,7 @@ pub enum DocumentOperation {
 impl DocumentOperation {
     pub const fn path(self) -> &'static str {
         match self {
+            Self::Redact => "redact",
             Self::Parse => "parse",
             Self::Embed => "embed",
             Self::Extract => "extract",

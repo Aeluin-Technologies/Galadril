@@ -432,3 +432,9 @@ js_test(
     entry_point = "tests/ontology.test.ts",
     data = ["app/utils/ontology.ts", "app/utils/ontology-code.ts", "app/utils/ontology-graph.ts", "app/utils/ontology-edit.ts", "app/types/ontology.ts", "tests/support.ts", "package.json", ":node_modules/yaml"],
 )
+
+js_test(
+    name = "redaction_test",
+    entry_point = "tests/redaction.test.ts",
+    data = ["app/utils/pengolo-redaction.ts"],
+)

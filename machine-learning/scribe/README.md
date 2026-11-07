@@ -227,3 +227,32 @@ tests ReBAC and Cedar ABAC, permits a root causal result with private inputs,
 and verifies completion and replay after closing the WebSocket. The fixture
 does not invent evidence; it combines real tool responses. This validates the
 integration and security contracts, not a particular model's answer quality.
+
+## Native document redaction
+
+Pengolo exposes **Redact a document** in its composer menu. The authenticated
+`POST /pengolo/files/redact` endpoint forwards bounded PDF or UTF-8 text bytes
+to Scribe's `POST /documents/redact`; the original is never added to a chat,
+library, index or object store. The response is a local downloadable copy.
+This path does not call a model, execute plugin code or grant storage authority.
+
+Rules are declarative literals, built-in email/French telephone patterns or
+RE2 expressions. Initials are a fixed transformation. There are at most sixteen
+rules, 4,096 matches, 128 PDF pages and 16 MiB of decoded input/output. Linux
+child processes have independent CPU, memory and wall-clock limits and receive
+no provider credentials. Metrics record outcomes and counts, never content.
+
+PDFium removes selected text objects and retains unselected glyphs at their
+original origins; public initials are inserted without paragraph reflow.
+PDF Oxide sanitizes metadata and garbage-collects the nonincremental output.
+Verification checks removed glyphs, retained content and extracted private text.
+Annotations and embedded files are removed. Images, forms, marked content,
+thumbnails, layers and unsupported text geometry are refused. Matching private
+text in a bookmark also refuses the operation rather than returning a partial
+copy. Scanned documents require a separate supported preprocessing path.
+
+Every output declares `requires_review: true` and
+`coverage: provided_rules_only`. These results do not certify anonymization,
+resolve ambiguous identities or enable privacy-required plugin execution.
+A manual review is necessary before sharing the copy. Private source documents
+must never be committed as test fixtures or uploaded to CI.

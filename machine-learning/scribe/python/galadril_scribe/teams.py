@@ -160,10 +160,46 @@ class TeamRegistry:
         catalog: CapabilityCatalog,
         delegated: TeamDefinition | None = None,
         native_ids: tuple[str, ...] = (),
+        execution_context: str | None = None,
     ) -> None:
         team = delegated if delegated is not None else self.get(identifier)
+        context = (
+            catalog.resolve_execution_context(execution_context)
+            if execution_context is not None
+            else None
+        )
+        if context is not None and context.privacy != "standard":
+            raise ValueError("Required privacy preprocessing is unavailable")
+        context_id = context.id if context is not None else None
+        for selected in tool_ids:
+            if not catalog.execution_allowed(selected, context_id):
+                raise ValueError(
+                    "Capability unavailable for this execution context"
+                )
         if team is not None:
+            if sum(self.sealed_member(agent) for agent in team.agents) > 1:
+                raise ValueError("Only one sealed reviewer is allowed")
             for agent in team.agents:
+                for skill_id in agent.skill_ids:
+                    if not catalog.execution_allowed(skill_id, context_id):
+                        raise ValueError(
+                            "Skill unavailable for this execution context"
+                        )
+                if (
+                    agent.implementation_id is not None
+                    and context_id is not None
+                    and not catalog.execution_allowed(
+                        agent.implementation_id, context_id
+                    )
+                ):
+                    raise ValueError(
+                        "Implementation unavailable for this execution context"
+                    )
+                if self.sealed_member(agent) and (
+                    len(agent.skill_ids) != 1
+                    or agent.implementation_id is not None
+                ):
+                    raise ValueError("Sealed reviewers must run independently")
                 if any(
                     identifier not in self._skills
                     for identifier in agent.skill_ids
@@ -178,6 +214,19 @@ class TeamRegistry:
                     target=CapabilityTarget.SCRIBE,
                     model=model,
                 )
+
+    def sealed_member(self, member: AgentDefinition) -> bool:
+        return any(
+            self._skills[identifier].capability.execution_profile.isolation
+            == "sealed"
+            for identifier in member.skill_ids
+            if identifier in self._skills
+        )
+
+    def sealed_instructions(self, member: AgentDefinition) -> str:
+        if not self.sealed_member(member) or len(member.skill_ids) != 1:
+            raise ValueError("Invalid sealed reviewer")
+        return self._skills[member.skill_ids[0]].instructions
 
     def skills(
         self, identifiers: tuple[str, ...]

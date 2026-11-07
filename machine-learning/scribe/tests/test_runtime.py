@@ -887,7 +887,7 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
                     client,
                     model=TestModel(
                         call_tools=[
-                            "law_mcp_web_web_search"
+                            "fixture_mcp_web_web_search"
                             if plugin
                             else "external_0_web_search"
                         ]
@@ -896,8 +896,8 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
                         ToolExtension(
                             Capability.model_validate(
                                 {
-                                    "id": "law.mcp.web",
-                                    "plugin_id": "law",
+                                    "id": "fixture.mcp.web",
+                                    "plugin_id": "fixture",
                                     "plugin_version": "1.0.0",
                                     "kind": "mcp",
                                     "targets": ["scribe"],
@@ -916,7 +916,9 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
                     else (),
                 )
                 selected = (
-                    request().model_copy(update={"tool_ids": ("law.mcp.web",)})
+                    request().model_copy(
+                        update={"tool_ids": ("fixture.mcp.web",)}
+                    )
                     if plugin
                     else request()
                 )

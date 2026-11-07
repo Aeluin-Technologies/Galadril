@@ -138,6 +138,7 @@ export default defineNuxtConfig({
 
   i18n: {
     defaultLocale: "en",
+    vueI18n: "./i18n.config.ts",
     strategy: "no_prefix",
     langDir: ".",
     detectBrowserLanguage: {
@@ -153,6 +154,12 @@ export default defineNuxtConfig({
         iso: "en-US",
         file: "en-US.json",
         name: "English",
+      },
+      {
+        code: "fr",
+        language: "fr-FR",
+        file: "fr-FR.json",
+        name: "Français",
       },
     ],
     baseUrl: "",

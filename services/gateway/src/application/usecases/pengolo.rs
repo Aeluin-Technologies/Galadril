@@ -29,6 +29,53 @@ use crate::domain::pengolo::{
     document_scope_allows, file_available, validate_upload,
 };
 
+fn execution_context(project: &Record) -> Result<Option<String>> {
+    let value = project
+        .data
+        .get("executionContext")
+        .filter(|value| !value.is_null())
+        .or_else(|| project.data.get("litigationBranch"));
+    value
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| !value.is_empty() && value.len() <= 128)
+                .map(str::to_owned)
+                .context("Invalid execution context")
+        })
+        .transpose()
+}
+
+/// Projects stored by the early legal preview retain their execution context.
+fn project_for_client(mut project: Record) -> Result<Record> {
+    let context = execution_context(&project)?;
+    if let Some(data) = project.data.as_object_mut() {
+        data.remove("litigationBranch");
+        if let Some(context) = context {
+            data.insert("executionContext".into(), Value::String(context));
+        }
+    }
+    Ok(project)
+}
+
+fn registered_context(
+    catalog: &crate::domain::capabilities::CapabilityCatalog,
+    value: Option<&str>,
+) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            let context = catalog.resolve_execution_context(value)?;
+            ensure!(
+                context.privacy ==
+                    crate::domain::capabilities::Privacy::Standard,
+                "Required privacy preprocessing is unavailable"
+            );
+            Ok(context.id.clone())
+        })
+        .transpose()
+}
+
 fn graph_sources(
     links: &[crate::domain::document_retrieval::GraphReference],
 ) -> Vec<EvidenceSource> {
@@ -706,6 +753,21 @@ impl PengoloService {
         Ok(page)
     }
 
+    async fn authorize_project_processing(
+        &self,
+        actor: &Principal<'_>,
+        project: &str,
+    ) -> Result<()> {
+        let project = self.project(actor, project).await?;
+        if let Some(context) = execution_context(&project)? {
+            registered_context(
+                &self.agent.capabilities().await?,
+                Some(&context),
+            )?;
+        }
+        Ok(())
+    }
+
     pub async fn index_document(
         &self,
         actor: &Principal<'_>,
@@ -723,7 +785,7 @@ impl PengoloService {
             .context("Document unavailable")?;
         ensure!(file.owner_id == actor.user, "Document unavailable");
         if let Some(project) = &file.project_id {
-            self.project(actor, project).await?;
+            self.authorize_project_processing(actor, project).await?;
         }
         self.documents
             .as_ref()
@@ -915,7 +977,7 @@ impl PengoloService {
                         )
                         .await?;
                     if allowed {
-                        result.push(project);
+                        result.push(project_for_client(project)?);
                     } else if project.owner_id == actor.user {
                         denied_owned.push(project.id);
                     }
@@ -935,6 +997,9 @@ impl PengoloService {
     ) -> Result<Value> {
         self.verify(actor).await?;
         let mut input = ProjectInput::parse(input)?;
+        let catalog = self.agent.capabilities().await?;
+        input.execution_context =
+            registered_context(&catalog, input.execution_context.as_deref())?;
         for role in &input.roles {
             ensure!(
                 self.iam.role_exists(actor.tenant, role).await?,
@@ -954,6 +1019,13 @@ impl PengoloService {
                 project.data.get("shared").and_then(Value::as_bool) ==
                     Some(input.shared),
                 "Project visibility cannot be widened after creation"
+            );
+            ensure!(
+                registered_context(
+                    &catalog,
+                    execution_context(project)?.as_deref()
+                )? == input.execution_context,
+                "Project execution context cannot change"
             );
         }
         if input.instructions.is_none() {
@@ -1157,7 +1229,7 @@ impl PengoloService {
             "Temporary files cannot enter project libraries"
         );
         if let Some(project) = &input.project_id {
-            self.project(actor, project).await?;
+            self.authorize_project_processing(actor, project).await?;
         }
         if let Some(session) = &input.temporary_session {
             ensure!(
@@ -1222,6 +1294,9 @@ impl PengoloService {
         );
         if string(&file.data, "status")? == "ready" {
             return Ok(serde_json::to_value(file_projection(file))?);
+        }
+        if let Some(project) = &file.project_id {
+            self.authorize_project_processing(actor, project).await?;
         }
         let file = self
             .store
@@ -1454,6 +1529,7 @@ impl PengoloService {
         input: &SendInput,
     ) -> Result<Option<String>> {
         if let Some(id) = &input.project_id {
+            self.authorize_project_processing(actor, id).await?;
             let project = self.project(actor, id).await?;
             if project.data.get("contextMode").and_then(Value::as_str) ==
                 Some("personal")
@@ -1611,12 +1687,30 @@ impl PengoloService {
                 .any(|model| model.alias == input.model_alias),
             "Select an available model with medium reasoning"
         );
-        let (team, tool_ids) = self.selected_agents(actor, &input).await?;
         let project = if let Some(id) = &input.project_id {
             Some(self.project(actor, id).await?)
         } else {
             None
         };
+        let catalog = self.agent.capabilities().await?;
+        let branch = project
+            .as_ref()
+            .map(execution_context)
+            .transpose()?
+            .flatten();
+        let branch = registered_context(&catalog, branch.as_deref())?;
+        ensure!(
+            branch.is_none() || input.graph_context.is_none(),
+            "Graph context is unavailable for isolated projects"
+        );
+        let (team, tool_ids, defense) = self
+            .selected_agents(actor, &input, branch.as_deref())
+            .await?;
+        ensure!(
+            !input.share_with_isolated_reviewers ||
+                (defense && !input.file_ids.is_empty()),
+            "Sharing requires a defense specialist and attached documents"
+        );
         let preferences = self.preference_record(actor).await?;
         self.store.expire_leases(actor.tenant).await?;
         let existing = if let Some(id) = &input.chat_id {
@@ -1760,7 +1854,13 @@ impl PengoloService {
                 .and_then(|r| r.data.get("instructions"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions});
+            let defense_attachment_indices =
+                if input.share_with_isolated_reviewers {
+                    (0..attachments.len()).collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions,"execution_context":branch,"shared_attachment_indices":defense_attachment_indices});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -2090,6 +2190,19 @@ impl PengoloService {
                 chat.data.get("activeGeneration").is_none_or(Value::is_null),
                 "Wait for the active generation before moving this chat"
             );
+            if chat.project_id != input.project_id {
+                for id in
+                    [chat.project_id.as_deref(), input.project_id.as_deref()]
+                        .into_iter()
+                        .flatten()
+                {
+                    ensure!(
+                        execution_context(&self.project(actor, id).await?)?
+                            .is_none(),
+                        "Conversations cannot enter or leave a isolated project"
+                    );
+                }
+            }
             let document_project = if let Some(project) = &input.project_id {
                 let project = self.project(actor, project).await?;
                 if project.data.get("contextMode").and_then(Value::as_str) ==
@@ -2343,6 +2456,13 @@ impl PengoloService {
     ) -> Result<Value> {
         self.verify(actor).await?;
         let input = crate::domain::pengolo::AgentInput::parse(value)?;
+        let catalog = self.agent.capabilities().await?;
+        let scope = if let Some(project) = &input.project_id {
+            execution_context(&self.project(actor, project).await?)?
+        } else {
+            None
+        };
+        let scope = registered_context(&catalog, scope.as_deref())?;
         if let Some(id) = &input.id {
             let existing = self
                 .store
@@ -2351,12 +2471,26 @@ impl PengoloService {
                 .context("Agent unavailable")?;
             ensure!(existing.owner_id == actor.user, "Agent unavailable");
             if let Some(project) = &existing.project_id {
-                self.project(actor, project).await?;
+                let source = self.project(actor, project).await?;
+                ensure!(
+                    execution_context(&source)?.is_none() ||
+                        existing.project_id == input.project_id,
+                    "Isolated agents cannot leave their project"
+                );
             }
+            ensure!(
+                scope.is_none() || existing.project_id == input.project_id,
+                "Existing agents cannot enter a isolated project"
+            );
         }
-        if let Some(project) = &input.project_id {
-            self.project(actor, project).await?;
-        }
+        ensure!(
+            input
+                .skill_ids
+                .iter()
+                .all(|id| !catalog.sealed_capability(id) &&
+                    catalog.execution_allowed(id, scope.as_deref())),
+            "Skill unavailable for this execution context"
+        );
         let catalog = self.agent.capabilities().await?;
         validate_agent_skills(&catalog, &input.skill_ids, None)?;
         let record = Record {
@@ -2408,22 +2542,24 @@ impl PengoloService {
         Ok(true)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn selected_agents(
         &self,
         actor: &Principal<'_>,
         input: &SendInput,
-    ) -> Result<(Option<Value>, Vec<String>)> {
+        branch: Option<&str>,
+    ) -> Result<(Option<Value>, Vec<String>, bool)> {
         if input.agent_ids.is_empty() {
-            return Ok((None, Vec::new()));
+            return Ok((None, Vec::new(), false));
         }
         let catalog = self.agent.capabilities().await?;
         let mut agents = Vec::with_capacity(input.agent_ids.len());
         let mut tools = Vec::new();
+        let mut defense = false;
         let official = plugin_specialists(&catalog)?;
         for id in &input.agent_ids {
-            let record = if let Some(template) =
-                official.iter().find(|item| &item.id == id)
-            {
+            let template = official.iter().find(|item| &item.id == id);
+            let record = if let Some(template) = template {
                 template.clone()
             } else {
                 let record = self
@@ -2441,6 +2577,10 @@ impl PengoloService {
                                     input.project_id.as_ref()),
                     "Agent unavailable for this conversation"
                 );
+                ensure!(
+                    branch.is_none() || record.project_id == input.project_id,
+                    "Isolated projects require project-local custom agents"
+                );
                 record
             };
             if let Some(project) = &record.project_id {
@@ -2453,14 +2593,26 @@ impl PengoloService {
                     .cloned()
                     .context("Invalid agent Skills")?,
             )?;
-            validate_agent_skills(
-                &catalog,
-                &skills,
-                Some(&input.model_alias),
-            )?;
+            ensure!(
+                skills
+                    .iter()
+                    .all(|id| catalog.execution_allowed(id, branch)),
+                "Skill unavailable for this execution context"
+            );
+            if skills.iter().any(|id| catalog.sealed_capability(id)) {
+                ensure!(
+                    template.is_some() && skills.len() == 1 && !defense,
+                    "The defense specialist must run independently"
+                );
+                defense = true;
+            }
             for tool in
                 agent_tools(&catalog, &skills, Some(&input.model_alias))?
             {
+                ensure!(
+                    catalog.execution_allowed(&tool, branch),
+                    "Tool unavailable for this execution context"
+                );
                 if !tools.contains(&tool) {
                     tools.push(tool);
                 }
@@ -2473,6 +2625,7 @@ impl PengoloService {
                 json!({"id":"user.team.chat","name":"Selected specialists","agents":agents}),
             ),
             tools,
+            defense,
         ))
     }
 
@@ -2574,6 +2727,18 @@ fn search_results(value: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_projection_preserves_the_legacy_context_under_the_generic_key()
+    -> Result<()> {
+        let project: Record = serde_json::from_value(json!({
+            "id": "project", "ownerId": "user", "revision": 1, "updatedAt": 0,
+            "data": {"executionContext": null, "litigationBranch": "administratif"}
+        }))?;
+        let result = project_for_client(project)?;
+        assert_eq!(result.data, json!({"executionContext": "administratif"}));
+        Ok(())
+    }
+
     #[test]
     fn web_results_report_bounded_public_origins() -> Result<()> {
         let value = search_results(json!({"results":[
@@ -3056,4 +3221,5 @@ mod tests {
 }
 
 mod compiler;
+mod redaction;
 pub use compiler::CompiledArtifact;

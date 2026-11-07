@@ -1,9 +1,10 @@
-import type { SemanticDocument } from "../types/ontology";
+import type { OntologyResource, SemanticDocument } from "../types/ontology";
 
 /** A single graph projection keeps live and historical models consistent. */
 export function ontologyGraph(
   document: SemanticDocument | undefined,
   selection = "",
+  label = (resource: OntologyResource) => resource.display_name,
 ) {
   const resources = document?.resources ?? [];
   const types = resources.filter((r) =>
@@ -26,7 +27,7 @@ export function ontologyGraph(
       String(r.attributes.target_type),
     ]),
   ]);
-  const labels = new Map(types.map((r) => [r.resource_id, r.display_name]));
+  const labels = new Map(types.map((r) => [r.resource_id, label(r)]));
   const counts = new Map<string, number>();
   for (const resource of resources)
     if (resource.owner_id)
@@ -56,7 +57,7 @@ export function ontologyGraph(
       id: r.resource_id,
       source: String(r.attributes.source_type),
       target: String(r.attributes.target_type),
-      label: r.display_name,
+      label: label(r),
     })),
   };
 }

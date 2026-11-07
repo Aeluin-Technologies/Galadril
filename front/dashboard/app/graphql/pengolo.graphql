@@ -71,6 +71,7 @@ fragment Project on PengoloProject {
     shared
     roles
     contextMode
+    executionContext
     instructions
   }
 }
@@ -326,6 +327,7 @@ query Agents {
       pluginId
       kind
       execution
+      executionProfile { requiresContext isolation contexts { id name aliases privacy } }
       compatibility {
         allowedModels
         requires

@@ -23,7 +23,7 @@ def _module_resource_ids(ontology: dict[str, JsonValue]) -> tuple[str, ...]:
 
 
 def _package_resource_ids(
-    ontologies: tuple[dict[str, JsonValue], ...],
+    ontologies: list[dict[str, JsonValue]] | tuple[dict[str, JsonValue], ...],
 ) -> set[str]:
     identifiers: set[str] = set()
     for ontology in ontologies:
@@ -32,6 +32,17 @@ def _package_resource_ids(
                 raise ValueError("Duplicate package resource")
             identifiers.add(identifier)
     return identifiers
+
+
+def _resource_objects(
+    module: dict[str, JsonValue],
+) -> list[dict[str, JsonValue]]:
+    items = module.get("resources")
+    if not isinstance(items, list) or not all(
+        isinstance(item, dict) for item in items
+    ):
+        raise ValueError("Invalid ontology resources")
+    return [item for item in items if isinstance(item, dict)]
 
 
 class OntologyContract(BaseModel):
