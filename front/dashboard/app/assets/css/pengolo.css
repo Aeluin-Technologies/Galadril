@@ -361,6 +361,8 @@
   overflow-wrap: anywhere;
 }
 .p-markdown {
+  font-size: 14px;
+  line-height: 1.65;
   overflow-wrap: anywhere;
 }
 .p-markdown > :first-child {
@@ -376,13 +378,13 @@
   margin: 1.6em 0 0.7em;
 }
 .p-markdown h1 {
-  font-size: 25px;
-}
-.p-markdown h2 {
   font-size: 22px;
 }
-.p-markdown h3 {
+.p-markdown h2 {
   font-size: 19px;
+}
+.p-markdown h3 {
+  font-size: 16px;
 }
 .p-markdown :is(ul, ol) {
   padding-left: 1.6em;
@@ -421,14 +423,15 @@
   min-width: 100%;
   border-collapse: collapse;
   margin: 1.25em 0;
-  font-size: 15px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .p-markdown :is(td, th) {
   min-width: 7rem;
   max-width: 32rem;
   overflow-wrap: normal;
   word-break: normal;
-  padding: 12px 18px;
+  padding: 8px 12px;
   text-align: left;
   border-bottom: 1px solid var(--p-line);
 }

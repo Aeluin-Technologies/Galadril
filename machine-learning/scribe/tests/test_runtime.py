@@ -1818,7 +1818,9 @@ async def test_private_memory_requires_web_approval_after_recall_or_recovery(
         transport=httpx.MockTransport(gateway)
     ) as client:
         runtime = Runtime(
-            settings(), client, model=FunctionModel(stream_function=model)
+            settings().model_copy(update={"web_search_provider": "openai"}),
+            client,
+            model=FunctionModel(stream_function=model),
         )
         chunks = [
             chunk

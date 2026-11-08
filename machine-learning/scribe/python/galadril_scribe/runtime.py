@@ -469,7 +469,10 @@ async def web_search(ctx: RunContext[Dependencies], query: str) -> str:
         or (ctx.deps.redact is not None and ctx.deps.redact(query) != query)
     ):
         return json.dumps(await _unavailable(ctx, "web"))
-    if ctx.deps.web_requires_approval:
+    trace.get_current_span().add_event(
+        "scribe.web.route", {"external": ctx.deps.web_external}
+    )
+    if ctx.deps.web_requires_approval and ctx.deps.web_external:
         approved = (
             ctx.deps.web_approval is not None
             and await ctx.deps.web_approval(query)
@@ -1270,6 +1273,7 @@ class Runtime:
                 alias, query, limit
             ),
             web_remaining=self.settings.max_tool_calls,
+            web_external=self.settings.web_search_provider == "openai",
             web_enabled=request.web_search or request.web_query is not None,
             progress=progress,
             activity=emit,
