@@ -2225,6 +2225,10 @@ test("specialist report citations open an authorized panel on the right", async 
   });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Rapport vérifiable.");
+  await expect(panel.locator(".p-markdown p").first()).toHaveCSS(
+    "font-size",
+    "14px",
+  );
   const heading = panel.getByRole("heading", {
     name: "Specialist report",
     exact: true,
@@ -2290,6 +2294,8 @@ test("colored task cards keep model wording and animate their checked state", as
     name: "Pengolo response",
     exact: true,
   });
+  await expect(article.locator("table")).toHaveCSS("font-size", "13px");
+  await expect(article.locator("td").first()).toHaveCSS("padding-top", "8px");
   await expect(article.locator(".p-tone-warning")).toHaveText("À vérifier");
   await expect(article.locator(".p-tone-warning")).toHaveCSS(
     "color",
