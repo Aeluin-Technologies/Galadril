@@ -129,15 +129,10 @@ async def test_quota_failure_midstream_falls_back_without_replaying_completed_to
             assert not any(
                 item.get("role") == "system" for item in body["input"]
             )
-            declarations = [
-                item
-                for item in body["input"]
-                if item.get("type") == "additional_tools"
-            ]
-            assert declarations and declarations[0]["role"] == "developer"
-            assert any(
-                tool["name"] == "calculate" for tool in declarations[0]["tools"]
+            assert not any(
+                item.get("type") == "additional_tools" for item in body["input"]
             )
+            assert any(tool["name"] == "calculate" for tool in body["tools"])
             return stream(call=len(calls) == 1, failed=len(calls) > 1)
         assert token == "Bearer api-secret"
         assert body["max_output_tokens"] == 2048

@@ -109,18 +109,8 @@ class _PlanTransport(httpx.AsyncBaseTransport):
                 native.append(tool)
             else:
                 raise ModelAPIError("openai", "Unsupported hosted plan tool")
-        # Additional-tools items preserve default-namespace calls across API failover.
-        if declarations:
-            inputs.insert(
-                0,
-                {
-                    "type": "additional_tools",
-                    "role": "developer",
-                    "tools": declarations,
-                },
-            )
-        if native:
-            payload["tools"] = native
+        if declarations or native:
+            payload["tools"] = [*declarations, *native]
         headers = dict(request.headers)
         headers.pop("content-length", None)
         forwarded = httpx.Request(
