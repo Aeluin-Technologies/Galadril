@@ -1,7 +1,10 @@
 """Generation dependencies keep delegated credentials outside model arguments."""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import httpx
 from pydantic_ai_harness.ask_user import Answerer
@@ -9,6 +12,9 @@ from pydantic_ai_harness.ask_user import Answerer
 from galadril_scribe.activity import WarningSource
 from galadril_scribe.media import StorageMedia
 from galadril_scribe.sandbox import Sandbox
+
+if TYPE_CHECKING:
+    from galadril_scribe.workflows import TaskGraph
 
 
 @dataclass(slots=True)
@@ -30,3 +36,4 @@ class Dependencies:
     web_requires_approval: bool = False
     web_external: bool = False
     web_closed: bool = False
+    tasks: TaskGraph | None = None

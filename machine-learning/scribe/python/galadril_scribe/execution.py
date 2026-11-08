@@ -17,6 +17,8 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import UsageLimits
 
+from galadril_scribe.workflows import Consumption
+
 if TYPE_CHECKING:
     from galadril_scribe.builtin import SecretPolicy
     from galadril_scribe.contracts import RunRequest, Settings
@@ -40,6 +42,7 @@ class ExecutionState(BaseModel):
     safe: bool
     cost_usd: Decimal | None = Field(default=None, ge=0)
     mission: str = Field(max_length=32768)
+    task_consumption: Consumption = Field(default_factory=Consumption)
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,7 +246,9 @@ def unpack_text(value: str) -> str:
     return decoded.decode("utf-8")
 
 
-def safe_to_replay(messages: list[ModelMessage]) -> bool:
+def safe_to_replay(
+    messages: list[ModelMessage], *, replayable_tools: tuple[str, ...] = ()
+) -> bool:
     """Replay known read operations; unknown effects require an explicit review."""
     retryable = {
         "web_search",
@@ -261,6 +266,7 @@ def safe_to_replay(messages: list[ModelMessage]) -> bool:
         "restore_memory",
         "read_plan",
         "search_conversation_history",
+        *replayable_tools,
     }
     pending: dict[str, str] = {}
     for message in messages:
