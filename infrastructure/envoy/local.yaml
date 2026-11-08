@@ -1140,7 +1140,7 @@ static_resources:
                           headers: [{name: ':method', string_match: {exact: GET}}]
                         route: {cluster: legal_service, timeout: 5s}
                       - match:
-                          safe_regex: {regex: '^/[a-z][a-z0-9_/-]{0,127}/mcp$'}
+                          safe_regex: {regex: '^/[a-z][a-z0-9_/-]*/mcp$'}
                           headers: [{name: ':method', string_match: {exact: POST}}]
                         route: {cluster: legal_service, timeout: 60s}
                       - match: {prefix: /}
