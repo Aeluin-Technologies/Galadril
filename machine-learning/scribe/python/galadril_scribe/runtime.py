@@ -1433,7 +1433,7 @@ class Runtime:
                         else None
                     )
                     replayable_tools = self.extensions.replayable(
-                        request.tool_ids
+                        request.tool_ids, toolsets=orchestrator_tools
                     )
                     if workflow is not None:
 

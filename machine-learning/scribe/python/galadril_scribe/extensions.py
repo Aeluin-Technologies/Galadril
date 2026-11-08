@@ -302,15 +302,31 @@ class ToolRegistry:
             extension.factory(), MediatedToolset
         )
 
-    def replayable(self, identifiers: tuple[str, ...]) -> tuple[str, ...]:
+    def replayable(
+        self,
+        identifiers: tuple[str, ...],
+        *,
+        toolsets: Sequence[AbstractToolset[Dependencies]] | None = None,
+    ) -> tuple[str, ...]:
         """Accept replay guarantees only for a selected factory's own registered tools."""
+        owned: dict[str, AbstractToolset[Dependencies]] = {}
+        for item in toolsets or ():
+            while isinstance(item, WrapperToolset):
+                if isinstance(item, AvailableToolset):
+                    owned[item.capability_id] = item.wrapped
+                    break
+                item = item.wrapped
         names: list[str] = []
         for identifier in identifiers:
             extension = self._extensions.get(identifier)
             if extension is None:
                 continue
             try:
-                toolset = extension.factory()
+                toolset = (
+                    extension.factory()
+                    if toolsets is None
+                    else owned.get(identifier)
+                )
             except Exception as error:
                 logger.warning(
                     "scribe.replay.policy_unavailable",
