@@ -128,7 +128,7 @@ from galadril_scribe.media import StorageMedia
 from galadril_scribe.media import content as content
 from galadril_scribe.private_context import PrivateContextProcessor
 from galadril_scribe.sandbox import Sandbox, SandboxFailure
-from galadril_scribe.step_store import GatewayStepStore
+from galadril_scribe.step_store import GatewayStepStore, serialized_state_access
 from galadril_scribe.teams import (
     AgentDefinition,
     AgentReport,
@@ -1335,7 +1335,9 @@ class Runtime:
             deps.web_closed = resumed.web_closed
             deps.web_requires_approval |= resumed.web_requires_approval
 
-        async def state_access(key: str, value: JsonValue | None) -> JsonValue:
+        async def gateway_state_access(
+            key: str, value: JsonValue | None
+        ) -> JsonValue:
             payload: dict[str, JsonValue] = {
                 "operation": "agent_state",
                 "key": key,
@@ -1348,9 +1350,23 @@ class Runtime:
                 headers={"authorization": f"Bearer {deps.capability}"},
                 json=payload,
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                state_kind = key.partition(":")[0]
+                logger.warning(
+                    "scribe.state.rejected",
+                    status_code=response.status_code,
+                    state_kind=state_kind
+                    if state_kind in {"native", "checkpoint", "evidence"}
+                    else "other",
+                    write=value is not None,
+                )
+                raise
             result = cast(JsonValue, response.json())
             return unpack_text(result) if isinstance(result, str) else result
+
+        state_access = serialized_state_access(gateway_state_access)
 
         durable = isinstance(request, GenerationRequest)
         memory_capability = ExecutionMemory(

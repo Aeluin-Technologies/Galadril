@@ -1840,3 +1840,144 @@ async def test_private_memory_requires_web_approval_after_recall_or_recovery(
     assert outbound == []
     assert len(returns) == 1
     assert "not authorized" in returns[0]
+
+
+@pytest.mark.parametrize("status", [403, 404, 503])
+@pytest.mark.anyio
+async def test_durable_generation_continues_when_graph_context_is_denied(
+    status: int,
+) -> None:
+    from galadril_scribe.contracts import GenerationRequest
+    from pydantic import JsonValue
+    from pydantic_ai.models.function import FunctionModel
+
+    persisted: dict[str, JsonValue] = {}
+    operations: list[str] = []
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        operation = payload["operation"]
+        operations.append(operation)
+        if operation in {"context", "conversation_memory"}:
+            return httpx.Response(status, text="private-context-canary")
+        assert operation == "agent_state"
+        if payload.get("value") is not None:
+            persisted[payload["key"]] = payload["value"]
+            return httpx.Response(200, json=True)
+        return httpx.Response(
+            200, content=json.dumps(persisted.get(payload["key"]))
+        )
+
+    async def response(messages: object, info: object) -> AsyncIterator[str]:
+        assert "private-context-canary" not in str(messages)
+        yield "I can continue with the authorized evidence."
+
+    selected = GenerationRequest.model_validate(
+        request().model_dump()
+        | {
+            "id": "b" * 32,
+            "conversation_memory": True,
+            "graph_context": {"kind": "entity", "id": "private-entity"},
+        }
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    assert "checkpoint" in persisted
+    assert "private-context-canary" not in str(chunks)
+
+
+@pytest.mark.anyio
+async def test_state_writes_serialize_optimistic_revisions_without_retrying_denials() -> (
+    None
+):
+    from galadril_scribe.step_store import serialized_state_access
+    from pydantic import JsonValue
+
+    revision = 0
+    saved: list[JsonValue] = []
+
+    async def optimistic(key: str, value: JsonValue | None) -> JsonValue:
+        nonlocal revision
+        observed = revision
+        await asyncio.sleep(0)
+        if observed != revision:
+            raise RuntimeError("Workspace revision conflict")
+        revision += 1
+        saved.append(value)
+        return True
+
+    with pytest.raises(RuntimeError, match="Workspace revision conflict"):
+        await asyncio.gather(
+            optimistic("checkpoint", "raw-first"),
+            optimistic("checkpoint", "raw-second"),
+        )
+    revision = 0
+    saved.clear()
+
+    access = serialized_state_access(optimistic)
+    assert await asyncio.gather(
+        access("checkpoint", "first"), access("checkpoint", "second")
+    ) == [True, True]
+    assert saved == ["first", "second"]
+    calls = 0
+
+    async def denied(key: str, value: JsonValue | None) -> JsonValue:
+        nonlocal calls
+        calls += 1
+        httpx.Response(
+            403,
+            request=httpx.Request("POST", "http://gateway/internal/chat/tools"),
+        ).raise_for_status()
+        return None
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await serialized_state_access(denied)("checkpoint", "private")
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_durable_state_denial_stays_fatal_and_logs_only_bounded_metadata() -> (
+    None
+):
+    from galadril_scribe.contracts import GenerationRequest
+
+    def denied(incoming: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="private-state-canary")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(denied)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        selected = GenerationRequest.model_validate(
+            request().model_dump() | {"id": "b" * 32}
+        )
+        with capture_logs() as logs:
+            chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "failed"
+    state_logs = [
+        entry for entry in logs if entry.get("event") == "scribe.state.rejected"
+    ]
+    assert state_logs
+    for entry in state_logs:
+        assert entry["status_code"] == 403
+        assert entry["state_kind"] in {
+            "native",
+            "checkpoint",
+            "evidence",
+            "other",
+        }
+        assert isinstance(entry["write"], bool)
+        assert set(entry) == {
+            "event",
+            "log_level",
+            "status_code",
+            "state_kind",
+            "write",
+        }
+    assert "private-state-canary" not in str(logs) + str(chunks)

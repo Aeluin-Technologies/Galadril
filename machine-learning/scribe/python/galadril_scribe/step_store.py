@@ -7,7 +7,7 @@ import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai_harness.step_persistence import (
     ContinuableSnapshot,
@@ -18,6 +18,17 @@ from pydantic_ai_harness.step_persistence import (
 )
 
 from galadril_scribe.execution_memory import StateAccess, checkpoint_messages
+
+
+def serialized_state_access(access: StateAccess) -> StateAccess:
+    """Keep one generation's compare-and-swap writes ordered without retrying denials."""
+    lock = asyncio.Lock()
+
+    async def serialized(key: str, value: JsonValue | None) -> JsonValue:
+        async with lock:
+            return await access(key, value)
+
+    return serialized
 
 
 class GatewayStepStore(InMemoryStepStore):
