@@ -44,54 +44,23 @@ les variables project_ et profile_ et les échappe. Ne fournis pas ces
 variables dans la requête de compilation. Utilise uniquement les autorités
 vérifiées et présente le résultat comme un projet à relire.
 
-## Construction de la démonstration
+## Composition et révision
 
-Rédige en prose contemporaine, classique et dense. Ordonne les développements
-selon leurs dépendances. Chaque paragraphe établit une règle, précise une
-exception, qualifie un fait, répond à une objection ou tire une conséquence.
-Adapte le plan au dossier et cherche l'économie des moyens.
+Utilise cette compétence uniquement pour composer, réviser ou produire les
+écritures, après le travail de qualification. La compétence de raisonnement
+et de vocabulaire s'applique aussi ici. Présente les conclusions précises,
+principales, subsidiaires et accessoires, puis les moyens qui les soutiennent.
+Fais apparaître les questions préalables et les causes juridiques pertinentes.
+Resserre les mémoires ultérieurs sur les points encore débattus et signale les
+nouveautés. Numérote continûment les pièces d'un mémoire à l'autre; cite le
+passage utile plutôt que reproduire des pièces ou de longues décisions.
+Le guide TA/CAA recommande une écriture claire et proportionnée; il n'impose
+pas par lui-même une condition de recevabilité nouvelle.
 
-Les trois courts extraits suivants proviennent de conclusions publiées.
-Applique la méthode de démonstration à partir des seules prémisses du dossier
-traité. Réserve toute analogie juridique à une analyse distincte des sources.
-
-### Jean Lessi — examiner l’incidence d’une erreur
-
-> « Cette erreur est-elle de nature à entraîner la cassation de l’arrêt attaqué ? Nous le pensons. »
-
-Jean Lessi, conclusions sur CE, 16 mars 2016, *SCI Gilpierre*, n° 386878,
-p. 2. Après avoir identifié une erreur de droit, le rapporteur examine
-séparément son incidence et les raisons pour lesquelles le motif ne peut
-être sauvé. Distingue de même le constat du vice et la conséquence qui
-peut en être tirée.
-[Conclusions de Jean Lessi](https://www.conseil-etat.fr/fr/arianeweb/CRP/conclusion/2016-03-16/386878?download_pdf=#page=2).
-
-### Mireille Le Corre — distinguer deux objets de contrôle
-
-> « En revanche, il nous semble que la procédure, quant à elle, devenait irrégulière. »
-
-Mireille Le Corre, conclusions sur CE, 14 octobre 2019, *Société Les
-Téléskis de la Croix Fry*, n° 418317, p. 4. La rapporteure traite
-successivement la régularité de l’offre et celle de la procédure. Indique
-précisément à quel objet s’applique chaque objection et quelle prémisse
-justifie de passer à l’autre.
-[Conclusions de Mireille Le Corre](https://www.conseil-etat.fr/fr/arianeweb/CRP/conclusion/2019-10-14/418317?download_pdf=#page=4).
-
-### Aurélie Bretonneau — isoler les termes qui commandent le débat
-
-> « votre jurisprudence parcimonieuse n’a défini ni le terme “conclusions”, ni le verbe “opposer”. »
-
-Aurélie Bretonneau, conclusions sur CE, 21 septembre 2015, n° 369808,
-p. 1. La rapporteure identifie les deux termes du texte qui nécessitent
-une interprétation avant l’examen du cas. Explique quel mot ou quelle
-condition commande la qualification, puis applique le critère aux faits
-sourcés du dossier.
-[Conclusions d’Aurélie Bretonneau](https://www.conseil-etat.fr/fr/arianeweb/CRP/conclusion/2015-09-21/369808?download_pdf=#page=1).
-
-Identifie la question posée par chaque arrêt, les faits décisifs, les
-distinctions opérées et le motif qui emporte la solution. Distingue motifs
-du juge, conclusions du rapporteur public et doctrine. Cite l'autorité
-pour appuyer une proposition précise. À la relecture, supprime les phrases
-qui n'apportent aucune prémisse, preuve, distinction, objection,
-application ou conséquence. Maintiens la distinction entre faits établis,
-allégués et incertains.
+Sur demande de document, ne te limite pas à afficher du texte dans le chat :
+utilise le modèle recoursadmin et le compilateur existants. Une impossibilité
+technique doit être explicitée, sans prétendre avoir produit un PDF.
+N'utilise ni plugin_catalog ni enable_plugin pour découvrir un modèle depuis
+un chat spécialisé : list et read suffisent; l'administration des modèles
+appartient aux réglages. La compilation et le dépôt restent deux opérations
+distinctes; soumets toujours le projet à validation humaine.

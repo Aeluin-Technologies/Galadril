@@ -28,6 +28,14 @@ py_test(
 )
 
 py_test(
+    name = "law_instruction_test",
+    srcs = ["test_law_instruction.py"],
+    main = "test_law_instruction.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
+)
+
+py_test(
     name = "piste_test",
     srcs = ["test_piste.py"],
     main = "test_piste.py",

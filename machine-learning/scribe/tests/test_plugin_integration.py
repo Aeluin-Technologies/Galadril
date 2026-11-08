@@ -433,7 +433,7 @@ async def test_private_law_context_refuses_originals_before_model_or_pdf_fetch(
                 "capability": "a" * 64,
                 "execution_context": "law.administratif",
                 "team": _LAW_TEAM,
-                "tool_ids": ["law.algorithm.dossier"],
+                "tool_ids": ["law.algorithm.dossier", "law.mcp.research"],
                 "attachments": [attachment],
                 "history": [{"role": "user", "content": "PRIVATE_HISTORY"}],
             }
@@ -513,7 +513,7 @@ async def test_private_chat_projects_provider_context_before_generation(
                 "capability": "a" * 64,
                 "execution_context": "law.administratif",
                 "team": _LAW_TEAM,
-                "tool_ids": ["law.algorithm.dossier"],
+                "tool_ids": ["law.algorithm.dossier", "law.mcp.research"],
                 "prompt": "User prompt remains intact.",
                 "library_enabled": True,
                 "project_instructions": "Use the project instructions.",
@@ -540,7 +540,8 @@ async def test_private_chat_projects_provider_context_before_generation(
         assert "PRIVATE_SIGNATURE" not in repr(calls)
         assert "PDF exhibit: M. T." in repr(calls)
         assert "read_file" not in tools
-        assert "Coordonne les huit spécialistes" in repr(calls)
+        assert "instruct_litigation" in repr(calls)
+        assert "Raisonnement et vocabulaire" in repr(calls)
         assert "document_search" in tools
         assert "redact_document" in tools
         assert any(tool.endswith("validate_dossier") for tool in tools)

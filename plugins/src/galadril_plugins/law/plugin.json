@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
   "id": "law",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "capabilities": [
     {
       "id": "law.skill.coordination",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Coordination du dossier",
       "description": "Cadre la demande, les priorités et les missions des spécialistes du contentieux administratif.",
       "parameters_schema": {
@@ -20,21 +22,76 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard",
+        "role": "orchestrator"
+      }
+    },
+    {
+      "id": "law.skill.raisonnement",
+      "plugin_id": "law",
+      "plugin_version": "0.3.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Raisonnement et vocabulaire juridiques",
+      "description": "Socle obligatoire de qualification, de preuve et de vocabulaire pour tous les agents.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
@@ -47,9 +104,11 @@
     {
       "id": "law.skill.faits",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Faits et pièces",
       "description": "Établit la chronologie du dossier et rattache les faits aux pièces et aux pages.",
       "parameters_schema": {
@@ -57,28 +116,37 @@
         "additionalProperties": false
       },
       "compatibility": {
-        "requires": ["law.algorithm.dossier"]
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       },
       "execution_profile": {
         "contexts": [
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
@@ -90,9 +158,11 @@
     {
       "id": "law.skill.recevabilite",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Recevabilité et procédure",
       "description": "Vérifie la voie de droit, la compétence et les conditions de recevabilité à partir de sources et de faits établis.",
       "parameters_schema": {
@@ -104,35 +174,49 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "standard"
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       }
     },
     {
       "id": "law.skill.jurisprudence",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Recherche de jurisprudence",
       "description": "Recherche et vérifie la jurisprudence administrative favorable et contraire dans les sources officielles accessibles.",
       "parameters_schema": {
@@ -144,35 +228,49 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "standard"
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       }
     },
     {
       "id": "law.skill.veille",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Veille juridique",
       "description": "Recherche les évolutions jurisprudentielles et normatives sur la période demandée.",
       "parameters_schema": {
@@ -184,35 +282,49 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "standard"
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       }
     },
     {
       "id": "law.skill.partie-adverse",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Revue indépendante de la défense",
       "description": "Voici la requête que nous venons de recevoir. Représente la partie défenderesse et trouve les meilleurs angles d’attaque à partir de la requête et des pièces communiquées.",
       "parameters_schema": {
@@ -224,35 +336,49 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "sealed"
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       }
     },
     {
       "id": "law.skill.redaction",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Rédaction contentieuse",
       "description": "Charge le skill de rédaction et applique ses exemples de démonstration à un projet de requête, de mémoire ou de courrier au greffe.",
       "parameters_schema": {
@@ -260,28 +386,37 @@
         "additionalProperties": false
       },
       "compatibility": {
-        "requires": ["law.algorithm.dossier"]
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       },
       "execution_profile": {
         "contexts": [
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
@@ -293,9 +428,11 @@
     {
       "id": "law.skill.citations",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Vérification des citations",
       "description": "Vérifie les décisions, textes, renvois et pièces cités dans un projet.",
       "parameters_schema": {
@@ -307,35 +444,49 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "standard"
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       }
     },
     {
       "id": "law.skill.relecture",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "skill",
-      "targets": ["scribe"],
+      "targets": [
+        "scribe"
+      ],
       "name": "Relecture avant validation",
       "description": "Contrôle la cohérence d'un projet d'acte, du bordereau et du rendu final.",
       "parameters_schema": {
@@ -343,28 +494,37 @@
         "additionalProperties": false
       },
       "compatibility": {
-        "requires": ["law.algorithm.dossier"]
+        "requires": [
+          "law.algorithm.dossier",
+          "law.mcp.research"
+        ]
       },
       "execution_profile": {
         "contexts": [
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
@@ -376,9 +536,12 @@
     {
       "id": "law.algorithm.dossier",
       "plugin_id": "law",
-      "plugin_version": "0.2.0",
+      "plugin_version": "0.3.0",
       "kind": "algorithm",
-      "targets": ["pipeline", "scribe"],
+      "targets": [
+        "pipeline",
+        "scribe"
+      ],
       "step_type": "algorithm",
       "name": "Validate administrative litigation dossier",
       "description": "Validate extracted litigation structure, filings and their evidence references before drafting or downstream use.",
@@ -391,27 +554,57 @@
           {
             "id": "law.administratif",
             "name": "Contentieux administratif",
-            "aliases": ["administratif"],
+            "aliases": [
+              "administratif"
+            ],
             "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.judiciaire",
             "name": "Contentieux judiciaire",
-            "aliases": ["judiciaire"],
+            "aliases": [
+              "judiciaire"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           },
           {
             "id": "law.penal",
             "name": "Procès pénal",
-            "aliases": ["penal"],
+            "aliases": [
+              "penal"
+            ],
             "instructions": "",
             "privacy": "pseudonymized"
           }
         ],
         "requires_context": "law.administratif",
         "isolation": "standard"
+      }
+    },
+    {
+      "id": "law.mcp.research",
+      "plugin_id": "law",
+      "plugin_version": "0.3.0",
+      "kind": "mcp",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Official French legal research",
+      "description": "Read Légifrance and Judilibre through the authenticated Galadril MCP hub.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "x-galadril-mcp": {
+          "resource": "https://mcp.gravitalia.com/law/mcp",
+          "scopes": [
+            "legal:read"
+          ]
+        }
+      },
+      "execution_profile": {
+        "requires_context": "law.administratif"
       }
     }
   ],
@@ -446,9 +639,17 @@
     "law.algorithm.dossier": {
       "pipeline": "galadril_plugins.law.dossier.dossier_block",
       "scribe": "galadril_plugins.law.tools.tools"
+    },
+    "law.skill.raisonnement": {
+      "skill": "skills/administratif/raisonnement.md"
+    },
+    "law.mcp.research": {
+      "scribe": "galadril_plugins.law.piste_tools.research_tools"
     }
   },
-  "document_templates": ["recoursadmin.json"],
+  "document_templates": [
+    "recoursadmin.json"
+  ],
   "ontologies": [
     "socle-ontology.json",
     "ecritures-ontology.json",

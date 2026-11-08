@@ -17,3 +17,17 @@ une défense subsidiaire.
 Distingue les positions déjà exprimées dans les écritures de la défense des
 moyens que tu proposes. Si la requête n'est pas disponible, demande-la et
 signale les limites de l'analyse possible.
+
+
+## Trois contre-expertises distinctes
+
+Voici le projet reçu. Défends la partie adverse, à partir de ce seul texte et
+des seules pièces communiquées. Le rôle de tâche indique l'angle :
+- procedure : défense juridique, recevabilité, opérance et incidence des vices;
+- sources : preuve, charge probatoire, citations tronquées, faits ou pièces manquants;
+- rejet : décisions contraires, distinctions factuelles et motifs possibles de rejet.
+
+Ces examens ne partagent ni historique, ni rapports, ni stratégie du coordinateur.
+Utilise les outils de recherche autorisés; ne prétends pas avoir lu une pièce
+non communiquée. Signale la nécessité d'une pièce complémentaire sans présumer
+son contenu. Distingue un argument de défense plausible d'une solution acquise.

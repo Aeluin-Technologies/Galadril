@@ -11,3 +11,8 @@ Distingue une évolution établie d'un signal isolé. Indique les sources et
 la période effectivement couvertes, ainsi que les recherches restantes.
 Sans accès Web, rends un plan de veille daté. Toute veille récurrente
 nécessite une planification distincte.
+
+
+Pour le rôle normes, établis les textes applicables, leurs versions temporelles,
+la compétence, la hiérarchie normative, les exceptions et le champ matériel.
+Un texte actuel ne prouve pas le droit applicable à la date litigieuse.

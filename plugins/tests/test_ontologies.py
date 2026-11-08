@@ -237,7 +237,10 @@ class Packages(unittest.TestCase):
             for skill in registry.skills()
             if skill.capability.plugin_id == "law"
         ]
-        self.assertEqual(len(skills), 9)
+        self.assertEqual(len(skills), 10)
+        self.assertIn(
+            "law.skill.raisonnement", {skill.capability.id for skill in skills}
+        )
         for skill in skills:
             self.assertTrue(
                 manifest["bindings"][skill.capability.id]["skill"].startswith(
