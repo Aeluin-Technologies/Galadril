@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-5f36fcdc.js";
+            window.path_to_searchindex_js = "searchindex-e012c616.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-5b7553d6.js"></script>
+        <script src="toc-e13b2548.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2706,6 +2706,221 @@ the OpenAI web provider, private-source queries still require confirmation.
 Hosted chat sessions declare callable functions in the Responses <code>tools</code> field;
 function declarations are not substituted with deferred <code>additional_tools</code> inputs.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="scoped-instruction-through-generic-task-graphs"><a class="header" href="#scoped-instruction-through-generic-task-graphs">Scoped instruction through generic task graphs</a></h1>
+<p>Scribe owns a domain-neutral durable task graph. Installed workflow toolsets
+declare allowed skills, common instructions, role instructions, research tools
+and replay guarantees. Plugin arguments cannot import code or supply service
+URLs. Legal decomposition and procedural rules belong entirely to <code>law</code>.</p>
+<p><code>law</code> first decomposes the original memorandum into grounds with exact passages,
+questions, legal causes, branches, exhibit indices and acyclic dependencies. It
+rejects passages absent from the supplied original text and indices outside the
+authorized attachment scope. Independent grounds run in parallel; each ground
+receives separate norms, case-law, evidence and objections examinations. A
+justified discovery can refine the question or request another already authorized
+exhibit. Requests outside that scope fail closed.</p>
+<p>Task ordering (<code>depends_on</code>) does not grant read access. Only explicit artifact
+inputs (<code>input_ids</code>) enter a task conversation. Large artifacts have exact
+paginated reads; they are not silently replaced by summaries. Each child receives
+a fresh dependency context without chat history, project instructions, memory,
+mailbox, sandbox or sibling reports. Registered research tools retain mediated
+Gateway authorization, including when the selected plugin requires confidentiality.</p>
+<p>The coordinator composes a draft from the research reports. Three separate
+defenders receive only this released draft and explicitly shared exhibits. They
+independently examine procedure, proof/citations and contrary case law. The
+coordinator revises the draft; a separate final task checks references, temporal
+versions, exhibits, conclusions and the inventory. Human validation remains
+mandatory. The registered <code>recoursadmin</code> template and encrypted document profile
+injection retain their existing boundaries.</p>
+<p>All workers, including the coordinator, receive <code>raisonnement.md</code>. Drafting
+instructions remain in <code>redaction.md</code>; incidence-of-defects instructions are a
+single plugin-owned resource shared by the relevant roles. Danthony, El Bahi and
+Hallal remain distinct mechanisms. Structural checks reject category mismatches
+but cannot establish the truth of factual or legal premises.</p>
+<p>Each immutable task scope is checkpointed before execution and after completion
+or interruption. Completed tasks are restored without repeating model calls;
+changed scopes require a new revision. Consumption after the last coordinator
+checkpoint is reconciled during replay. Research tasks may replay after an
+interruption; this does not grant replay permission for tools with side effects.</p>
+<p>Concurrency, graph size, model requests, tokens, cost and overall duration remain
+bounded. Before starting concurrent work, the graph reserves capacity and retains
+a coordinator reserve. Tool calls have no numerical quota. A failed batch cancels
+and joins its sibling tasks so their checkpoints and consumption are recorded.
+The static team roster remains for compatibility; it is not the dynamic task
+count. Report identities use the existing authorized report reader in Pengolo.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="authenticated-mcp-hub"><a class="header" href="#authenticated-mcp-hub">Authenticated MCP hub</a></h1>
+<p>The MCP server belongs to <code>services/mcp</code>; shared authorization and the native
+client belong to <code>platform/mcp</code>. Plugins declare client capabilities and never
+host public servers. The first provider supplies Légifrance and Judilibre through
+PISTE. Installed providers register tools in separately authorized namespaces.</p>
+<h2 id="authority"><a class="header" href="#authority">Authority</a></h2>
+<p>Public clients use the Galadril login and OAuth authorization code with PKCE
+S256. Configure <code>AUTH_MCP_CLIENTS</code> on the dashboard with a JSON array:</p>
+<pre><code class="language-json">[
+  {
+    "id": "galadril-mcp-chatgpt-law",
+    "name": "Galadril legal research",
+    "redirectUris": ["https://REPLACE-WITH-THE-EXACT-CHATGPT-CALLBACK"],
+    "resource": "https://mcp.gravitalia.com/law/mcp",
+    "scopes": ["legal:read"]
+  }
+]
+</code></pre>
+<p>Copy the exact callback displayed when creating the ChatGPT connection. This is
+a public OAuth client, with token endpoint authentication method <code>none</code>; it has
+no shared client secret. Registration is deployment controlled, not anonymous.
+The dashboard reconciles this policy with Hydra and refuses conflicting existing
+registrations. The authorization bridge binds Hydra’s audience to the registered
+MCP resource. Tokens issued for the dashboard or another namespace are rejected.</p>
+<p>Use an externally reachable <code>AUTH_PUBLIC_ORIGIN</code> and a consistent <code>AUTH_ISSUER</code>.
+The OAuth metadata lives at <code>/.well-known/oauth-authorization-server</code>; protected
+resource metadata lives under <code>mcp.gravitalia.com</code>. The existing Galadril identity,
+passkey and consent checks remain in force. Enabling the Docker overlay does not
+create a Cloudflare tunnel, DNS record or ChatGPT connection.</p>
+<p>Native Pengolo calls do not reuse the public OAuth token or expose the generation
+capability to the provider. The client exchanges generation authority with Gateway
+for a random, resource-bound grant lasting 60 seconds. The MCP introspects this
+grant on every call. Gateway checks the active generation, owner, current user
+access, selected registered capability, execution context and resource. A user,
+session or MCP identifier alone never authorizes an invocation. Grants cannot
+invoke the other chat tools and expire after Gateway restarts.</p>
+<h2 id="deployment"><a class="header" href="#deployment">Deployment</a></h2>
+<p>Build <code>//services/mcp:images</code>. Add <code>infrastructure/docker/law-mcp.yaml</code> to the
+normal Compose files only on deployments configured for MCP. The overlay adds only
+the read-only unprivileged MCP service. The existing API Envoy process owns the
+loopback MCP listener on port 8098, with an exact host match for
+<code>mcp.gravitalia.com</code>. No additional proxy or tunnel container is needed.</p>
+<p>Add a public hostname to the existing Cloudflare Tunnel configuration:
+<code>mcp.gravitalia.com</code> → <code>http://127.0.0.1:8098</code>, preserving the original Host
+header (or explicitly setting it to <code>mcp.gravitalia.com</code>). The existing Compose
+connector <code>utils-email-tunnel</code> shares the API proxy network namespace; its current
+email-tracking profile and token mount remain unchanged. An independently managed
+connector can be reused if it can reach this loopback listener. Native Pengolo
+calls do not require Cloudflare. No host port is published for MCP, and the
+listener returns 404 for hosts or paths outside its public contract.</p>
+<p><code>MCP_NAMESPACES</code> declares installed providers, capability identities, paths, OAuth
+scopes and allowed clients. These are operator settings, never tool arguments.
+The service validates each namespace independently and returns 404 for unknown
+paths. Future providers use this registration contract and the shared verifier.</p>
+<p>PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
+Envoy or a model prompt. Default file mounts are <code>.local/piste-key</code> and
+<code>.local/piste-oauth-key</code>; they must be regular files with mode 0600, readable by
+the configured service UID. The API key authenticates Judilibre. Légifrance uses
+the OAuth client ID and secret. <code>SECRET_KEY</code> in the API-key file is not the OAuth
+secret; use the separate OAuth file. JSON credential files are also supported.
+Server deployments may instead provide <code>LAW_PISTE_API_KEY</code>,
+<code>LAW_PISTE_CLIENT_ID</code>, <code>LAW_PISTE_CLIENT_SECRET</code> and
+<code>LAW_PISTE_ENVIRONMENT=production|sandbox</code>. Never put these values in a plugin
+manifest or repository.</p>
+<p>The API adapters use fixed PISTE origins, bounded responses and timeouts, cached
+OAuth tokens and no redirects. Search results are leads, not verified citations.
+<code>verify_citation</code> re-fetches a source and separately checks identity and quotation;
+it never certifies legal applicability. OTLP spans record provider operation and
+authorization outcomes without prompts, document text, query bodies or tokens.</p>
+<h2 id="verification-2"><a class="header" href="#verification-2">Verification</a></h2>
+<p>Tests use synthetic credentials and mock official API responses. MCP transport
+tests exercise unauthenticated denial, public metadata and authenticated discovery.
+Gateway tests cover resource-bound delegation. A real external OAuth connection
+still requires the configured public issuer, exact callback and Cloudflare tunnel.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="law-and-mcp-quality-evidence"><a class="header" href="#law-and-mcp-quality-evidence">Law and MCP quality evidence</a></h1>
+<p>Measured on 8 November 2026. This is a bounded review of the new Python MCP
+implementation, legal instruction workflow and generic task graph, not a quality
+score for the entire monorepo. Model behavior tests use synthetic fixtures and
+PydanticAI <code>FunctionModel</code>, not live legal advice or a real private dossier.</p>
+<h2 id="tools-and-coverage"><a class="header" href="#tools-and-coverage">Tools and coverage</a></h2>
+<ul>
+<li>Crapper: <code>6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d</code>.</li>
+<li>Mutator: <code>a5a0cb803b66e0cdb8bf471b3b08af701d424a41</code>.</li>
+<li>Dryer: <code>66ff6d21a42c04afcad89c78a80066176d1294b0</code>.</li>
+<li>Tests and coverage use Bazel with BuildBuddy, <code>--config=ci --config=release</code>,
+remote execution and no local fallback. Credentials remain in a private
+Bazel configuration file and are absent from reports.</li>
+<li>Python toolchain coverage is enabled. LCOV is collected with
+<code>--combined_report=none --experimental_fetch_all_coverage_outputs</code>,
+<code>--instrument_test_targets</code> and instrumentation for <code>platform/mcp</code>,
+<code>services/mcp</code>, <code>plugins</code> and <code>machine-learning/scribe</code>.</li>
+<li>Per-test LCOV records are merged by source path: line hits are added and
+branch hits are combined. A dependency’s zero-hit record must not replace
+coverage from the test that actually exercises it.</li>
+<li>Crapper uses existing coverage, preferring branch coverage inside functions.
+It never starts a language-specific test runner. Dryer uses threshold 0.8
+with its default minimum sizes; it found no candidates in the measured paths.</li>
+</ul>
+<p>The <a href="operations/law_mcp_quality.csv">per-function CSV</a> covers 71 functions in the MCP core
+and service, <code>law/instruction.py</code>, <code>law/tools.py</code>, <code>law/piste_tools.py</code>,
+<code>scribe/workflows.py</code> and <code>scribe/workflow_execution.py</code>. Every measured score is
+strictly below 10. The maximum is 9.9954 (<code>TaskSpec.scoped</code>), displayed as 10.0 by
+the CLI’s rounding. This does not mean every function or defensive branch has
+100% coverage. Existing large Runtime functions, Rust and frontend code are not
+included in this CRAP measurement.</p>
+<p>Initial implementation entry points were split by responsibility and retested:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Responsibility</th><th>Initial CC / branch coverage / CRAP</th><th>Final main check CC / coverage / CRAP</th></tr>
+</thead>
+<tbody>
+<tr><td>OAuth signature, identity and resource</td><td>18 / 56.2% / 45.1</td><td>6 / 100% / 6.0</td></tr>
+<tr><td>Official citation identity and quotation</td><td>17 / 20% / 165.0</td><td>6 / 100% / 6.0</td></tr>
+<tr><td>Instruction coordinator</td><td>14 / 55.8% / 30.9</td><td>6 / 55% / 9.3</td></tr>
+<tr><td>Native MCP authorization</td><td>8 / 55.6% / 13.6</td><td>6 / 71.4% / 6.8</td></tr>
+</tbody>
+</table>
+</div>
+<p>These are responsibility comparisons, not identical function bodies. Header
+parsing, key loading, source identity, quotation checks and refinement policy
+have their own entries in the CSV. The baseline is the first implementation,
+not the pre-feature <code>main</code> branch.</p>
+<h2 id="mutation-audit"><a class="header" href="#mutation-audit">Mutation audit</a></h2>
+<p>Mutation runs use isolated source copies, one worker and an explicit Bazel test
+command with timeout factor 30. Every failing invocation was checked for a
+completed failing test, rather than a build, authentication or timeout failure.</p>
+<ul>
+<li>Citation verifier: 22 executed mutants detected; no survivor. Two sites have
+no executable-line hit in Mutator’s mapping, although both provider paths are
+exercised by the tests.</li>
+<li>MCP URL policy, JWT identity/resource checks and native grant verification:
+25 detected, two equivalent survivors, one site not executed by coverage
+mapping. Other key-cache/loading methods were outside this mutation run.</li>
+<li>The two equivalent survivors change the minimum token-string length from
+one to zero or exclude one-character strings. Such strings cannot form a
+JWT; the decoder still rejects them before any authority is accepted.</li>
+</ul>
+<p>The initial campaigns exposed missing assertions for malformed source records,
+gateway failure responses containing otherwise valid identity data, exact size
+limits, token expiration arithmetic and allowed boundary values. Tests were
+added and the actionable survivors were rerun. The result is 47 detected
+non-equivalent mutations, not a repository-wide mutation score.</p>
+<h2 id="behavioral-evidence-and-limits"><a class="header" href="#behavioral-evidence-and-limits">Behavioral evidence and limits</a></h2>
+<p>Seventeen affected Bazel targets passed across the final targeted runs:
+Gateway, MCP delegation, Scribe Runtime/teams/plugin integration/document tools,
+task graphs, dynamic instruction, plugin templates/ontologies/PISTE/MCP,
+frontend authentication and frontend tool typechecks. Tests cover independent
+defenders, private history exclusion, exact artifact paging, evidence scope,
+budget reservations, replay accounting and research-question refinement.</p>
+<p>Useful BuildBuddy snapshots:</p>
+<ul>
+<li><a href="https://app.buildbuddy.io/invocation/d5c7829c-05cd-409b-bc0c-56ab00e0117b">Targeted cross-service checks</a>.</li>
+<li><a href="https://app.buildbuddy.io/invocation/ed26d9c5-57d9-4e32-90b3-0d4cbd6b385b">Gateway authorization and delegation</a>.</li>
+<li><a href="https://app.buildbuddy.io/invocation/9a73080d-b6dd-4b46-b51f-a01113843f0f">Coverage and evidence-scope checks</a>.</li>
+</ul>
+<p>The required <a href="https://app.buildbuddy.io/invocation/4fc21520-fa07-4691-a235-52c4f26ede9a">workspace gate</a>
+did not pass: 51 targets could not build under forced remote execution, including
+actions explicitly requiring local execution, and the host ran out of disk
+space. Three application test failures in that run were subsequently corrected
+and passed targeted reruns. Global CI success is therefore not established.</p>
+<p>Workspace Ruff passes. The changed Rust modules pass the nightly formatter;
+workspace formatting also reports unrelated existing files. The full Clippy run
+was attempted but exhausted disk space. Both required Gazelle commands built
+remotely but their generated Linux executables could not run on the macOS host.</p>
+<p>Read-only production PISTE contract checks returned HTTP 200 for Judilibre
+health, Légifrance decision consultation, JORF consultation, jurisprudence search
+and dated code-article search. Credentials and response bodies were not logged.
+This does not prove a full live Pengolo investigation or an external ChatGPT
+OAuth connection. The latter still requires the deployment’s exact callback,
+public issuer and configured Cloudflare tunnel.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chatgpt-plan-usage-in-personal-open-source-installations"><a class="header" href="#chatgpt-plan-usage-in-personal-open-source-installations">ChatGPT plan usage in personal open-source installations</a></h1>
 <p>Galadril uses the documented Sign in with ChatGPT open-source flow, not Codex’s
 private backend or another application’s OAuth client. This optional integration
@@ -2922,7 +3137,7 @@ Pengolo artifacts carry this tag. This is also required to collect inputs left b
 a process crash between writing S3 and admitting the queue row. Do not apply this
 rule to template revisions. Gateway’s staging bucket keeps its existing short
 staging lifecycle. No download URL grants seven days of unauthenticated access.</p>
-<h2 id="deployment"><a class="header" href="#deployment">Deployment</a></h2>
+<h2 id="deployment-1"><a class="header" href="#deployment-1">Deployment</a></h2>
 <p><code>infrastructure/docker/document-compiler.yaml</code> is a Linux-only opt-in Compose
 overlay. <code>infrastructure/kubernetes-overlays/document-compiler</code> is the Kubernetes
 entrypoint; it includes the normal Galadril base and a separate
