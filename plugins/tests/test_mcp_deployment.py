@@ -16,23 +16,29 @@ class MCPDeploymentTest(unittest.TestCase):
             (root / "infrastructure/docker/law-mcp.yaml").read_text()
         )
         services = compose["services"]
-        for name in ("law-mcp", "law-mcp-envoy", "law-mcp-tunnel"):
+        self.assertEqual(set(services), {"law-mcp"})
+        for name in ("law-mcp",):
             self.assertNotIn("ports", services[name])
             self.assertTrue(services[name]["read_only"])
-        tunnel = services["law-mcp-tunnel"]
-        self.assertEqual(tunnel["profiles"], ["mcp-public"])
-        self.assertNotIn("LAW_PISTE_API_KEY", tunnel.get("environment", {}))
-        self.assertIn("law-mcp-envoy", tunnel["depends_on"])
         for volume in services["law-mcp"]["volumes"]:
             self.assertTrue(volume["read_only"])
             self.assertFalse(volume["bind"]["create_host_path"])
         proxy = yaml.safe_load(
-            (root / "infrastructure/envoy/law-mcp.yaml").read_text()
+            (root / "infrastructure/envoy/local.yaml").read_text()
         )
-        listener = proxy["static_resources"]["listeners"][0]
+        listener = next(
+            item
+            for item in proxy["static_resources"]["listeners"]
+            if item["name"] == "cloudflare_mcp"
+        )
         self.assertEqual(
             listener["address"]["socket_address"]["address"], "127.0.0.1"
         )
+        host = listener["filter_chains"][0]["filters"][0]["typed_config"][
+            "route_config"
+        ]["virtual_hosts"][0]
+        self.assertEqual(host["domains"], ["mcp.gravitalia.com"])
+        self.assertIn("cookie", host["request_headers_to_remove"])
         routes = listener["filter_chains"][0]["filters"][0]["typed_config"][
             "route_config"
         ]["virtual_hosts"][0]["routes"]

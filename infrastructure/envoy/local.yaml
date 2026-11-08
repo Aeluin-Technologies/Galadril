@@ -1110,7 +1110,67 @@ static_resources:
                 - key: service.name
                   value:
                     string_value: gateway-proxy
+  - name: cloudflare_mcp
+    address:
+      socket_address: {address: 127.0.0.1, port_value: 8098}
+    filter_chains:
+      - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: law_mcp
+              normalize_path: true
+              merge_slashes: true
+              path_with_escaped_slashes_action: REJECT_REQUEST
+              max_request_headers_kb: 16
+              request_headers_timeout: 5s
+              stream_idle_timeout: 90s
+              route_config:
+                name: legal_research
+                virtual_hosts:
+                  - name: legal_research
+                    domains: [mcp.gravitalia.com]
+                    request_headers_to_remove: [cookie, x-forwarded-user, x-forwarded-email]
+                    response_headers_to_add:
+                      - header: {key: cache-control, value: no-store}
+                      - header: {key: x-content-type-options, value: nosniff}
+                    routes:
+                      - match:
+                          prefix: /.well-known/oauth-protected-resource/
+                          headers: [{name: ':method', string_match: {exact: GET}}]
+                        route: {cluster: legal_service, timeout: 5s}
+                      - match:
+                          safe_regex: {regex: '^/[a-z][a-z0-9_/-]{0,127}/mcp$'}
+                          headers: [{name: ':method', string_match: {exact: POST}}]
+                        route: {cluster: legal_service, timeout: 60s}
+                      - match: {prefix: /}
+                        direct_response: {status: 404}
+              http_filters:
+                - name: envoy.filters.http.local_ratelimit
+                  typed_config:
+                    '@type': type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                    stat_prefix: mcp_ingress
+                    token_bucket: {max_tokens: 120, tokens_per_fill: 120, fill_interval: 60s}
+                    filter_enabled: {default_value: {numerator: 100, denominator: HUNDRED}}
+                    filter_enforced: {default_value: {numerator: 100, denominator: HUNDRED}}
+                - name: envoy.filters.http.buffer
+                  typed_config:
+                    '@type': type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                    max_request_bytes: 65536
+                - name: envoy.filters.http.router
+                  typed_config:
+                    '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
+  - name: legal_service
+    type: STATIC
+    connect_timeout: 2s
+    load_assignment:
+      cluster_name: legal_service
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: {address: 127.0.0.1, port_value: 8097}
   - name: pengolo_staging
     connect_timeout: 3s
     type: STRICT_DNS
