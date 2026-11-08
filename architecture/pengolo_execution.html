@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-359c92c3.js";
+            window.path_to_searchindex_js = "../searchindex-b63ba327.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-5b7553d6.js"></script>
@@ -217,9 +217,16 @@ its report closes consultations and public web research for that synthesis.</p>
 <code>SCRIBE_CHAT_TOKEN_LIMIT</code>, <code>SCRIBE_RUN_TIMEOUT_SECONDS</code>,
 <code>SCRIBE_RESEARCH_MODEL_REQUESTS</code>, <code>SCRIBE_RESEARCH_TOKEN_LIMIT</code>, and
 <code>SCRIBE_RESEARCH_TIMEOUT_SECONDS</code>. Compose forwards them. Selecting a specialist
-team uses the investigation profile; ordinary chats can select it in the model menu.
+team automatically uses the investigation profile; ordinary chats use the chat profile.
 The existing <code>SCRIBE_MAX_TOOL_CALLS</code> setting bounds optional paid hosted OpenAI
 search only; it does not limit native tools or SearchXNG queries.</p>
+<p>Ordinary chats expose <code>search_emails</code>, <code>read_email</code> and <code>propose_email</code> directly.
+They use the generation-scoped Gateway lease, not indexing as a prerequisite
+for mailbox access. Reply proposals retain the original mailbox/message parent;
+sender selection and sending remain explicit user actions. Read failures return
+bounded <code>denied</code> or <code>unavailable</code> outcomes, not a fabricated tool quota. Private
+specialist contexts retain their restricted tool set and do not gain raw mail
+access through these ordinary-chat tools.</p>
 <p><code>SCRIBE_CHAT_COST_LIMIT_USD</code> and <code>SCRIBE_RESEARCH_COST_LIMIT_USD</code> are optional native
 PydanticAI cost limits. Cost and token limits depend on provider usage reporting;
 unavailable prices remain unknown rather than zero. OTLP records model requests,

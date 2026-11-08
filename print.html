@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-359c92c3.js";
+            window.path_to_searchindex_js = "searchindex-b63ba327.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5b7553d6.js"></script>
@@ -2634,9 +2634,16 @@ its report closes consultations and public web research for that synthesis.</p>
 <code>SCRIBE_CHAT_TOKEN_LIMIT</code>, <code>SCRIBE_RUN_TIMEOUT_SECONDS</code>,
 <code>SCRIBE_RESEARCH_MODEL_REQUESTS</code>, <code>SCRIBE_RESEARCH_TOKEN_LIMIT</code>, and
 <code>SCRIBE_RESEARCH_TIMEOUT_SECONDS</code>. Compose forwards them. Selecting a specialist
-team uses the investigation profile; ordinary chats can select it in the model menu.
+team automatically uses the investigation profile; ordinary chats use the chat profile.
 The existing <code>SCRIBE_MAX_TOOL_CALLS</code> setting bounds optional paid hosted OpenAI
 search only; it does not limit native tools or SearchXNG queries.</p>
+<p>Ordinary chats expose <code>search_emails</code>, <code>read_email</code> and <code>propose_email</code> directly.
+They use the generation-scoped Gateway lease, not indexing as a prerequisite
+for mailbox access. Reply proposals retain the original mailbox/message parent;
+sender selection and sending remain explicit user actions. Read failures return
+bounded <code>denied</code> or <code>unavailable</code> outcomes, not a fabricated tool quota. Private
+specialist contexts retain their restricted tool set and do not gain raw mail
+access through these ordinary-chat tools.</p>
 <p><code>SCRIBE_CHAT_COST_LIMIT_USD</code> and <code>SCRIBE_RESEARCH_COST_LIMIT_USD</code> are optional native
 PydanticAI cost limits. Cost and token limits depend on provider usage reporting;
 unavailable prices remain unknown rather than zero. OTLP records model requests,
@@ -3857,10 +3864,13 @@ repository and path. lakeFS stores immutable revisions while S3 remains the
 physical object store. A lakeFS commit ID is returned unchanged as an opaque
 Registry revision ID and is used for optimistic writes, publication pinning,
 and reproducible Vision execution.</p>
-<p>Tenant lifecycle is also owned by Registry. Internal callers may validate only
+<p>Tenant lifecycle is also owned by Registry. Internal callers may validate
 a bounded, explicitly supplied list against Registry-owned S3 markers. Empty
-validation requests are rejected and Registry exposes no tenant enumeration
-operation. Reads fail closed for missing tenants; artifact insertions
+validation requests are rejected. A separate paginated <code>ListTenants</code> RPC discovers
+initialized tenants within Registry’s configured storage namespace; proxy policies
+reserve it to Intake and Vision, excluding Gateway and public callers. Shared Rust
+and Python clients own pagination, cursor checks, and tenant identity validation.
+Reads fail closed for missing tenants; artifact insertions
 initialize the server-derived S3 marker and lakeFS repository when necessary.
 The tenant deletion RPC requires an exact repeated tenant ID and exists solely
 for irreversible GDPR erasure of both lakeFS metadata and physical S3 objects.</p>
@@ -3895,9 +3905,10 @@ from its immutable revision.</p>
 PostgreSQL RLS, and records audit/access events. Audit rows may refer to opaque
 Registry revisions, but PostgreSQL does not persist ontology or pipeline
 artifacts.</p>
-<p>Vision workers load an explicitly selected tenant pipeline and block-local
-ontology slices by tenant, pipeline, block, and immutable pipeline revision.
-They retain the
+<p>Vision workers discover tenants and deployed pipelines automatically through
+Registry, with optional explicit restrictions for isolated workers. Block-local
+ontology slices remain pinned by tenant, pipeline, block, and immutable pipeline
+revision. They retain the
 FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.</p>
 <h2 id="ontology-collaboration"><a class="header" href="#ontology-collaboration">Ontology collaboration</a></h2>
 <p>Registry records ontology operations in immutable tenant revisions. Draft
