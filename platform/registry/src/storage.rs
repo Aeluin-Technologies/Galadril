@@ -85,9 +85,40 @@ pub struct TenantSnapshot {
     pub revision_id: String,
 }
 
+#[derive(Debug)]
+/// Bounded discovery projection without repository or object locations.
+pub struct TenantPage {
+    /// Initialized tenant identities suitable for runtime artifact reads.
+    pub tenant_ids: Vec<String>,
+    /// Opaque cursor that does not expose repository or object locations.
+    pub next_page_token: Option<String>,
+}
+
+pub(crate) fn validate_discovery_page(
+    limit: u32,
+    token: Option<&str>,
+) -> Result<()> {
+    ensure!((1..=100).contains(&limit), "invalid tenant discovery limit");
+    ensure!(
+        token.is_none_or(|value| !value.is_empty() &&
+            value.len() <= 4096 &&
+            value.bytes().all(|byte| byte.is_ascii_graphic())),
+        "invalid tenant discovery cursor"
+    );
+    Ok(())
+}
+
 #[async_trait]
 /// Versioned storage contract kept below all domain semantics.
 pub trait RevisionStore: Send + Sync {
+    /// Enumerates initialized tenants within this Registry's storage
+    /// namespace.
+    async fn list_tenants(
+        &self,
+        limit: u32,
+        page_token: Option<&str>,
+    ) -> Result<TenantPage>;
+
     /// Verifies that the tenant marker physically exists in S3.
     async fn tenant_exists(&self, tenant_id: &str) -> Result<bool>;
 
@@ -692,6 +723,61 @@ impl S3TenantDirectory {
 
 #[async_trait]
 impl RevisionStore for LakeFsStore {
+    async fn list_tenants(
+        &self,
+        limit: u32,
+        page_token: Option<&str>,
+    ) -> Result<TenantPage> {
+        validate_discovery_page(limit, page_token)?;
+        let directory = &self.directory;
+        let listed = directory
+            .client
+            .list_objects_v2()
+            .bucket(&directory.bucket)
+            .prefix(&directory.prefix)
+            .delimiter("/")
+            .max_keys(i32::try_from(limit)?)
+            .set_continuation_token(page_token.map(str::to_owned))
+            .send()
+            .await
+            .context("S3 tenant discovery failed")?;
+        let mut tenant_ids =
+            Vec::with_capacity(listed.common_prefixes().len());
+        for item in listed.common_prefixes() {
+            let tenant = item
+                .prefix()
+                .and_then(|prefix| prefix.strip_prefix(&directory.prefix))
+                .and_then(|relative| relative.strip_suffix('/'))
+                .filter(|tenant| valid_tenant(tenant))
+                .context("S3 returned invalid tenant discovery prefix")?;
+            if self.marker(tenant).await?.is_some() {
+                tenant_ids.push(tenant.to_owned());
+            }
+        }
+        let next_page_token = if listed.is_truncated() == Some(true) {
+            let token = listed
+                .next_continuation_token()
+                .context("S3 tenant discovery cursor missing")?;
+            validate_discovery_page(limit, Some(token))?;
+            ensure!(
+                Some(token) != page_token,
+                "S3 tenant discovery cursor repeated"
+            );
+            Some(token.to_owned())
+        } else {
+            None
+        };
+        tracing::debug!(
+            tenants = tenant_ids.len(),
+            has_more = next_page_token.is_some(),
+            "registry_tenant_discovery_page"
+        );
+        Ok(TenantPage {
+            tenant_ids,
+            next_page_token,
+        })
+    }
+
     async fn tenant_exists(&self, tenant_id: &str) -> Result<bool> {
         ensure!(valid_tenant(tenant_id), "invalid tenant ID");
         Ok(self.marker(tenant_id).await?.is_some())
@@ -997,6 +1083,65 @@ mod tests {
             "404 Not Found",
             "<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>",
         )
+    }
+
+    #[tokio::test]
+    async fn discovery_pages_only_initialized_tenants_inside_registry_namespace()
+    -> Result<()> {
+        let listing = "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><IsTruncated>true</IsTruncated><NextContinuationToken>opaque-next</NextContinuationToken><CommonPrefixes><Prefix>registry/tenant_a/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>registry/uninitialized/</Prefix></CommonPrefixes></ListBucketResult>";
+        let (endpoint, handle) = mock_lakefs(vec![
+            response("200 OK", listing),
+            response("200 OK", tenant_marker("tenant_a")),
+            s3_missing(),
+            response("200 OK", "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><IsTruncated>false</IsTruncated><CommonPrefixes><Prefix>registry/tenant_b/</Prefix></CommonPrefixes></ListBucketResult>"),
+            response("200 OK", tenant_marker("tenant_b")),
+        ]).await?;
+        let mut settings = config("http://127.0.0.1:1");
+        settings.storage_namespace = "s3://lake/registry/".to_owned();
+        let store = LakeFsStore::new(settings, s3_config(&endpoint))?;
+        let first = store.list_tenants(100, None).await?;
+        assert_eq!(first.tenant_ids, ["tenant_a"]);
+        assert_eq!(first.next_page_token.as_deref(), Some("opaque-next"));
+        let second = store
+            .list_tenants(100, first.next_page_token.as_deref())
+            .await?;
+        assert_eq!(second.tenant_ids, ["tenant_b"]);
+        assert!(second.next_page_token.is_none());
+        let requests = handle.await??;
+        assert!(
+            requests
+                .first()
+                .context("first page")?
+                .contains("prefix=registry%2F")
+        );
+        assert!(
+            requests
+                .get(3)
+                .context("next page")?
+                .contains("continuation-token=opaque-next")
+        );
+        assert!(requests.iter().all(|request| request.starts_with("GET ")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_foreign_prefixes_and_invalid_bounds()
+    -> Result<()> {
+        let (endpoint, handle) = mock_lakefs(vec![response("200 OK", "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><IsTruncated>false</IsTruncated><CommonPrefixes><Prefix>foreign/tenant_a/</Prefix></CommonPrefixes></ListBucketResult>")]).await?;
+        let mut settings = config("http://127.0.0.1:1");
+        settings.storage_namespace = "s3://lake/registry/".to_owned();
+        let store = LakeFsStore::new(settings, s3_config(&endpoint))?;
+        assert!(store.list_tenants(0, None).await.is_err());
+        assert!(store.list_tenants(101, None).await.is_err());
+        assert!(
+            store
+                .list_tenants(100, Some(&"a".repeat(4097)))
+                .await
+                .is_err()
+        );
+        assert!(store.list_tenants(100, None).await.is_err());
+        assert_eq!(handle.await??.len(), 1);
+        Ok(())
     }
 
     #[test]

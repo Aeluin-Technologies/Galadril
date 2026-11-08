@@ -24,6 +24,66 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_tenant_discovery_is_reserved_to_pipeline_workloads(self) -> None:
+        method = "/galadril.registry.v1.Registry/ListTenants"
+        for filename in ("registry.yaml", "local.yaml"):
+            config = yaml.safe_load((ROOT / filename).read_text())
+            grants: list[dict[str, object]] = []
+            for listener in config["static_resources"]["listeners"]:
+                for chain in listener.get("filter_chains", []):
+                    for item in chain["filters"]:
+                        for http_filter in item.get("typed_config", {}).get(
+                            "http_filters", []
+                        ):
+                            rules = http_filter.get("typed_config", {}).get(
+                                "rules", {}
+                            )
+                            if not isinstance(rules, dict):
+                                continue
+                            grants.extend(
+                                policy
+                                for policy in rules.get("policies", {}).values()
+                                if method in json.dumps(policy)
+                            )
+            self.assertEqual(len(grants), 1, filename)
+            self.assertEqual(
+                grants[0]["principals"],
+                [
+                    {
+                        "authenticated": {
+                            "principal_name": {
+                                "exact": "spiffe://galadril/" + caller
+                            }
+                        }
+                    }
+                    for caller in ("intake", "vision")
+                ],
+            )
+        root = ROOT.parent / "kubernetes"
+        policies = list(
+            yaml.safe_load_all((root / "security.yaml").read_text())
+        )
+        grants = [
+            rule
+            for policy in policies
+            for rule in policy.get("spec", {}).get("rules", [])
+            if method in json.dumps(rule)
+        ]
+        self.assertEqual(len(grants), 1)
+        self.assertEqual(
+            grants[0]["from"],
+            [
+                {
+                    "source": {
+                        "principals": [
+                            "cluster.local/ns/galadril/sa/" + caller
+                            for caller in ("intake", "vision")
+                        ]
+                    }
+                }
+            ],
+        )
+
     def test_tool_proxy_outlives_the_library_tool_budget(self) -> None:
         for filename in ("local.yaml", "scribe.yaml", "gateway.yaml"):
             config = yaml.safe_load((ROOT / filename).read_text())

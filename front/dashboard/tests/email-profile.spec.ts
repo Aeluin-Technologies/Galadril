@@ -1006,12 +1006,30 @@ for (const senderCount of [1, 2]) {
         .click();
     }
     await expect(page.getByText("Email sent", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Message", exact: true }),
+    ).toBeHidden();
+    await page
+      .getByRole("button", { name: "See details", exact: true })
+      .click();
+    await expect(
+      page.getByRole("textbox", { name: "Message", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Hide details", exact: true })
+      .click();
     expect(sendCount).toBe(1);
     expect((draft?.content as { track_opens?: boolean }).track_opens).toBe(
       true,
     );
     await page.reload();
     await expect(page.getByText("Email sent", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Sent", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "See details", exact: true })
+      .click();
     await expect(
       page.getByRole("button", { name: "Sent", exact: true }),
     ).toBeDisabled();

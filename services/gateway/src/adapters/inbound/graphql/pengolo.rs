@@ -456,6 +456,8 @@ pub struct OutputEvent {
 #[graphql(name = "PengoloReplay")]
 pub struct Replay {
     #[serde(default)]
+    pub specialist_report: Option<SpecialistReport>,
+    #[serde(default)]
     pub can_answer: bool,
     pub events: Vec<OutputEvent>,
     pub status: PengoloStatus,
@@ -463,6 +465,15 @@ pub struct Replay {
     pub message: Option<Message>,
     pub chat_revision: Option<Long>,
     pub chat_updated_at: Option<Long>,
+}
+
+#[derive(Deserialize, GraphQLObject)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[graphql(name = "PengoloSpecialistReport")]
+pub struct SpecialistReport {
+    pub id: String,
+    pub agent_id: String,
+    pub content: String,
 }
 
 #[derive(Deserialize, GraphQLObject)]

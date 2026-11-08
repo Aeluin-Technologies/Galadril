@@ -43,7 +43,7 @@ for (const decision of [true, false, "unavailable"] as const) {
         exact: true,
       }),
     ).toBeVisible();
-    await expect.poll(() => checked).toBe(true);
+    expect(checked).toBe(false);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollHeight <= innerHeight,
@@ -59,8 +59,7 @@ for (const decision of [true, false, "unavailable"] as const) {
       name: "Email ontology",
       exact: true,
     });
-    if (decision === true) await expect(link).toBeVisible();
-    else await expect(link).toHaveCount(0);
+    await expect(link).toHaveCount(0);
   });
 }
 
@@ -198,7 +197,45 @@ test("plugin ontologies stay isolated until an explicit tenant participant mappi
   ).toBe(true);
 });
 
-async function fixture(page: Page, canManage = true) {
+test("imported ontology layers expand and fold without editing the package", async ({
+  page,
+}, info) => {
+  const state = await fixture(page, true, true);
+  const shell = await page.request.get("/login");
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology");
+  await page
+    .getByRole("link", { name: "Email and documents", exact: true })
+    .click();
+  const graph = page.getByRole("region", {
+    name: "Related types",
+    exact: true,
+  });
+  const layer = graph.getByRole("button", {
+    name: "Shared foundations",
+    exact: true,
+  });
+  await expect(layer).toHaveAttribute("aria-expanded", "false");
+  await expect(graph.getByText("Plugin person", { exact: true })).toHaveCount(
+    0,
+  );
+  await layer.click();
+  await expect(layer).toHaveAttribute("aria-expanded", "true");
+  await expect(graph.getByText("Plugin person", { exact: true })).toBeVisible();
+  await layer.click();
+  await expect(layer).toHaveAttribute("aria-expanded", "false");
+  expect(state.writes).toBe(0);
+  await graph.screenshot({
+    path: info.outputPath("ontology-layers.png"),
+    animations: "disabled",
+  });
+});
+
+async function fixture(page: Page, canManage = true, layered = false) {
   const person = {
     resource_id: "mail.person",
     kind: "object_type",
@@ -234,7 +271,13 @@ async function fixture(page: Page, canManage = true) {
     version: "1.0.0",
     name: "Email and documents",
     ontologies: [
-      { id: "utils.messages", resources: [person, message, to, sender] },
+      {
+        id: "utils.messages",
+        ...(layered
+          ? { package_id: "sample.core", package_name: "Shared foundations" }
+          : {}),
+        resources: [person, message, to, sender],
+      },
     ],
   };
   const tenant = {
@@ -395,9 +438,12 @@ test("leaving the ontology workspace clears unfinished type fields", async ({
     .getByRole("textbox", { name: "Name", exact: true })
     .fill("Unfinished private type");
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
-  await page.getByRole("link", { name: "All ontologies", exact: true }).click();
-  await expect(page).toHaveURL(/\/ontology$/);
+  await expect(
+    page.getByRole("link", { name: "All ontologies", exact: true }),
+  ).toHaveCount(0);
   await page.goBack();
+  await expect(page).toHaveURL(/\/ontology$/);
+  await page.goForward();
   await page
     .getByRole("button", { name: "Add object type", exact: true })
     .click();

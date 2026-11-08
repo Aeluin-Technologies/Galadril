@@ -115,8 +115,8 @@ l’orchestrateur clôt les consultations avant de lire ce rapport.
 
 La rédaction demande de confirmer les coordonnées publiques trouvées à partir
 du nom ou de l'adresse d'un organisme. Les informations personnelles restent
-des champs à renseigner dans les sources hors du fil. La saisie dédiée, le
-profil chiffré réutilisable et leur liaison au compilateur restent à intégrer.
+des champs à renseigner dans les sources hors du fil. La saisie dédiée et le profil chiffré sont reliés au compilateur comme décrit
+ci-dessus.
 [Annuaire de l'administration et des services publics](https://www.data.gouv.fr/dataservices/api-annuaire-de-ladministration-et-des-services-publics).
 
 ## Télérecours Citoyens
@@ -128,147 +128,54 @@ stables, les règles de reprise et la provenance des documents. Le mécanisme
 d'ingestion autorisée de Gateway constitue le point d'intégration côté
 Galadril. [Contrat des connecteurs](../../../README.md#authorized-input-delivery).
 
-## Ontologie du dossier
+## Ontologies par couches
 
-[Le paquet `law.contentieux`](contentieux-ontology.json) fournit un socle
-commun aux contentieux français. Registry matérialise une vue du paquet pour
-le tenant et publie des révisions immuables. L’instance, le mémoire, les
-écritures, les pièces, les assertions, les moyens, les décisions et leur
-dispositif gardent des identifiants partagés. Le mémoire s’emploie aussi,
-par exemple, en cassation civile et devant la chambre de l’instruction.
-[CPC, art. 978](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000029729587)
-· [CPP, art. 198](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000051743075).
+Le catalogue 0.4.0 sépare les définitions communes des trois branches. Chaque
+couche importe une version exacte de ses dépendances, dans le même plugin.
 
-Pour un dossier, choisir le paquet de sa branche dans le catalogue. Les
-paquets `law.administratif`, `law.judiciaire` et `law.penal` contiennent le
-socle applicable et leur seule branche. Les références vers les ressources
-écartées sont exclues. `law.contentieux` conserve le catalogue historique
-complet et les révisions existantes.
+| Paquet              | Contenu propre                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `law.socle`         | Dossier, instance, juridiction, partie, jugement rendu et article.                                                    |
+| `law.ecritures`     | Une écriture avec son type : requête, mémoire en défense, en réplique ou complémentaire ; son auteur et son instance. |
+| `law.moyens`        | Moyens reliés aux écritures, aux articles et aux jugements cités.                                                     |
+| `law.preuves`       | Pièces, numérotation, document source et référence de fichier.                                                        |
+| `law.contentieux`   | Composition des quatre couches et contrat d’extraction du dossier.                                                    |
+| `law.administratif` | Instance et juridiction administratives, acte attaqué et document qui le révèle.                                      |
+| `law.judiciaire`    | Instance et juridiction civiles, commerciales ou sociales.                                                            |
+| `law.penal`         | Instance et juridiction pénales.                                                                                      |
 
-Les trois branches décrivent des pratiques au sein des deux ordres
-juridictionnels français. Le civil et le pénal partagent le type de
-juridiction `law.court.judicial`. La dénomination officielle de la
-juridiction, sa catégorie, la formation saisie et le rôle qu’elle exerce
-dans l’instance sont distincts.
-[Ministère de la Justice, organisation des cours et tribunaux](https://www.justice.gouv.fr/justice-france/cours-tribunaux).
+Le dossier relie les instances, les parties et les écritures. Une instance en
+cours conserve son numéro et sa procédure ; elle ne constitue pas un jugement.
+Le jugement rendu conserve son dispositif et sa source. Une partie comporte
+un nom, une adresse et un mode de représentation ; son représentant peut être
+une autre partie. Les informations personnelles du requérant destinées au
+rendu LaTeX restent dans le coffre privé décrit ci-dessus.
 
-| Branche | Juridictions et particularités |
-| --- | --- |
-| `law.administratif` | Tribunal administratif, cour administrative d’appel, Conseil d’État, Cour nationale du droit d’asile. Les actes administratifs, les recours préalables et le référé-suspension restent représentés dans leurs modules historiques. [Conseil d’État, les tribunaux et cours](https://www.conseil-etat.fr/site/qui-sommes-nous/les-tribunaux-et-cours). |
-| `law.judiciaire` | Matière civile, commerciale ou sociale. Le tribunal judiciaire, le tribunal de commerce et le conseil de prud’hommes relèvent de l’ordre judiciaire. L’assignation et les conclusions écrites spécialisent l’écriture commune. La requête introductive peut aussi servir en matière civile. [Juridictions civiles](https://www.justice.gouv.fr/justice-france/lorganisation-cours-tribunaux/lordre-judiciaire/juridictions-civiles) · [CPC, art. 54](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000042597347) · [CPC, art. 768](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000039623422). |
-| `law.penal` | Formations et juridictions pénales, dont le tribunal correctionnel, le tribunal de police, la cour criminelle départementale et la cour d’assises. Le chef de poursuite conserve la personne visée et les qualifications attribuées. Les prétentions civiles et les peines prononcées ont leurs propres types. [Juridictions pénales](https://www.justice.gouv.fr/justice-france/lorganisation-cours-tribunaux/lordre-judiciaire/juridictions-penales) · [CPP, du tribunal correctionnel](https://www.legifrance.gouv.fr/codes/id/LEGISCTA000006151898). |
+Les liens structurés permettent de remonter du moyen à l’écriture, aux articles,
+aux jurisprudences et aux pièces citées. Les cardinalités sont déclarées sur les
+propriétés et les liens ; elles décrivent le contrat attendu des producteurs.
+Une définition d’ontologie ne remplace pas l’autorisation ni la validation des
+occurrences. Aucune qualification ou conclusion juridique n’est inférée par ces
+paquets.
 
-Le paquet fournit des libellés de référence en anglais, avec les termes
-techniques français conservés. Le catalogue du dashboard fournit les
-libellés français sans modifier les définitions ni les noms saisis par
-les tenants.
+Registry reçoit une définition fermée après résolution des imports. Les couches
+ne créent aucun accès à une autre ontologie ou à un autre tenant. Leur provenance
+est conservée ; le graphe du dashboard peut les replier en blocs et les déplier.
+Les libellés officiels sont traduits par le frontend ; les termes techniques du
+droit français et les noms saisis par l’utilisateur restent inchangés.
 
-| Module | Ce qu’il représente |
-| --- | --- |
-| `law.procedure` | Dossier, instances, parties et juridiction. La catégorie de contentieux, la procédure, le degré, la fonction exercée par le juge et le ressort sont des axes distincts. |
-| `law.ecritures` | Requêtes et mémoires rattachés à leur instance de dépôt. Le dossier et chaque instance peuvent réunir plusieurs écritures. |
-| `law.evenements` | Événements matériels ou procéduraux datables. L’instant de l’événement et celui de sa consignation sont distincts. |
-| `law.actes` | Actes et recours administratifs préalables. Un document peut porter, notifier, publier ou seulement révéler un acte. Adoption, publication, notification et entrée en vigueur sont des événements distincts. |
-| `law.faits` | Événements matériels, assertions attribuées et appréciations probatoires successives. Le statut allégué, contesté ou établi est celui d’une appréciation sourcée. |
-| `law.normes` | Sources, dispositions et versions temporelles, règles formulées, applicabilité contextualisée, relations de hiérarchie ou de dérogation et interprétations tirées des motifs du juge. |
-| `law.moyens` | Conclusions de partie, causes juridiques, moyens, arguments, objections et réponses. Une identité stable relie leurs formulations successives, chacune rattachée à une écriture et à ses passages. |
-| `law.preuves` | Pièces, productions et cotes par bordereau, versions de documents, captures de provenance et passages précis. Une relation probatoire attribuée qualifie l’étayage ou la contradiction d’une assertion. |
-| `law.decisions` | Motifs, constatations du juge, traitement des moyens et des conclusions, articles ordonnés du dispositif, effets prononcés et portée. Voies mentionnées, voies exercées et clôtures sont identifiées séparément. |
-| `law.delais` | Faits générateurs, fondements, interruptions, suspensions et prorogations, puis appréciations successives de l’échéance et de son opposabilité. |
-| `law.execution` | Injonctions, obligations, astreintes, liquidations, constats d’exécution et instances d’exécution. |
+L’historisation, les états temporels et les événements relèvent des mécanismes
+natifs de Vision, de l’ESKG et de Timescale. Le catalogue ne duplique plus ces
+mécanismes par des objets « version d’objection », « version de moyen » ou par
+une chronologie juridique parallèle.
 
-### Dispositif et chaîne probatoire
+### Compatibilité
 
-Un dossier clôturé pointe vers les constats de clôture de ses instances.
-Chaque constat renvoie, lorsqu’il est identifié, au dispositif de la décision
-qui termine cette instance. Chaque article du dispositif conserve son rang et
-son passage source. Il peut porter plusieurs effets ou dispositions, par
-exemple l’annulation partielle d’un acte, une injonction de réexamen et le
-rejet du surplus. Le sort de chaque conclusion pointe vers les articles
-pertinents. Le sort d’un moyen pointe vers la décision et ses motifs ou
-passages pertinents, y compris lorsqu’un moyen est expressément laissé sans
-examen. Les observations sur les recours et le caractère exécutoire sont
-indépendantes des constats de clôture. Une exécution partielle peut donc
-être consignée après la clôture de l’instance.
-
-Dans un dossier fictif, une pièce numérisée contient une lettre qui révèle
-une décision administrative. Le passage exact de la lettre est rattaché à
-sa version et à sa provenance. Une partie affirme avoir reçu la lettre
-à une certaine date. Un passage d’un accusé de réception peut étayer ou
-contredire cette assertion. La qualification de la notification mobilise
-ensuite une règle dont les versions et le champ d’application sont
-identifiés. Le moyen invoque cette qualification, l’adversaire objecte que
-l’envoi et la réception sont distincts, et le juge consigne son appréciation
-dans un motif. Si le dispositif ordonne un réexamen, l’obligation et ses
-constats d’exécution se rattachent à cet effet précis.
-
-La demande de suspension relève de `law.suspension_request`, qui peut
-pointer vers l’instance au fond. La suspension prononcée relève de
-`law.suspension_effect` et procède d’un article du dispositif. Les événements
-et appréciations de délai restent sourcés, y compris lorsqu’une notification
-est connue et que l’opposabilité reste à vérifier.
-[CJA, pouvoirs du juge des référés](https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006070933/LEGISCTA000006150399/?anchor=LEGIARTI000006449326).
-[CJA, délais](https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006070933/LEGISCTA000006136478/).
-[CJA, exécution](https://www.legifrance.gouv.fr/codes/id/LEGISCTA000006118216).
-
-### Cardinalités, dates et accès
-
-- `min_count` et `max_count` s’appliquent du point de vue de la source.
-  L’absence de maximum indique un nombre non borné. Les champs
-  `inverse_min_count` et `inverse_max_count` bornent le nombre de sources
-  pour certaines relations de composition. `inverse_of` désigne une
-  projection inverse, filtrée aux requêtes dans `law.proceeding.petitions`.
-  `required` décrit les propriétés attendues sur un objet complet. Une
-  extraction incomplète conserve ses sources et ses champs manquants.
-- Les intervalles `valid_from`–`valid_until` sont semi-ouverts. Une borne
-  absente laisse sa valeur indéterminée. Les dates d’effet, de capture et
-  d’appréciation sont conservées séparément. Une révision d’un document
-  ou d’une disposition reçoit une nouvelle identité de version. Les liens
-  vers les passages et versions antérieures restent attachés à leur
-  source d’origine.
-- `access_scope` documente la frontière attendue. Les ressources du dossier
-  sont soumises à ses droits. Les documents et passages héritent des droits
-  de leurs sources. Seule une publication vérifiée peut fournir une
-  projection publique distincte. Une référence opaque, une citation ou
-  un lien avec une source publique ne confère aucun droit. Gateway et les
-  services propriétaires restent responsables de l’autorisation du dossier,
-  des documents et du tenant. Le profil nominatif chiffré relève d’un
-  parcours séparé.
-- Registry valide la cohérence de la définition, dont les références,
-  l’héritage et les extrémités des liens. Les nouvelles cardinalités,
-  indications d’accès et règles de cohérence entre occurrences décrivent le
-  contrat des futurs producteurs. Elles ne constituent pas un contrôle
-  d’accès ni une validation des instances à elles seules. Le paquet
-  n’infère ni fait établi, ni opposabilité, ni échéance, ni résultat du
-  litige. Les appréciations, y compris celles proposées par un modèle,
-  gardent leur origine et leur état de vérification.
-
-### Compatibilité et spécialisations
-
-La version 0.3 conserve les modules, les identifiants de ressources et le
-contrat de `law.algorithm.dossier`. Le validateur et le
-rendu LaTeX continuent d’accepter le format historique, avec sa requête
-introductive désignée. Dans le nouveau modèle, `law.filing.proceeding`
-reste le rattachement canonique d’une écriture et
-`law.proceeding.petitions` expose l’ensemble des requêtes de l’instance.
-Les anciens champs et liens restent lisibles comme projections de
-compatibilité. Les révisions déjà publiées et leurs données restent
-rattachées à leur version d’origine.
-
-Dans le socle, la requête désignée et le régime administratif historique
-sont facultatifs. Le dossier administratif historique conserve ses
-exigences dans son validateur. La branche administrative exige au moins
-une partie défenderesse. Les liens de branche vers la juridiction et vers
-les défendeurs administratifs décrivent les mêmes relations que les liens
-génériques, avec des contraintes plus précises. Les producteurs doivent
-maintenir la cohérence de ces projections. Aucune catégorie de juridiction
-ne détermine à elle seule la compétence ou l’issue d’une instance.
-
-Les extensions réservent leurs propres préfixes et déclarent les dépendances
-dans une définition Registry fermée. Par exemple,
-`law.university.exam_regulation` peut spécialiser `law.administrative_act`
-et ajouter ses propres liens vers les formations et les épreuves.
-`law.urbanisme` et `law.public_contracts` peuvent ajouter des types de la
-même manière. Les extensions reprennent les relations du socle pour les
-versions, les moyens, les preuves et les décisions, et publient leurs
-propres révisions.
+Les révisions Registry déjà publiées restent immuables et leurs données restent
+liées à leur schéma d’origine. La version 0.4.0 est un nouveau schéma simplifié,
+sans migration destructive automatique. Ses identifiants conservés gardent leur
+identité ; les anciens objets de version restent consultables dans les anciennes
+révisions. Toute migration des occurrences exige un mapping explicite et revu.
+Le validateur administratif historique de `law.algorithm.dossier` et le modèle
+LaTeX restent compatibles avec leur format d’entrée existant. Les spécialistes
+administratifs restent séparés des branches judiciaire et pénale.

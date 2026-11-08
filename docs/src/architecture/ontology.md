@@ -12,10 +12,13 @@ physical object store. A lakeFS commit ID is returned unchanged as an opaque
 Registry revision ID and is used for optimistic writes, publication pinning,
 and reproducible Vision execution.
 
-Tenant lifecycle is also owned by Registry. Internal callers may validate only
+Tenant lifecycle is also owned by Registry. Internal callers may validate
 a bounded, explicitly supplied list against Registry-owned S3 markers. Empty
-validation requests are rejected and Registry exposes no tenant enumeration
-operation. Reads fail closed for missing tenants; artifact insertions
+validation requests are rejected. A separate paginated `ListTenants` RPC discovers
+initialized tenants within Registry's configured storage namespace; proxy policies
+reserve it to Intake and Vision, excluding Gateway and public callers. Shared Rust
+and Python clients own pagination, cursor checks, and tenant identity validation.
+Reads fail closed for missing tenants; artifact insertions
 initialize the server-derived S3 marker and lakeFS repository when necessary.
 The tenant deletion RPC requires an exact repeated tenant ID and exists solely
 for irreversible GDPR erasure of both lakeFS metadata and physical S3 objects.
@@ -57,9 +60,10 @@ PostgreSQL RLS, and records audit/access events. Audit rows may refer to opaque
 Registry revisions, but PostgreSQL does not persist ontology or pipeline
 artifacts.
 
-Vision workers load an explicitly selected tenant pipeline and block-local
-ontology slices by tenant, pipeline, block, and immutable pipeline revision.
-They retain the
+Vision workers discover tenants and deployed pipelines automatically through
+Registry, with optional explicit restrictions for isolated workers. Block-local
+ontology slices remain pinned by tenant, pipeline, block, and immutable pipeline
+revision. They retain the
 FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.
 
 ## Ontology collaboration

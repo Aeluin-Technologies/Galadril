@@ -315,14 +315,17 @@ class ComposeContractTest(unittest.TestCase):
             mapping(minio)["volumes"],
         )
 
-    def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
+    def test_vision_discovers_pipelines_without_placeholder_tenants(
+        self,
+    ) -> None:
         vision = mapping(services("streaming.yaml")["vision"])
         command = vision["command"]
         self.assertIsInstance(command, list)
         self.assertNotIn("--pipeline-config", command)
         environment = mapping(vision["environment"])
-        self.assertIn("VISION_TENANT_ID", environment)
-        self.assertIn("VISION_PIPELINE_ID", environment)
+        self.assertNotIn("VISION_TENANT_ID", environment)
+        self.assertNotIn("VISION_PIPELINE_ID", environment)
+        self.assertNotIn("VISION_TENANT_IDS", environment)
 
     def test_vision_reserves_shared_memory_for_ray(self) -> None:
         """Keeps Ray's object store out of the container filesystem."""

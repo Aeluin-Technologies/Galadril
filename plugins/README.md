@@ -66,6 +66,14 @@ inventory before creating, updating or publishing it. Missing capabilities,
 changed versions, unmet dependencies and invalid JSON Schema parameters reject
 the operation. Metadata discovery imports no executable factories.
 
+Ontology packages may declare `imports` as exact `{ "id", "version" }` pins
+to other packages in the same plugin. Discovery rejects cycles, missing pins,
+cross-plugin ownership and conflicting modules. It resolves transitive imports
+once, retaining each module's `package_id` and `package_name` for presentation.
+Registry receives the existing closed package format; imports grant neither
+cross-ontology access nor executable capabilities. Contracts remain local to
+the declaring package. Previously published tenant revisions are unchanged.
+
 A model contribution targeting Scribe uses a `model` binding whose factory takes
 its shared `httpx.AsyncClient` and returns
 `galadril_scribe.plugins.RegisteredModel(model, config)`. `model` is a native

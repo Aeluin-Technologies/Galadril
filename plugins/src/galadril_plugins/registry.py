@@ -689,12 +689,13 @@ class PluginRegistry:
 
     def ontology_packages(self) -> list[dict[str, JsonValue]]:
         """Reads bounded package data without importing plugin implementations."""
-        from .ontologies import OntologyPackage
+        from .ontologies import OntologyPackage, resolve_ontology_packages
 
         result: list[dict[str, JsonValue]] = []
         identifiers: set[str] = set()
         total = 0
         for manifest in self._manifests.values():
+            packages: list[OntologyPackage] = []
             for path in manifest.ontologies:
                 data = (
                     files(f"galadril_plugins.{manifest.id}")
@@ -704,26 +705,26 @@ class PluginRegistry:
                 total += len(data)
                 if total > 2 * 1024 * 1024 or len(result) >= 32:
                     raise ValueError("Ontology package inventory exceeds limit")
-                package = OntologyPackage.model_validate_json(data)
-                for view in (package,):
-                    if (
-                        len(result) >= 32
-                        or not view.id.startswith(manifest.id + ".")
-                        or view.id in identifiers
-                    ):
-                        raise ValueError("Invalid ontology package identity")
-                    if not set(view.contracts).issubset(
-                        {item.id for item in manifest.capabilities}
-                    ):
-                        raise ValueError("Unknown ontology capability")
-                    identifiers.add(view.id)
-                    result.append(
-                        {
-                            **view.model_dump(mode="json"),
-                            "plugin_id": manifest.id,
-                            "plugin_version": manifest.version,
-                        }
-                    )
+                packages.append(OntologyPackage.model_validate_json(data))
+            for view in resolve_ontology_packages(tuple(packages)):
+                if (
+                    len(result) >= 32
+                    or not view.id.startswith(manifest.id + ".")
+                    or view.id in identifiers
+                ):
+                    raise ValueError("Invalid ontology package identity")
+                if not set(view.contracts).issubset(
+                    {item.id for item in manifest.capabilities}
+                ):
+                    raise ValueError("Unknown ontology capability")
+                identifiers.add(view.id)
+                result.append(
+                    {
+                        **view.model_dump(mode="json"),
+                        "plugin_id": manifest.id,
+                        "plugin_version": manifest.version,
+                    }
+                )
         return result
 
     def document_templates(self) -> list[dict[str, JsonValue]]:

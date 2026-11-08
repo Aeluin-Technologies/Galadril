@@ -42,10 +42,6 @@ spec:
           value: production
         - name: VISION_BOOTSTRAP_PATH
           value: /etc/galadril/connectors.yaml
-        - name: VISION_TENANT_ID
-          value: tenant
-        - name: VISION_PIPELINE_ID
-          value: default
         - name: GRPC_DNS_RESOLVER
           value: native
         - name: RAY_raylet_start_wait_time_s

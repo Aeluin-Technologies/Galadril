@@ -1,0 +1,140 @@
+{
+  "id": "law.preuves",
+  "name": "Pièces and source documents",
+  "version": "0.4.0",
+  "ontologies": [
+    {
+      "id": "law.preuves",
+      "version": "0.4.0",
+      "resources": [
+        {
+          "resource_id": "law.document",
+          "kind": "object_type",
+          "display_name": "Source document",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.document.file_id",
+          "kind": "property",
+          "owner_id": "law.document",
+          "display_name": "Authorized document reference",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.document.title",
+          "kind": "property",
+          "owner_id": "law.document",
+          "display_name": "Document title",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.exhibit",
+          "kind": "object_type",
+          "display_name": "Pièce",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.exhibit.number",
+          "kind": "property",
+          "owner_id": "law.exhibit",
+          "display_name": "Bordereau number",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.exhibit.title",
+          "kind": "property",
+          "owner_id": "law.exhibit",
+          "display_name": "Pièce title",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.exhibit.document",
+          "kind": "link_type",
+          "display_name": "Source document",
+          "references": ["law.exhibit", "law.document"],
+          "attributes": {
+            "source_type": "law.exhibit",
+            "target_type": "law.document",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.filing.exhibits",
+          "kind": "link_type",
+          "display_name": "Pièces produced",
+          "references": ["law.filing", "law.exhibit"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.exhibit",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea.exhibits",
+          "kind": "link_type",
+          "display_name": "Pièces cited by the moyen",
+          "references": ["law.plea", "law.exhibit"],
+          "attributes": {
+            "source_type": "law.plea",
+            "target_type": "law.exhibit",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.filing.document",
+          "kind": "link_type",
+          "display_name": "Original écrit",
+          "references": ["law.filing", "law.document"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.document",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.document",
+          "kind": "link_type",
+          "display_name": "Original judgment",
+          "references": ["law.judicial_decision", "law.document"],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.document",
+            "min_count": 0,
+            "max_count": 1
+          }
+        }
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "id": "law.moyens",
+      "version": "0.4.0"
+    }
+  ],
+  "contracts": {}
+}

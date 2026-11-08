@@ -1,0 +1,162 @@
+{
+  "id": "law.ecritures",
+  "name": "Écrits and filings",
+  "version": "0.4.0",
+  "ontologies": [
+    {
+      "id": "law.ecritures",
+      "version": "0.4.0",
+      "resources": [
+        {
+          "resource_id": "law.filing",
+          "kind": "object_type",
+          "display_name": "Écrit",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.filing.kind",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Type of écrit",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "requete",
+              "memoire_defense",
+              "memoire_replique",
+              "memoire_complementaire",
+              "observations",
+              "note_delibere",
+              "courrier",
+              "autre"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.filing.title",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Title",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.date",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Filing date",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.subject",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Subject",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.facts",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Facts presented in the écrit",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.discussion",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Discussion",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.conclusions",
+          "kind": "property",
+          "owner_id": "law.filing",
+          "display_name": "Conclusions",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.filing.proceeding",
+          "kind": "link_type",
+          "display_name": "Instance concerned",
+          "references": ["law.filing", "law.proceeding"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.proceeding",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.filing.author",
+          "kind": "link_type",
+          "display_name": "Author",
+          "references": ["law.filing", "law.party"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.party",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.filings",
+          "kind": "link_type",
+          "display_name": "Écrits filed in the instance",
+          "references": ["law.proceeding", "law.filing"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.filing",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.brief.responds_to",
+          "kind": "link_type",
+          "display_name": "Écrit answered",
+          "references": ["law.filing", "law.filing"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.filing",
+            "min_count": 0
+          }
+        }
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "id": "law.socle",
+      "version": "0.4.0"
+    }
+  ],
+  "contracts": {}
+}

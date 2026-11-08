@@ -7,6 +7,20 @@ pub struct Tenant {
     pub head_revision_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTenantsRequest {
+    #[prost(uint32, tag = "1")]
+    pub limit: u32,
+    #[prost(string, optional, tag = "2")]
+    pub page_token: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTenantsResponse {
+    #[prost(string, repeated, tag = "1")]
+    pub tenant_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "2")]
+    pub next_page_token: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TenantValidation {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
@@ -69,6 +83,7 @@ pub struct Pipeline {
     pub deleted_at_ms: ::core::option::Option<i64>,
     #[prost(string, optional, tag = "12")]
     pub previous_revision_id: ::core::option::Option<::prost::alloc::string::String>,
+    /// Versioned collaboration state, independent from execution configuration.
     #[prost(bytes = "vec", tag = "13")]
     pub authoring_json: ::prost::alloc::vec::Vec<u8>,
 }
@@ -92,6 +107,7 @@ pub struct PutPipelineRequest {
     pub expected_revision_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(bool, tag = "9")]
     pub create_only: bool,
+    /// A strictly typed AuthoringCommand; absent retains the legacy strict write.
     #[prost(bytes = "vec", optional, tag = "10")]
     pub authoring_command_json: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
 }
@@ -288,6 +304,39 @@ pub struct ListOntologiesResponse {
     pub ontologies: ::prost::alloc::vec::Vec<OntologyCatalogEntry>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOntologyHistoryRequest {
+    #[prost(string, tag = "1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub limit: u32,
+    #[prost(string, optional, tag = "4")]
+    pub after_revision_id: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OntologyHistoryEntry {
+    #[prost(string, tag = "1")]
+    pub revision_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub author: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub branch: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(int64, tag = "6")]
+    pub created_at_ms: i64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListOntologyHistoryResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub items: ::prost::alloc::vec::Vec<OntologyHistoryEntry>,
+    #[prost(string, optional, tag = "2")]
+    pub next_revision_id: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OntologyBinding {
     #[prost(string, tag = "1")]
     pub pipeline_id: ::prost::alloc::string::String,
@@ -435,39 +484,6 @@ pub struct OntologyMerge {
     #[prost(message, repeated, tag = "2")]
     pub conflicts: ::prost::alloc::vec::Vec<MergeConflict>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListOntologyHistoryRequest {
-    #[prost(string, tag = "1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "3")]
-    pub limit: u32,
-    #[prost(string, optional, tag = "4")]
-    pub after_revision_id: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyHistoryEntry {
-    #[prost(string, tag = "1")]
-    pub revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub author: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub branch: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub operation: ::prost::alloc::string::String,
-    #[prost(int64, tag = "6")]
-    pub created_at_ms: i64,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListOntologyHistoryResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub items: ::prost::alloc::vec::Vec<OntologyHistoryEntry>,
-    #[prost(string, optional, tag = "2")]
-    pub next_revision_id: ::core::option::Option<::prost::alloc::string::String>,
-}
 /// Generated client implementations.
 pub mod registry_client {
     #![allow(
@@ -560,7 +576,32 @@ pub mod registry_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Validates a bounded caller-supplied tenant set against S3 markers.
+        /// Internal workload discovery; never exposed to browser or Gateway callers.
+        pub async fn list_tenants(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListTenantsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTenantsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/galadril.registry.v1.Registry/ListTenants",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("galadril.registry.v1.Registry", "ListTenants"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Validates only supplied tenants; an empty set is invalid.
         pub async fn validate_tenants(
             &mut self,
             request: impl tonic::IntoRequest<super::ValidateTenantsRequest>,
@@ -978,7 +1019,10 @@ pub mod registry_client {
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "ListOntologyHistory"),
+                    GrpcMethod::new(
+                        "galadril.registry.v1.Registry",
+                        "ListOntologyHistory",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -1116,7 +1160,15 @@ pub mod registry_server {
     /// Generated trait containing gRPC methods that should be implemented for use with RegistryServer.
     #[async_trait]
     pub trait Registry: std::marker::Send + std::marker::Sync + 'static {
-        /// Validates a bounded caller-supplied tenant set against S3 markers.
+        /// Internal workload discovery; never exposed to browser or Gateway callers.
+        async fn list_tenants(
+            &self,
+            request: tonic::Request<super::ListTenantsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTenantsResponse>,
+            tonic::Status,
+        >;
+        /// Validates only supplied tenants; an empty set is invalid.
         async fn validate_tenants(
             &self,
             request: tonic::Request<super::ValidateTenantsRequest>,
@@ -1322,6 +1374,51 @@ pub mod registry_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
+                "/galadril.registry.v1.Registry/ListTenants" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListTenantsSvc<T: Registry>(pub Arc<T>);
+                    impl<
+                        T: Registry,
+                    > tonic::server::UnaryService<super::ListTenantsRequest>
+                    for ListTenantsSvc<T> {
+                        type Response = super::ListTenantsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListTenantsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Registry>::list_tenants(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListTenantsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/galadril.registry.v1.Registry/ValidateTenants" => {
                     #[allow(non_camel_case_types)]
                     struct ValidateTenantsSvc<T: Registry>(pub Arc<T>);
@@ -2061,7 +2158,8 @@ pub mod registry_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Registry>::list_ontology_history(&inner, request).await
+                                <T as Registry>::list_ontology_history(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }

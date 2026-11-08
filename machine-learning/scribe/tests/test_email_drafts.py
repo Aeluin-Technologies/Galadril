@@ -12,6 +12,176 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_native_mail_read_follows_the_original_body_cursor(self) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from galadril_scribe.email import read_email
+        from pydantic_ai import ModelRetry
+
+        async def run() -> None:
+            calls = 0
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                nonlocal calls
+                calls += 1
+                self.assertEqual(
+                    json.loads(request.content)["request"]["offset"], 16384
+                )
+                return httpx.Response(
+                    200,
+                    json={"body": "End of original message.", "next_offset": 0},
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        client=client,
+                        capability="delegated",
+                        tools_url="http://gateway/tools",
+                    )
+                )
+                result = json.loads(
+                    await read_email(ctx, "a" * 32, "b" * 32, offset=16384)
+                )
+                self.assertEqual(
+                    result["message"]["body"], "End of original message."
+                )
+                self.assertEqual(result["message"]["next_offset"], 0)
+                with self.assertRaises(ModelRetry):
+                    await read_email(ctx, "a" * 32, "b" * 32, offset=-1)
+            self.assertEqual(calls, 1)
+
+        asyncio.run(run())
+
+    def test_native_mail_search_reads_original_and_keeps_reply_parent(
+        self,
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from galadril_scribe.email import read_email, search_emails
+
+        async def run() -> None:
+            operations: list[str] = []
+            account, message = "a" * 32, "b" * 32
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                self.assertEqual(
+                    request.headers["authorization"], "Bearer delegated"
+                )
+                payload = json.loads(request.content)
+                self.assertEqual(payload["operation"], "email")
+                action = payload["request"]
+                operations.append(action["operation"])
+                if action["operation"] == "accounts":
+                    return httpx.Response(
+                        200,
+                        json=[
+                            {
+                                "id": account,
+                                "rights": ["read"],
+                                "config": {"address": "owner@example.org"},
+                            }
+                        ],
+                    )
+                if action["operation"] == "messages":
+                    self.assertEqual(
+                        action,
+                        {
+                            "operation": "messages",
+                            "account": account,
+                            "query": "Alex",
+                            "before": 0,
+                        },
+                    )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "items": [
+                                {
+                                    "id": message,
+                                    "message": {
+                                        "sender": "alex@example.org",
+                                        "subject": "Meeting",
+                                    },
+                                }
+                            ],
+                            "next_before": 0,
+                        },
+                    )
+                self.assertEqual(
+                    action,
+                    {
+                        "operation": "message",
+                        "account": account,
+                        "message": message,
+                        "offset": 0,
+                    },
+                )
+                return httpx.Response(
+                    200,
+                    json={
+                        "sender": "alex@example.org",
+                        "text": "Complete original message",
+                        "subject": "Meeting",
+                    },
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        client=client,
+                        capability="delegated",
+                        tools_url="http://gateway/internal/chat/tools",
+                    )
+                )
+                result = json.loads(await search_emails(ctx, "Alex"))
+                self.assertEqual(result["account"], account)
+                result = json.loads(await read_email(ctx, account, message))
+                self.assertEqual(
+                    result["message"]["text"], "Complete original message"
+                )
+                self.assertEqual(
+                    result["reply_source"],
+                    {"account": account, "message": message},
+                )
+            self.assertEqual(operations, ["accounts", "messages", "message"])
+
+        asyncio.run(run())
+
+    def test_native_mail_tools_report_denial_without_claiming_a_quota(
+        self,
+    ) -> None:
+        import json
+        from types import SimpleNamespace
+
+        from galadril_scribe.email import read_email
+
+        async def run() -> None:
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(403)
+                )
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        client=client,
+                        capability="delegated",
+                        tools_url="http://gateway/internal/chat/tools",
+                    )
+                )
+                result = json.loads(await read_email(ctx, "a" * 32, "b" * 32))
+                self.assertEqual(result["status"], "denied")
+                self.assertEqual(result["operation"], "message")
+                self.assertNotIn("quota", json.dumps(result))
+
+        asyncio.run(run())
+
     def test_model_decision_can_return_no_reply_without_a_body(self) -> None:
         async def run() -> None:
             async with httpx.AsyncClient() as client:

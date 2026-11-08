@@ -936,6 +936,9 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   ).toHaveCount(0);
   await model.click();
   await expect(
+    page.getByRole("menuitem", { name: "Deep investigation", exact: true }),
+  ).toHaveCount(0);
+  await expect(
     page.getByRole("menuitem", { name: /Thinking effort/ }),
   ).toBeDisabled();
   await expect(
@@ -963,6 +966,10 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
   const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
     .width;
+  await prompt.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
   expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth * 0.9);
   const lines = await prompt.evaluate((element) =>
     Array.from(element.getClientRects(), (rect) => ({
@@ -1029,7 +1036,23 @@ test("Pengolo attaches a library document by clicking its compact row", async ({
       indexing: { stage: "completed" },
     },
   };
-  await mockDashboard(page, [file]);
+  await mockDashboard(page, [file], {
+    pengoloDownload: {
+      name: file.data.name,
+      mime: file.data.mime,
+      size: file.data.size,
+      url: "/fixture-file",
+    },
+  });
+  await page.route("**/fixture-file*", (route) =>
+    route.fulfill({
+      contentType: "application/pdf",
+      body: Buffer.from(
+        "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAgMTgwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA1NSA+PgpzdHJlYW0KQlQgL0YxIDE2IFRmIDM1IDEwMCBUZCAoUHVibGljIHJlcG9ydCAtIHByZXZpZXcpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAwMzQ1IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDE1CiUlRU9GCg==",
+        "base64",
+      ),
+    }),
+  );
   await page.goto("/pengolo");
   await page.getByRole("button", { name: "Add files and tools" }).click();
   await page.getByRole("menuitem", { name: "Choose from library" }).click();
@@ -1055,6 +1078,24 @@ test("Pengolo attaches a library document by clicking its compact row", async ({
   await expect(page.locator(".p-composer .p-file-chips")).toContainText(
     "Public report.pdf",
   );
+  const chip = page
+    .locator(".p-composer .p-file-chips")
+    .getByRole("button", { name: "Public report.pdf", exact: true });
+  await chip.click();
+  const preview = page.getByRole("dialog", {
+    name: "Public report.pdf",
+    exact: true,
+  });
+  await expect(preview).toBeVisible();
+  await expect(preview.locator("iframe")).toBeVisible();
+  await preview.screenshot({
+    path: info.outputPath("selected-file-preview.png"),
+    animations: "disabled",
+  });
+  await preview
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await expect(chip).toBeVisible();
 });
 
 test("Pengolo folds live tasks into Thinking without hiding questions", async ({
@@ -1248,6 +1289,11 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
   await expect(choose).toBeEnabled();
   await choose.click();
   await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await choose.hover();
+  await expect(choose).toHaveCSS(
+    "background-color",
+    await law.evaluate((element) => getComputedStyle(element).backgroundColor),
+  );
   await choose.click();
   await expect(choose).toHaveAttribute("aria-pressed", "false");
   await choose.focus();
@@ -1832,6 +1878,14 @@ test("message actions acknowledge copy and export and reveal copying on hover", 
     exact: true,
   });
   await expect(copy).toHaveCSS("opacity", "1");
+  await expect(mine.locator(".p-message-body .p-message-copy")).toHaveCount(0);
+  const bubbleBounds = await mine.locator(".p-message-body").boundingBox();
+  const copyBounds = await copy.boundingBox();
+  expect(bubbleBounds).not.toBeNull();
+  expect(copyBounds).not.toBeNull();
+  expect(copyBounds!.y).toBeGreaterThanOrEqual(
+    bubbleBounds!.y + bubbleBounds!.height,
+  );
   await copy.click();
   await expect(
     mine.getByRole("button", { name: "Copied", exact: true }),
@@ -2085,4 +2139,178 @@ test("prompt pastes plain text, keeps newlines and copies without tool labels", 
     );
   });
   await expect(prompt.locator("img,b")).toHaveCount(0);
+});
+
+test("prompt keeps a full-width focus target and a visible insertion line", async ({
+  page,
+}, testInfo) => {
+  await mockDashboard(page);
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Web search", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Disable web search", exact: true }),
+  ).toBeVisible();
+  await page
+    .locator(".p-composer-entry")
+    .click({ position: { x: 350, y: 12 } });
+  await expect(prompt).toBeFocused();
+  await prompt.pressSequentially("bbb");
+  await expect(prompt).toHaveText("bbb");
+  await prompt.press("ArrowLeft");
+  await prompt.pressSequentially("x");
+  await expect(prompt).toHaveText("bbxb");
+  await page.screenshot({
+    path: testInfo.outputPath("composer-caret-short.png"),
+    caret: "initial",
+  });
+  await prompt.fill("A longer prompt with public research. ".repeat(20));
+  await prompt.press("ControlOrMeta+End");
+  await page.screenshot({
+    path: testInfo.outputPath("composer-caret-long.png"),
+    caret: "initial",
+  });
+});
+
+test("specialist report citations open an authorized panel on the right", async ({
+  page,
+}, info) => {
+  const reportId = "a".repeat(64);
+  const base = chatFixture();
+  const record = {
+    ...base,
+    data: {
+      ...base.data,
+      messages: {
+        ...base.data.messages,
+        items: [
+          {
+            ...base.data.messages.items[0]!,
+            generationId: "b".repeat(32),
+            text: `Voir le [rapport sur les faits](#report-${reportId}).`,
+          },
+        ],
+      },
+    },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+    pengoloEvents: {
+      generationId: "b".repeat(32),
+      status: "completed",
+      events: [],
+      message: null,
+      chatRevision: 1,
+      chatUpdatedAt: 1,
+      specialistReport: {
+        id: reportId,
+        agentId: "facts",
+        content:
+          "Rapport vérifiable.\n\n[Source citée](https://example.test/source)\n\n![Tracking](https://example.test/tracking.png)",
+      },
+    },
+  });
+  await page.goto("/pengolo/" + record.id);
+  const citation = page.getByRole("link", { name: "rapport sur les faits" });
+  await citation.click();
+  const panel = page.getByRole("dialog", {
+    name: "Specialist report",
+    exact: true,
+  });
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("Rapport vérifiable.");
+  const heading = panel.getByRole("heading", {
+    name: "Specialist report",
+    exact: true,
+  });
+  await expect
+    .poll(() =>
+      heading.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      }),
+    )
+    .toBe(true);
+  await expect(
+    panel.locator("img,iframe,audio,video,object,embed"),
+  ).toHaveCount(0);
+  const box = await panel.boundingBox();
+  expect(box!.x).toBeGreaterThan(600);
+  await panel.screenshot({
+    path: info.outputPath("specialist-report-panel.png"),
+  });
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(citation).toBeFocused();
+  await citation.click();
+  await panel
+    .getByRole("button", { name: "Close report", exact: true })
+    .click();
+  await expect(panel).toBeHidden();
+});
+
+test("colored task cards keep model wording and animate their checked state", async ({
+  page,
+}, info) => {
+  const base = chatFixture();
+  const message = {
+    ...base.data.messages.items[0]!,
+    text: "| Point | Appréciation |\n| --- | --- |\n| Sources | ==À vérifier=={warning} |\n\n- [ ] Consulter les pièces\n- [x] Lire les références",
+  };
+  const record = {
+    ...base,
+    data: { ...base.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+    updatePengoloChat: {
+      ...base,
+      revision: 2,
+      data: {
+        ...base.data,
+        messages: [{ ...message, taskChecks: [{ index: 0, checked: true }] }],
+      },
+    },
+  });
+  await page.goto("/pengolo/" + base.id);
+  const article = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  await expect(article.locator(".p-tone-warning")).toHaveText("À vérifier");
+  await expect(article.locator(".p-tone-warning")).toHaveCSS(
+    "color",
+    "rgb(146, 64, 14)",
+  );
+  const checkbox = article.getByRole("checkbox", {
+    name: "Consulter les pièces",
+    exact: true,
+  });
+  await expect(checkbox).toHaveCSS("appearance", "none");
+  await checkbox.check();
+  await expect(checkbox).toBeChecked();
+  const card = article.locator(".p-task-card").first();
+  await expect(card).toHaveCSS("background-color", "rgb(255, 251, 235)");
+  expect(
+    await checkbox.evaluate(
+      (element) => getComputedStyle(element, "::after").animationName,
+    ),
+  ).toBe("p-check");
+  await article.screenshot({
+    path: info.outputPath("colored-task-cards.png"),
+    animations: "disabled",
+  });
 });

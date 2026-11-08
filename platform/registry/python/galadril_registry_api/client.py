@@ -124,6 +124,11 @@ class _TenantValidationListMessage(Protocol):
     tenants: Sequence[_TenantValidationMessage]
 
 
+class _TenantPageMessage(Protocol):
+    tenant_ids: Sequence[str]
+    next_page_token: str
+
+
 def _serialize(message: object) -> bytes:
     """Serializes generated protobufs without leaking dynamic types outward."""
     return cast(bytes, cast(Message, message).SerializeToString())
@@ -152,6 +157,11 @@ def _tenant(data: bytes) -> object:
 def _tenant_validations(data: bytes) -> object:
     """Decodes bounded tenant validation results."""
     return registry_pb2.ValidateTenantsResponse.FromString(data)
+
+
+def _tenant_page(data: bytes) -> object:
+    """Keeps storage pagination opaque to runtime callers."""
+    return registry_pb2.ListTenantsResponse.FromString(data)
 
 
 def _delete_tenant(data: bytes) -> object:
@@ -183,6 +193,36 @@ class RegistryClient:
     async def close(self) -> None:
         """Closes the underlying HTTP/2 channel."""
         await self._channel.close()
+
+    async def list_tenants(self) -> tuple[str, ...]:
+        """Discovers initialized tenants from the trusted Registry namespace."""
+        tenants: dict[str, None] = {}
+        seen: set[str] = set()
+        token: str | None = None
+        while True:
+            response = cast(
+                _TenantPageMessage,
+                await self._channel.unary_unary(
+                    "/galadril.registry.v1.Registry/ListTenants",
+                    request_serializer=_serialize,
+                    response_deserializer=_tenant_page,
+                )(
+                    registry_pb2.ListTenantsRequest(
+                        limit=100, page_token=token
+                    ),
+                    timeout=30,
+                ),
+            )
+            if len(response.tenant_ids) > 100:
+                raise ValueError("Registry tenant discovery page exceeds limit")
+            for tenant in response.tenant_ids:
+                tenants[_validated_tenant(tenant)] = None
+            token = response.next_page_token
+            if not token:
+                return tuple(tenants)
+            if len(token) > 4096 or token in seen:
+                raise ValueError("Registry tenant discovery cursor is invalid")
+            seen.add(token)
 
     async def validate_tenants(
         self, tenant_ids: Sequence[str]

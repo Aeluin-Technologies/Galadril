@@ -42,6 +42,22 @@ fn package_resources(package: &Value) -> Result<Resources> {
                 .and_then(Value::as_object_mut)
                 .context("resource attributes missing")?;
             attributes.insert("plugin_module".into(), json!(module_id));
+            if let Some(package_id) = module.get("package_id") {
+                ensure!(
+                    package_id.as_str().is_some(),
+                    "invalid imported package identity"
+                );
+                attributes
+                    .insert("plugin_package_id".into(), package_id.clone());
+                attributes.insert(
+                    "plugin_package_name".into(),
+                    module
+                        .get("package_name")
+                        .filter(|name| name.is_string())
+                        .cloned()
+                        .context("imported package name missing")?,
+                );
+            }
             attributes.insert(
                 "plugin_module_version".into(),
                 module
@@ -170,28 +186,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn imported_layer_provenance_survives_materialization() -> Result<()> {
+        let package = json!({"id":"sample.writings","version":"1","ontologies":[{"id":"sample.core","version":"1","package_id":"sample.core","package_name":"Shared foundations","resources":[{"resource_id":"sample.party","kind":"object_type","display_name":"Party","references":[],"attributes":{}}]}]});
+        let ontology = materialize(&package, None, &BTreeMap::new())?;
+        assert_eq!(
+            ontology.pointer("/resources/0/attributes/plugin_package_id"),
+            Some(&json!("sample.core"))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn legal_package_materializes_with_filing_and_proceeding_dependencies()
     -> Result<()> {
-        let package: Value = serde_json::from_str(include_str!(
-            "../../../plugins/src/galadril_plugins/law/contentieux-ontology.json"
-        ))?;
+        let mut modules = Vec::new();
+        for source in [
+            include_str!(
+                "../../../plugins/src/galadril_plugins/law/socle-ontology.json"
+            ),
+            include_str!(
+                "../../../plugins/src/galadril_plugins/law/ecritures-ontology.json"
+            ),
+            include_str!(
+                "../../../plugins/src/galadril_plugins/law/moyens-ontology.json"
+            ),
+            include_str!(
+                "../../../plugins/src/galadril_plugins/law/preuves-ontology.json"
+            ),
+        ] {
+            let layer: Value = serde_json::from_str(source)?;
+            modules.extend(
+                layer
+                    .get("ontologies")
+                    .and_then(Value::as_array)
+                    .context("Layer modules missing")?
+                    .iter()
+                    .cloned(),
+            );
+        }
+        let package = json!({"id":"law.contentieux","version":"0.4.0","ontologies":modules});
         let ontology = materialize(&package, None, &BTreeMap::new())?;
         let selected = slice_ontology(
             &ontology,
             &[
-                "law.case.petition".into(),
-                "law.proceeding.suspends".into(),
-                "law.evidence_relation.passage".into(),
-                "law.qualification.rule_applications".into(),
-                "law.claim_ruling.items".into(),
-                "law.case_closure.proceeding_closures".into(),
-                "law.suspension_effect.request".into(),
-                "law.deadline_adjustment.event".into(),
-                "law.obligation.effect".into(),
-                "law.administratif.proceeding.court".into(),
-                "law.judiciaire.proceeding.court".into(),
-                "law.penal.proceeding.court".into(),
-                "law.penal.charge.qualifications".into(),
+                "law.case.proceedings".into(),
+                "law.filing.proceeding".into(),
+                "law.filing.author".into(),
+                "law.plea.provisions".into(),
+                "law.plea.jurisprudence".into(),
+                "law.plea.exhibits".into(),
+                "law.exhibit.document".into(),
             ],
             &[],
             true,
@@ -199,25 +243,20 @@ mod tests {
         let resources = selected
             .get("resources")
             .and_then(Value::as_array)
-            .context("Missing legal resource closure")?;
+            .context("Legal resource closure missing")?;
         for id in [
             "law.case",
             "law.proceeding",
             "law.filing",
-            "law.petition.facts",
-            "law.petition.relief",
-            "law.passage.locator_kind",
-            "law.rule_application.review_status",
-            "law.disposition_item.ordinal",
-            "law.proceeding_closure",
-            "law.claim_version",
-            "law.temporal_event.recorded_at",
-            "law.dispositive_effect",
-            "law.court.name",
-            "law.administratif.court.kind",
-            "law.court.judicial.kind",
-            "law.penal.proceeding.formation",
-            "law.submission_point",
+            "law.party",
+            "law.plea",
+            "law.provision",
+            "law.judicial_decision",
+            "law.exhibit",
+            "law.document",
+            "law.filing.kind",
+            "law.judicial_decision.disposition",
+            "law.document.file_id",
         ] {
             assert!(resources.iter().any(|item| {
                 item.get("resource_id").and_then(Value::as_str) == Some(id)

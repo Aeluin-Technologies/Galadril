@@ -14,6 +14,22 @@ class Tenant(_message.Message):
     head_revision_id: str
     def __init__(self, tenant_id: _Optional[str] = ..., head_revision_id: _Optional[str] = ...) -> None: ...
 
+class ListTenantsRequest(_message.Message):
+    __slots__ = ("limit", "page_token")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    page_token: str
+    def __init__(self, limit: _Optional[int] = ..., page_token: _Optional[str] = ...) -> None: ...
+
+class ListTenantsResponse(_message.Message):
+    __slots__ = ("tenant_ids", "next_page_token")
+    TENANT_IDS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    tenant_ids: _containers.RepeatedScalarFieldContainer[str]
+    next_page_token: str
+    def __init__(self, tenant_ids: _Optional[_Iterable[str]] = ..., next_page_token: _Optional[str] = ...) -> None: ...
+
 class TenantValidation(_message.Message):
     __slots__ = ("tenant_id", "exists")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]

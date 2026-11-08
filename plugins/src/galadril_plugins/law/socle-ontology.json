@@ -1,0 +1,422 @@
+{
+  "id": "law.socle",
+  "name": "Legal case foundations",
+  "version": "0.4.0",
+  "ontologies": [
+    {
+      "id": "law.socle",
+      "version": "0.4.0",
+      "resources": [
+        {
+          "resource_id": "law.case",
+          "kind": "object_type",
+          "display_name": "Dossier",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.case.title",
+          "kind": "property",
+          "owner_id": "law.case",
+          "display_name": "Case title",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.case.reference",
+          "kind": "property",
+          "owner_id": "law.case",
+          "display_name": "Internal case reference",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.proceeding",
+          "kind": "object_type",
+          "display_name": "Instance",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.proceeding.number",
+          "kind": "property",
+          "owner_id": "law.proceeding",
+          "display_name": "Case number",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.proceeding.procedure",
+          "kind": "property",
+          "owner_id": "law.proceeding",
+          "display_name": "Procedure",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.proceeding.degree",
+          "kind": "property",
+          "owner_id": "law.proceeding",
+          "display_name": "Degree",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": ["premier_degre", "second_degre", "hors_degre"]
+          }
+        },
+        {
+          "resource_id": "law.proceeding.status",
+          "kind": "property",
+          "owner_id": "law.proceeding",
+          "display_name": "Proceeding status",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": ["a_introduire", "en_cours", "terminee"]
+          }
+        },
+        {
+          "resource_id": "law.court",
+          "kind": "object_type",
+          "display_name": "Juridiction",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.court.name",
+          "kind": "property",
+          "owner_id": "law.court",
+          "display_name": "Court name",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.court.postal_address",
+          "kind": "property",
+          "owner_id": "law.court",
+          "display_name": "Court postal address",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.court.degree",
+          "kind": "property",
+          "owner_id": "law.court",
+          "display_name": "Position in the court hierarchy",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.party",
+          "kind": "object_type",
+          "display_name": "Party",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.party.name",
+          "kind": "property",
+          "owner_id": "law.party",
+          "display_name": "Person or entity name",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.party.public_postal_address",
+          "kind": "property",
+          "owner_id": "law.party",
+          "display_name": "Postal address",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.party.representation",
+          "kind": "property",
+          "owner_id": "law.party",
+          "display_name": "Representation",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true,
+            "allowed_values": [
+              "soi_meme",
+              "avocat",
+              "mandataire",
+              "representant_legal"
+            ]
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision",
+          "kind": "object_type",
+          "display_name": "Judgment, arrêt or ordonnance",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.number",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Decision number",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.date",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Decision date",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.kind",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Decision form",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false,
+            "allowed_values": ["jugement", "arret", "ordonnance", "avis"]
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.procedure",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Procedure",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.disposition",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Dispositif",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.url",
+          "kind": "property",
+          "owner_id": "law.judicial_decision",
+          "display_name": "Published decision URL",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.provision",
+          "kind": "object_type",
+          "display_name": "Article",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.provision.reference",
+          "kind": "property",
+          "owner_id": "law.provision",
+          "display_name": "Code or source and article number",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.provision.url",
+          "kind": "property",
+          "owner_id": "law.provision",
+          "display_name": "Article source URL",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": false
+          }
+        },
+        {
+          "resource_id": "law.case.proceedings",
+          "kind": "link_type",
+          "display_name": "Instances",
+          "references": ["law.case", "law.proceeding"],
+          "attributes": {
+            "source_type": "law.case",
+            "target_type": "law.proceeding",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.court",
+          "kind": "link_type",
+          "display_name": "Court seised",
+          "references": ["law.proceeding", "law.court"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.court",
+            "min_count": 1,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.claimants",
+          "kind": "link_type",
+          "display_name": "Claimants",
+          "references": ["law.proceeding", "law.party"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.defendants",
+          "kind": "link_type",
+          "display_name": "Defendants",
+          "references": ["law.proceeding", "law.party"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.observers",
+          "kind": "link_type",
+          "display_name": "Observers and interveners",
+          "references": ["law.proceeding", "law.party"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.party",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.party.representative",
+          "kind": "link_type",
+          "display_name": "Representative, including self-representation",
+          "references": ["law.party", "law.party"],
+          "attributes": {
+            "source_type": "law.party",
+            "target_type": "law.party",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.court.parent",
+          "kind": "link_type",
+          "display_name": "Higher court",
+          "references": ["law.court", "law.court"],
+          "attributes": {
+            "source_type": "law.court",
+            "target_type": "law.court",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.decisions",
+          "kind": "link_type",
+          "display_name": "Decisions rendered",
+          "references": ["law.proceeding", "law.judicial_decision"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.judicial_decision",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.judicial_decision.court",
+          "kind": "link_type",
+          "display_name": "Deciding court",
+          "references": ["law.judicial_decision", "law.court"],
+          "attributes": {
+            "source_type": "law.judicial_decision",
+            "target_type": "law.court",
+            "min_count": 0,
+            "max_count": 1
+          }
+        },
+        {
+          "resource_id": "law.proceeding.appeals",
+          "kind": "link_type",
+          "display_name": "Proceeding challenged by this appeal",
+          "references": ["law.proceeding", "law.proceeding"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.proceeding.related",
+          "kind": "link_type",
+          "display_name": "Related proceeding",
+          "references": ["law.proceeding", "law.proceeding"],
+          "attributes": {
+            "source_type": "law.proceeding",
+            "target_type": "law.proceeding",
+            "min_count": 0
+          }
+        }
+      ]
+    }
+  ],
+  "contracts": {}
+}

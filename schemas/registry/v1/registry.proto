@@ -4,6 +4,8 @@ package galadril.registry.v1;
 
 // Registry owns ontology and pipeline persistence and semantic validation.
 service Registry {
+  // Internal workload discovery; never exposed to browser or Gateway callers.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
   // Validates only supplied tenants; an empty set is invalid.
   rpc ValidateTenants(ValidateTenantsRequest)
       returns (ValidateTenantsResponse);
@@ -41,6 +43,16 @@ service Registry {
 message Tenant {
   string tenant_id = 1;
   string head_revision_id = 2;
+}
+
+message ListTenantsRequest {
+  uint32 limit = 1;
+  optional string page_token = 2;
+}
+
+message ListTenantsResponse {
+  repeated string tenant_ids = 1;
+  optional string next_page_token = 2;
 }
 
 message TenantValidation {

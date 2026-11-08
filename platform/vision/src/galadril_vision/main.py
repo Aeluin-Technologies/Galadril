@@ -33,7 +33,7 @@ logger = structlog.get_logger("main")
 
 
 def discovery_tenants(value: str) -> tuple[str, ...]:
-    """Discovery is bounded to operator-assigned tenants, never inferred from messages."""
+    """Validates an optional operator restriction on Registry discovery."""
     tenants = tuple(
         dict.fromkeys(item.strip() for item in value.split(",") if item.strip())
     )
@@ -52,7 +52,7 @@ def discovery_tenants(value: str) -> tuple[str, ...]:
 
 
 async def serve_publications(
-    config: VisionConfig, role: ServiceRole, tenants: tuple[str, ...]
+    config: VisionConfig, role: ServiceRole, tenants: tuple[str, ...] | None
 ) -> None:
     """Reload a shared consumer only when immutable deployed revisions change."""
     client = RegistryClient(config.registry)
@@ -62,9 +62,14 @@ async def serve_publications(
     try:
         while True:
             try:
+                discovered = (
+                    tenants
+                    if tenants is not None
+                    else await client.list_tenants()
+                )
                 found = [
                     (tenant, artifact)
-                    for tenant in tenants
+                    for tenant in discovered
                     for artifact in await client.list_published_pipelines(
                         tenant
                     )
@@ -109,7 +114,7 @@ async def serve_publications(
                 logger.info(
                     "pipeline.discovery.updated",
                     pipelines=len(pipelines),
-                    tenants=len(tenants),
+                    tenants=len(discovered),
                 )
             await asyncio.sleep(5)
     finally:
@@ -167,7 +172,7 @@ async def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--discover-tenants",
         default=os.getenv("VISION_TENANT_IDS"),
-        help="Operator-assigned tenants whose deployed pipelines are watched.",
+        help="Optional tenant restriction; otherwise Registry discovers all initialized tenants.",
     )
     parser.add_argument(
         "--tenant-id",
@@ -201,8 +206,16 @@ async def main(argv: Sequence[str] | None = None) -> None:
         config = await asyncio.to_thread(
             VisionConfig.from_yaml, args.bootstrap_config
         )
-        if args.discover_tenants:
-            tenants = discovery_tenants(args.discover_tenants)
+        if args.discover_tenants or (
+            args.tenant_id is None
+            and args.pipeline_id is None
+            and args.revision_id is None
+        ):
+            tenants = (
+                discovery_tenants(args.discover_tenants)
+                if args.discover_tenants
+                else None
+            )
             configure_runtime(config, service_name="galadril-vision")
             await prepare_database(config)
             await serve_publications(config, args.role, tenants)

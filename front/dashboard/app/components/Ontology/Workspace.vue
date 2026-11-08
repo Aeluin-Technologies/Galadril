@@ -70,6 +70,7 @@ const {
   targetTypes,
   graphNodes,
   graphEdges,
+  toggleLayer,
   newPropertyName,
   newPropertyId,
   newPropertyType,
@@ -194,6 +195,10 @@ function createType(input: OntologyTypeDraft) {
   if (graphEditable.value && addType(input)) creatingType.value = false;
 }
 function selectResource(value: string) {
+  if (value.startsWith("package:")) {
+    toggleLayer(value.slice("package:".length));
+    return;
+  }
   panel.value = "editor";
 
   selected.value = selected.value === value ? "" : value;
@@ -210,11 +215,6 @@ function selectResource(value: string) {
       class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-5 py-3"
     >
       <div>
-        <NuxtLink
-          to="/ontology"
-          class="text-xs text-muted hover:text-primary-foreground"
-          >{{ $t("ontologyManager.allOntologies") }}</NuxtLink
-        >
         <h1 class="sr-only">{{ $t("ontologyManager.ontology_manager") }}</h1>
         <nav
           class="flex min-w-0 items-center gap-2"

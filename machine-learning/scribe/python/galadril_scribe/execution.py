@@ -36,6 +36,7 @@ class ExecutionState(BaseModel):
     web_closed: bool = False
     web_requires_approval: bool = True
     team_reports: str = Field(default='{"reports":[]}', max_length=65536)
+    team_report_ids: tuple[str, ...] = Field(default=(), max_length=8)
     safe: bool
     cost_usd: Decimal | None = Field(default=None, ge=0)
     mission: str = Field(max_length=32768)
@@ -247,6 +248,8 @@ def safe_to_replay(messages: list[ModelMessage]) -> bool:
     retryable = {
         "web_search",
         "date_interval",
+        "search_emails",
+        "read_email",
         "document_search",
         "search",
         "search_evidence",

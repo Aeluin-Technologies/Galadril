@@ -21,8 +21,16 @@ const props = withDefaults(
     closeLabel?: string;
     dismissible?: boolean;
     size?: "default" | "wide";
+    placement?: "center" | "right";
+    modal?: boolean;
   }>(),
-  { closeLabel: "Close dialog", dismissible: true, size: "default" },
+  {
+    closeLabel: "Close dialog",
+    dismissible: true,
+    size: "default",
+    placement: "center",
+    modal: true,
+  },
 );
 const emit = defineEmits<{ "update:open": [value: boolean]; close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -36,10 +44,28 @@ async function synchronize() {
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    dialog.value.showModal();
+    if (props.modal) dialog.value.showModal();
+    else {
+      dialog.value.show();
+      dialog.value.focus();
+      document.addEventListener("keydown", nonModalEscape);
+    }
   } else if (!props.open && dialog.value?.open) {
     dialog.value.close();
+    document.removeEventListener("keydown", nonModalEscape);
     opener?.focus();
+  }
+}
+function nonModalEscape(event: KeyboardEvent) {
+  if (
+    active &&
+    props.open &&
+    !props.modal &&
+    event.key === "Escape" &&
+    !event.defaultPrevented
+  ) {
+    event.preventDefault();
+    close();
   }
 }
 function close() {
@@ -61,6 +87,13 @@ function backdrop(event: MouseEvent) {
 }
 /** Keeps the tab cycle in the modal instead of allowing focus into browser chrome. */
 function keydown(event: KeyboardEvent) {
+  if (!props.modal) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+    return;
+  }
   if (event.defaultPrevented || event.key !== "Tab" || !dialog.value) return;
   const elements = Array.from(
     dialog.value.querySelectorAll<HTMLElement>(
@@ -96,9 +129,11 @@ onActivated(() => {
 });
 onDeactivated(() => {
   active = false;
+  document.removeEventListener("keydown", nonModalEscape);
   dialog.value?.close();
 });
 onBeforeUnmount(() => {
+  document.removeEventListener("keydown", nonModalEscape);
   dialog.value?.close();
   if (opener?.isConnected) opener.focus();
 });
@@ -111,10 +146,17 @@ onBeforeUnmount(() => {
       ref="dialog"
       tabindex="-1"
       data-ui="dialog"
-      :class="size === 'wide' ? 'max-w-6xl' : 'max-w-lg'"
+      :class="
+        placement === 'right'
+          ? 'fixed inset-y-0 right-0 z-[70] m-0 ml-auto h-dvh max-h-dvh w-full max-w-xl rounded-none'
+          : [
+              size === 'wide' ? 'max-w-6xl' : 'max-w-lg',
+              'm-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] rounded-dialog',
+            ]
+      "
       :aria-labelledby="`${id}-title`"
       :aria-describedby="description ? `${id}-description` : undefined"
-      class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto rounded-dialog border border-border bg-surface p-0 text-foreground shadow-dialog"
+      class="overflow-y-auto border border-border bg-surface p-0 text-foreground shadow-dialog"
       @cancel.prevent="close"
       @click="backdrop"
       @keydown="keydown"

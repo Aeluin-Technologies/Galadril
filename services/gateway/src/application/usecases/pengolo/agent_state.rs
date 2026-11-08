@@ -16,6 +16,59 @@ fn state_id(generation: &str, key: &str) -> String {
 }
 
 impl PengoloService {
+    /// Exposes only explicitly disclosed reports after source reauthorization.
+    #[tracing::instrument(skip_all)]
+    pub async fn specialist_report(
+        &self,
+        actor: &Principal<'_>,
+        generation_id: &str,
+        report_id: &str,
+        temporary: bool,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        ensure!(
+            report_id.len() == 64 &&
+                report_id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Invalid report reference"
+        );
+        let generation = self
+            .store
+            .get(
+                actor.tenant,
+                Collection::Generation,
+                generation_id,
+                temporary,
+            )
+            .await?
+            .context("Generation unavailable")?;
+        let report = self
+            .agent_state(
+                actor,
+                &generation,
+                &format!("public_report:{report_id}"),
+                None,
+            )
+            .await?;
+        ensure!(
+            report.get("id").and_then(Value::as_str) == Some(report_id) &&
+                report
+                    .get("agentId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.is_empty() && id.len() <= 64) &&
+                report
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| content.chars().count() <= 65536),
+            "Specialist report unavailable"
+        );
+        tracing::info!(event.name = "pengolo.specialist_report.read");
+        Ok(json!({
+            "generationId": generation.id, "status": generation.data.get("status"),
+            "events": [], "message": null, "chatRevision": null, "chatUpdatedAt": null,
+            "specialistReport": report,
+        }))
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn agent_state(
         &self,

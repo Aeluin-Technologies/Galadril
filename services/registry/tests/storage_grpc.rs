@@ -231,6 +231,21 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         .into_inner();
     assert_eq!(read.definition_json, definition_json);
 
+    assert_eq!(client.discover_tenants().await?, ["tenant_a"]);
+    client
+        .put_tenant(proto::PutTenantRequest {
+            tenant_id: "tenant_b".to_owned(),
+        })
+        .await?;
+    assert_eq!(client.discover_tenants().await?, ["tenant_a", "tenant_b"]);
+    client
+        .delete_tenant(proto::DeleteTenantRequest {
+            tenant_id: "tenant_b".to_owned(),
+            confirmation_tenant_id: "tenant_b".to_owned(),
+        })
+        .await?;
+    assert_eq!(client.discover_tenants().await?, ["tenant_a"]);
+
     let validation = client
         .validate_tenants(proto::ValidateTenantsRequest {
             tenant_ids: vec!["tenant_a".to_owned()],

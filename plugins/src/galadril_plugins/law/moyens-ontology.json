@@ -1,0 +1,84 @@
+{
+  "id": "law.moyens",
+  "name": "Moyens and legal citations",
+  "version": "0.4.0",
+  "ontologies": [
+    {
+      "id": "law.moyens",
+      "version": "0.4.0",
+      "resources": [
+        {
+          "resource_id": "law.plea",
+          "kind": "object_type",
+          "display_name": "Moyen",
+          "references": [],
+          "attributes": {
+            "access_scope": "case_restricted"
+          }
+        },
+        {
+          "resource_id": "law.plea.title",
+          "kind": "property",
+          "owner_id": "law.plea",
+          "display_name": "Moyen title",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.plea.text",
+          "kind": "property",
+          "owner_id": "law.plea",
+          "display_name": "Moyen as stated in the écrit",
+          "value_type": "string",
+          "references": [],
+          "attributes": {
+            "required": true
+          }
+        },
+        {
+          "resource_id": "law.filing.pleas",
+          "kind": "link_type",
+          "display_name": "Moyens raised",
+          "references": ["law.filing", "law.plea"],
+          "attributes": {
+            "source_type": "law.filing",
+            "target_type": "law.plea",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea.provisions",
+          "kind": "link_type",
+          "display_name": "Articles invoked",
+          "references": ["law.plea", "law.provision"],
+          "attributes": {
+            "source_type": "law.plea",
+            "target_type": "law.provision",
+            "min_count": 0
+          }
+        },
+        {
+          "resource_id": "law.plea.jurisprudence",
+          "kind": "link_type",
+          "display_name": "Cited jurisprudence",
+          "references": ["law.plea", "law.judicial_decision"],
+          "attributes": {
+            "source_type": "law.plea",
+            "target_type": "law.judicial_decision",
+            "min_count": 0
+          }
+        }
+      ]
+    }
+  ],
+  "imports": [
+    {
+      "id": "law.ecritures",
+      "version": "0.4.0"
+    }
+  ],
+  "contracts": {}
+}

@@ -83,16 +83,24 @@ separate mailbox automation panel are removed from the ordinary workflow.
 
 Mailbox and sender choices belong to their source/output inspectors. The local
 worker previously waited for the placeholder `tenant/default`, and rejected the
-`editor` metadata emitted by the graphical editor. Operator-assigned
-`VISION_TENANT_IDS` now enables publication discovery and reloads consumers when
-immutable deployed revisions change. Assignment bounds tenant discovery; the
-Registry remains authoritative for the contents. A failed discovery read retains
-the running revision and retries, while mailbox effects still recheck live rights.
+`editor` metadata emitted by the graphical editor. Vision now discovers initialized
+tenants through Registry and reloads consumers when immutable deployed revisions
+change. No tenant list is required in Compose or Kubernetes. Explicit single-DAG
+arguments and an optional tenant restriction remain available for isolated workers.
+The shared Rust and Python Registry clients own pagination and response validation;
+Intake already resolves each notification's tenant and publications dynamically
+through the same Registry authority. Storage enumeration and marker validation stay
+inside Registry's configured namespace. Only the Intake and Vision workload
+identities may enumerate tenants; this RPC is unavailable to Gateway and browsers.
+A failed discovery read retains the running revision and retries, while mailbox
+effects still recheck live rights.
 
 | Failure | Owner and durable state | Recovery | Regression coverage |
 | --- | --- | --- | --- |
 | Graphical layout treated as service configuration | Vision reads the immutable Registry definition | Accept editor metadata without copying it into trusted connector settings | `test_graphical_layout_is_accepted_without_changing_service_connectors` |
-| New deployment never loaded | Operator-assigned Vision tenant set and Registry publication pins | Poll publication identities; drain and restart shared consumers only when the set changes | `test_discovery_reloads_changed_publications_and_stops_on_cancellation` |
+| New tenant or deployment never loaded | Registry tenant markers and publication pins | Discover tenants without restart; drain and restart shared consumers only when publications change | `test_native_discovery_finds_new_tenants_and_preserves_runtime_on_outage` |
+| Registry temporarily unavailable | Vision's currently loaded revision set | Retain running consumers and retry discovery | `test_native_discovery_finds_new_tenants_and_preserves_runtime_on_outage` |
+| Uninitialized or foreign storage prefix | Registry's physical marker and namespace checks | Ignore uninitialized tenants; reject namespace escape without provisioning storage | `discovery_pages_only_initialized_tenants_inside_registry_namespace`, `discovery_rejects_foreign_prefixes_and_invalid_bounds` |
 | Ray agents use stale base-image wheels | Driver bundle and child process environment | Inherit the driver's resolved dependency paths for embedded Ray | `test_embedded_ray_children_use_the_driver_dependency_paths` |
 | Courriel JSON rejected by the source MIME filter | Gateway replaces staging metadata during raw-object promotion | Preserve the staged MIME type under a copy source ETag precondition while replacing authorization metadata | Real RustFS promotion regression in Gateway storage tests |
 | Internal lakeFS writes enter ingestion | S3 notification Kafka topic | Acknowledge reserved internal notifications without invoking raw ingestion | `internal_storage_notifications_do_not_enter_ingestion` |

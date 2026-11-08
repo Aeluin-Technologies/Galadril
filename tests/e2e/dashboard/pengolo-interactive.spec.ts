@@ -186,7 +186,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
         },
       });
     if (body.query.includes("mutation sendPengolo")) {
-      expect(body.variables?.input?.executionMode).toBe("research");
+      expect(body.variables?.input?.executionMode).toBe("chat");
       return route.fulfill({
         json: {
           data: {
@@ -232,9 +232,10 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("fixture");
   await page.getByRole("button", { name: "Model", exact: true }).click();
-  await page
-    .getByRole("menuitem", { name: "Deep investigation", exact: true })
-    .click();
+  await expect(
+    page.getByRole("menuitem", { name: "Deep investigation", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await page
     .getByLabel("Message Pengolo", { exact: true })
     .fill("Watch public developments");

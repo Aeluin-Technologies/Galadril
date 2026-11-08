@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { PaperAirplaneIcon, EnvelopeIcon } from "@heroicons/vue/24/outline";
+import {
+  PaperAirplaneIcon,
+  EnvelopeIcon,
+  ChevronDownIcon,
+} from "@heroicons/vue/24/outline";
 import type { EmailProposal } from "~/utils/pengolo-activity";
 import {
   parseAccounts,
@@ -22,6 +26,7 @@ const content = ref({
   bcc: [...props.proposal.bcc],
 });
 const trackOpens = ref(false);
+const detailsOpen = ref(false);
 const attachments = ref<EmailAttachment[]>([]);
 const readingAttachments = ref(false);
 const reviewAttachments = ref(false);
@@ -51,6 +56,7 @@ function clear() {
   busy.value = false;
   error.value = "";
   sent.value = false;
+  detailsOpen.value = false;
   blocked.value = true;
   checkingDelivery.value = false;
   attachments.value = [];
@@ -256,10 +262,40 @@ async function deliver() {
 </script>
 <template>
   <UiCard
+    v-if="sent && !detailsOpen"
     :title="content.subject"
-    :description="$t('email.chat.help')"
+    :description="$t('email.chat.sent')"
     class="my-4"
   >
+    <template #actions>
+      <UiButton
+        variant="ghost"
+        size="sm"
+        :aria-expanded="false"
+        @click="detailsOpen = true"
+      >
+        {{ $t("email.chat.seeDetails")
+        }}<ChevronDownIcon class="size-4" aria-hidden="true" />
+      </UiButton>
+    </template>
+  </UiCard>
+  <UiCard
+    v-else
+    :title="content.subject"
+    :description="$t(sent ? 'email.chat.sent' : 'email.chat.help')"
+    class="my-4"
+  >
+    <template v-if="sent" #actions>
+      <UiButton
+        variant="ghost"
+        size="sm"
+        :aria-expanded="true"
+        @click="detailsOpen = false"
+      >
+        {{ $t("email.chat.hideDetails")
+        }}<ChevronDownIcon class="size-4 rotate-180" aria-hidden="true" />
+      </UiButton>
+    </template>
     <UiAlert v-if="error" tone="danger"
       >{{ error }}
       <NuxtLink
@@ -269,7 +305,6 @@ async function deliver() {
         >{{ $t("email.connect") }}</NuxtLink
       ></UiAlert
     >
-    <UiAlert v-if="sent" tone="success">{{ $t("email.chat.sent") }}</UiAlert>
     <p v-if="checkingDelivery" role="status" class="text-sm text-muted">
       {{ $t("email.chat.checkingStatus") }}
     </p>

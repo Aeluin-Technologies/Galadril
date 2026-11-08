@@ -6,6 +6,7 @@ import {
   EnvelopeIcon,
   UserGroupIcon,
   PaperClipIcon,
+  ChevronRightIcon,
 } from "@heroicons/vue/24/outline";
 import { pipelinePalette } from "~/utils/pipeline-visuals";
 import type { Node, Edge, EdgeProps } from "@vue-flow/core";
@@ -67,7 +68,13 @@ function appearance(id: string) {
     >
       <VueFlow
         :id="id"
-        :nodes="nodes.map((node) => ({ ...node, type: 'ontology' }))"
+        :nodes="
+          nodes.map((node) => ({
+            ...node,
+            type: 'ontology',
+            connectable: !node.data.packageId && !!editable,
+          }))
+        "
         :edges="renderedEdges"
         :edges-focusable="false"
         :nodes-draggable="editable ?? false"
@@ -97,7 +104,23 @@ function appearance(id: string) {
             "
           >
             <Handle type="target" :position="Position.Left" />
+            <UiButton
+              v-if="data.packageId"
+              variant="ghost"
+              size="sm"
+              align="start"
+              class="w-full"
+              :aria-expanded="data.expanded"
+              @click.stop="emit('select', nodeId)"
+            >
+              <ChevronRightIcon
+                class="h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none"
+                :class="{ 'rotate-90': data.expanded }"
+              />
+              {{ data.label }}
+            </UiButton>
             <div
+              v-if="!data.packageId"
               class="flex items-center gap-2 px-3 py-2 text-white"
               :style="{ backgroundColor: appearance(nodeId).color }"
             >
@@ -110,12 +133,19 @@ function appearance(id: string) {
               }}</strong>
             </div>
             <div class="space-y-1 px-3 py-2 text-xs text-muted">
-              <p class="truncate font-mono">{{ nodeId }}</p>
+              <p v-if="!data.packageId" class="truncate font-mono">
+                {{ nodeId }}
+              </p>
               <p>
                 {{
-                  $t("ontologyManager.propertyCount", {
-                    count: data.count ?? 0,
-                  })
+                  $t(
+                    data.packageId
+                      ? "ontologyManager.layerTypeCount"
+                      : "ontologyManager.propertyCount",
+                    {
+                      count: data.count ?? 0,
+                    },
+                  )
                 }}
               </p>
             </div>

@@ -51,13 +51,24 @@ class OntologyContract(BaseModel):
     resources: tuple[str, ...] = Field(default=(), max_length=256)
 
 
+class OntologyPackageImport(BaseModel):
+    """Pins reusable plugin layers without granting tenant storage access."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(pattern=r"^[a-z][a-z0-9_-]*[.][a-z][a-z0-9_-]*$")
+    version: str = Field(min_length=1, max_length=64)
+
+
 class OntologyPackage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str = Field(pattern=r"^[a-z][a-z0-9_-]*[.][a-z][a-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=256)
     version: str = Field(min_length=1, max_length=64)
     ontologies: tuple[dict[str, JsonValue], ...] = Field(
-        min_length=1, max_length=32
+        default=(), max_length=32
+    )
+    imports: tuple[OntologyPackageImport, ...] = Field(
+        default=(), max_length=32, exclude=True
     )
     contracts: dict[str, OntologyContract] = Field(
         default_factory=dict, max_length=128
@@ -70,12 +81,69 @@ class OntologyPackage(BaseModel):
         if len(json.dumps(self.model_dump(mode="json")).encode()) > 512 * 1024:
             raise ValueError("Ontology package exceeds limit")
         resources = _package_resource_ids(self.ontologies)
+        if not self.ontologies and not self.imports:
+            raise ValueError("Ontology package is empty")
         if len(resources) > 512:
             raise ValueError("Too many package resources")
-        if any(
+        if not self.imports and any(
             identifier not in resources
             for contract in self.contracts.values()
             for identifier in contract.resources
         ):
             raise ValueError("Unknown ontology contract resource")
         return self
+
+
+def resolve_ontology_packages(
+    packages: tuple[OntologyPackage, ...],
+) -> tuple[OntologyPackage, ...]:
+    """Compiles pinned layers once while retaining their grouping provenance."""
+    sources = {package.id: package for package in packages}
+    if len(sources) != len(packages):
+        raise ValueError("Duplicate ontology package identity")
+    resolved: dict[str, OntologyPackage] = {}
+    visiting: set[str] = set()
+
+    def resolve(package: OntologyPackage) -> OntologyPackage:
+        if package.id in resolved:
+            return resolved[package.id]
+        if package.id in visiting:
+            raise ValueError("Cyclic ontology package imports")
+        visiting.add(package.id)
+        modules: dict[str, dict[str, JsonValue]] = {}
+        for reference in package.imports:
+            dependency = sources.get(reference.id)
+            if dependency is None or dependency.version != reference.version:
+                raise ValueError(
+                    "Pinned ontology package import is unavailable"
+                )
+            if reference.id.split(".", 1)[0] != package.id.split(".", 1)[0]:
+                raise ValueError(
+                    "Ontology package import crosses plugin ownership"
+                )
+            for module in resolve(dependency).ontologies:
+                imported = {
+                    "package_id": dependency.id,
+                    "package_name": dependency.name,
+                    **module,
+                }
+                key = str(imported["id"])
+                if key in modules and modules[key] != imported:
+                    raise ValueError("Conflicting ontology package layers")
+                modules[key] = imported
+        for module in package.ontologies:
+            key = str(module["id"])
+            if key in modules:
+                raise ValueError("Duplicate ontology package layer")
+            modules[key] = module
+        value = OntologyPackage.model_validate(
+            {
+                **package.model_dump(mode="json"),
+                "ontologies": tuple(modules.values()),
+            }
+        )
+        visiting.remove(package.id)
+        resolved[package.id] = value
+        return value
+
+    return tuple(resolve(package) for package in packages)

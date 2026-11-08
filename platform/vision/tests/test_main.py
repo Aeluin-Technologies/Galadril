@@ -179,6 +179,79 @@ def test_database_preparation_does_not_require_a_published_pipeline() -> None:
     build.assert_not_called()
 
 
+def test_default_startup_discovers_registry_tenants_without_assignment() -> (
+    None
+):
+    config = _vision_config()
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch.object(VisionConfig, "from_yaml", return_value=config),
+        patch("galadril_vision.main.configure_runtime"),
+        patch("galadril_vision.main.prepare_database", AsyncMock()),
+        patch("galadril_vision.main.serve_publications", AsyncMock()) as serve,
+        patch(
+            "galadril_vision.main.wait_for_published_pipeline", AsyncMock()
+        ) as wait,
+    ):
+        asyncio.run(main(["--bootstrap-config", "/connectors.yaml"]))
+    serve.assert_awaited_once_with(config, ServiceRole.ALL, None)
+    wait.assert_not_awaited()
+
+
+def test_native_discovery_finds_new_tenants_and_preserves_runtime_on_outage() -> (
+    None
+):
+    from galadril_registry_api import PipelineArtifact
+    from galadril_vision.main import serve_publications
+
+    config = _vision_config()
+    artifact = PipelineArtifact("mail", "a" * 32, b"{}")
+    client = MagicMock()
+    client.list_tenants = AsyncMock(
+        side_effect=[(), ("tenant_a",), OSError("unavailable"), ("tenant_b",)]
+    )
+    client.list_published_pipelines = AsyncMock(return_value=(artifact,))
+    client.close = AsyncMock()
+    app = MagicMock()
+    app.stop = AsyncMock()
+
+    async def run() -> None:
+        await asyncio.Event().wait()
+
+    app.run = run
+    real_sleep = asyncio.sleep
+    polls = 0
+
+    async def tick(delay: float) -> None:
+        nonlocal polls
+        polls += 1
+        if polls == 4:
+            raise asyncio.CancelledError
+        if polls == 3:
+            app.stop.assert_not_awaited()
+        await real_sleep(0)
+
+    with (
+        patch("galadril_vision.main.RegistryClient", return_value=client),
+        patch(
+            "galadril_vision.main._load_artifact", return_value=config
+        ) as load,
+        patch(
+            "galadril_vision.main.build_stream_app", return_value=app
+        ) as build,
+        patch("galadril_vision.main.asyncio.sleep", side_effect=tick),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        asyncio.run(serve_publications(config, ServiceRole.ALL, None))
+    assert [call.args[1] for call in load.call_args_list] == [
+        "tenant_a",
+        "tenant_b",
+    ]
+    assert build.call_count == 2
+    assert app.stop.await_count == 2
+    client.close.assert_awaited_once()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
 

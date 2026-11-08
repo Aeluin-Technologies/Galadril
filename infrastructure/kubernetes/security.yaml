@@ -167,6 +167,7 @@ spec:
         - /galadril.registry.v1.Registry/GetRuntimePipeline
         - /galadril.registry.v1.Registry/GetOntologySlice
         - /galadril.registry.v1.Registry/ListPublishedPipelines
+        - /galadril.registry.v1.Registry/ListTenants
         - /grpc.health.v1.Health/Check
         ports:
         - '50053'

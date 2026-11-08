@@ -45,13 +45,13 @@
       "privateProcessing": "Les PDF joints sont pseudonymisés pour limiter la divulgation de données personnelles.",
       "research": "Investigation approfondie",
       "continue": "Reprendre l’investigation",
-      "interrupted": "L’investigation a été interrompue. Les messages et les points de reprise sont conservés.",
+      "interrupted": "L’investigation a été interrompue. Vos messages sont conservés ; la reprise nécessite un point de sauvegarde disponible.",
       "recoveryUnavailable": "Aucun point de reprise sûr n’est disponible, ou les sources ne sont plus accessibles. Un outil interrompu peut nécessiter une vérification.",
       "usage": "{iterations} itérations · {tokens} jetons · {seconds}s",
       "stopped": {
-        "budget": "Budget d’exécution atteint. Les résultats et points de reprise sont conservés.",
-        "timeout": "Durée d’exécution atteinte. Les résultats et points de reprise sont conservés.",
-        "error": "Exécution interrompue. Les résultats et points de reprise sont conservés."
+        "budget": "Budget d’exécution atteint. Vos messages publiés sont conservés.",
+        "timeout": "Durée d’exécution atteinte. Vos messages publiés sont conservés.",
+        "error": "Exécution interrompue. Vos messages publiés sont conservés."
       }
     },
     "litigation": {
@@ -86,6 +86,12 @@
       "preview": "Voir la copie",
       "create": "Créer la copie caviardée",
       "working": "Caviardage en cours"
+    },
+    "report": {
+      "title": "Rapport du spécialiste",
+      "loading": "Chargement du rapport…",
+      "unavailable": "Ce rapport est indisponible ou ses sources ne sont plus accessibles.",
+      "close": "Fermer le rapport"
     }
   },
   "officialOntologies": {
@@ -99,7 +105,7 @@
       "name": "Procédure pénale"
     },
     "law_contentieux": {
-      "name": "Contentieux français",
+      "name": "Couches communes du droit",
       "resources": {
         "law_case": "Dossier contentieux",
         "law_proceeding": "Instance",
@@ -127,7 +133,7 @@
         "law_proceeding_degree": "Degré de juridiction",
         "law_proceeding_jurisdiction_capacity": "Ressort dans l’instance",
         "law_proceeding_petitions": "Requêtes introduites dans l’instance",
-        "law_proceeding_challenged_acts": "Actes administratifs attaqués",
+        "law_proceeding_challenged_acts": "Actes contestés",
         "law_proceeding_review_challenges": "Voies de recours exercées dans l’instance",
         "law_proceeding_closures": "Constats successifs de fin d’instance",
         "law_proceeding_adjudicative_role": "Fonction exercée par le juge",
@@ -498,17 +504,17 @@
         "law_penalty_liquidation_period_start": "Début de la période liquidée",
         "law_penalty_liquidation_period_end": "Fin de la période liquidée",
         "law_penalty_liquidation_penalty": "Astreinte liquidée",
-        "law_administratif_proceeding": "Instance administrative",
-        "law_administratif_proceeding_court": "Juridiction saisie dans la branche",
-        "law_administratif_court": "Juridiction de l’ordre administratif",
-        "law_administratif_court_kind": "Catégorie de juridiction administrative",
+        "law_administratif_proceeding": "Contentieux administratif",
+        "law_administratif_proceeding_court": "Juridiction compétente",
+        "law_administratif_court": "Juridiction",
+        "law_administratif_court_kind": "Type de juridiction",
         "law_administratif_proceeding_defendants": "Parties défenderesses de l’instance administrative",
-        "law_judiciaire_proceeding": "Instance judiciaire civile",
-        "law_judiciaire_proceeding_court": "Juridiction saisie dans la branche",
+        "law_judiciaire_proceeding": "Contentieux civil",
+        "law_judiciaire_proceeding_court": "Juridiction compétente",
         "law_judiciaire_summons": "Assignation civile",
         "law_judiciaire_submissions": "Conclusions écrites civiles",
-        "law_penal_proceeding": "Instance pénale",
-        "law_penal_proceeding_court": "Juridiction saisie dans la branche",
+        "law_penal_proceeding": "Procédure pénale",
+        "law_penal_proceeding_court": "Juridiction compétente",
         "law_penal_proceeding_formation": "Formation pénale saisie",
         "law_penal_citation": "Citation pénale",
         "law_penal_requisitions": "Réquisitions écrites du ministère public",
@@ -520,7 +526,15 @@
         "law_penal_charge_prosecuted_party": "Personne visée par le chef de poursuite",
         "law_penal_charge_qualifications": "Qualifications pénales attribuées",
         "law_penal_sentence": "Peine prononcée",
-        "law_penal_civil_claim": "Prétention civile portée devant le juge pénal"
+        "law_penal_civil_claim": "Prétention civile portée devant le juge pénal",
+        "law_administrative_act_title": "Intitulé de l’acte",
+        "law_administrative_act_date": "Date de l’acte",
+        "law_administrative_act_author": "Administration ayant pris l’acte",
+        "law_administrative_act_document": "Document révélant l’acte",
+        "law_judiciaire_court": "Juridiction",
+        "law_judiciaire_court_kind": "Type de juridiction",
+        "law_penal_court": "Juridiction",
+        "law_penal_court_kind": "Type de juridiction"
       }
     },
     "utils_mail": {
@@ -559,6 +573,102 @@
         "mail_message_attachments": "Pièces jointes",
         "mail_message_in_reply_to": "Répond à"
       }
+    },
+    "law_socle": {
+      "name": "Socle des dossiers",
+      "resources": {
+        "law_case": "Dossier",
+        "law_case_title": "Intitulé du dossier",
+        "law_case_reference": "Référence interne du dossier",
+        "law_proceeding": "Instance",
+        "law_proceeding_number": "Numéro de l’instance",
+        "law_proceeding_procedure": "Procédure",
+        "law_proceeding_degree": "Degré de juridiction",
+        "law_proceeding_status": "État de l’instance",
+        "law_court": "Juridiction",
+        "law_court_name": "Nom de la juridiction",
+        "law_court_postal_address": "Adresse de la juridiction",
+        "law_court_degree": "Niveau dans la hiérarchie juridictionnelle",
+        "law_party": "Partie",
+        "law_party_name": "Nom de la personne ou de l’entité",
+        "law_party_public_postal_address": "Adresse postale",
+        "law_party_representation": "Mode de représentation",
+        "law_judicial_decision": "Jugement, arrêt ou ordonnance",
+        "law_judicial_decision_number": "Numéro de la décision",
+        "law_judicial_decision_date": "Date de la décision",
+        "law_judicial_decision_kind": "Forme de la décision",
+        "law_judicial_decision_procedure": "Procédure",
+        "law_judicial_decision_disposition": "Dispositif",
+        "law_judicial_decision_url": "Lien vers la décision publiée",
+        "law_provision": "Article",
+        "law_provision_reference": "Code ou source et numéro de l’article",
+        "law_provision_url": "Lien vers l’article",
+        "law_case_proceedings": "Instances du dossier",
+        "law_proceeding_court": "Juridiction saisie",
+        "law_proceeding_claimants": "Requérants ou demandeurs",
+        "law_proceeding_defendants": "Défendeurs",
+        "law_proceeding_observers": "Observateurs et intervenants",
+        "law_party_representative": "Représentant, y compris soi-même",
+        "law_court_parent": "Juridiction supérieure",
+        "law_proceeding_decisions": "Décisions rendues",
+        "law_judicial_decision_court": "Juridiction ayant statué",
+        "law_proceeding_appeals": "Instance faisant l’objet du recours",
+        "law_proceeding_related": "Instance liée"
+      }
+    },
+    "law_ecritures": {
+      "name": "Écrits",
+      "resources": {
+        "law_filing": "Écrit",
+        "law_filing_kind": "Type d’écrit",
+        "law_filing_title": "Intitulé",
+        "law_filing_date": "Date de dépôt",
+        "law_filing_subject": "Objet",
+        "law_filing_facts": "Faits présentés dans l’écrit",
+        "law_filing_discussion": "Discussion",
+        "law_filing_conclusions": "Conclusions",
+        "law_filing_proceeding": "Instance concernée",
+        "law_filing_author": "Auteur",
+        "law_proceeding_filings": "Écrits déposés dans l’instance",
+        "law_brief_responds_to": "Écrit auquel il est répondu"
+      }
+    },
+    "law_moyens": {
+      "name": "Moyens et références juridiques",
+      "resources": {
+        "law_plea": "Moyen",
+        "law_plea_title": "Intitulé du moyen",
+        "law_plea_text": "Moyen exposé dans l’écrit",
+        "law_filing_pleas": "Moyens soulevés",
+        "law_plea_provisions": "Articles invoqués",
+        "law_plea_jurisprudence": "Jurisprudences citées"
+      }
+    },
+    "law_preuves": {
+      "name": "Pièces et documents sources",
+      "resources": {
+        "law_document": "Document source",
+        "law_document_file_id": "Référence du document accessible",
+        "law_document_title": "Intitulé du document",
+        "law_exhibit": "Pièce",
+        "law_exhibit_number": "Numéro au bordereau",
+        "law_exhibit_title": "Intitulé de la pièce",
+        "law_exhibit_document": "Document source",
+        "law_filing_exhibits": "Pièces produites",
+        "law_plea_exhibits": "Pièces citées au soutien du moyen",
+        "law_filing_document": "Écrit original",
+        "law_judicial_decision_document": "Décision originale"
+      }
+    }
+  },
+  "ontologyManager": {
+    "layerTypeCount": "{count} types"
+  },
+  "email": {
+    "chat": {
+      "seeDetails": "Voir les détails",
+      "hideDetails": "Masquer les détails",
+      "sent": "Courriel envoyé"
     }
   }
 }

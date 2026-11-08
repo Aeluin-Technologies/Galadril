@@ -1524,13 +1524,13 @@
       "privateProcessing": "Attached PDFs are pseudonymized to limit disclosure of personal data.",
       "research": "Deep investigation",
       "continue": "Resume investigation",
-      "interrupted": "The investigation was interrupted. Your messages and saved checkpoints are kept.",
+      "interrupted": "The investigation was interrupted. Your messages are kept; recovery requires an available checkpoint.",
       "recoveryUnavailable": "No safe checkpoint is available, or the original sources are no longer accessible. An interrupted tool may need review.",
       "usage": "{iterations} iterations · {tokens} tokens · {seconds}s",
       "stopped": {
-        "budget": "Execution budget reached. Findings and checkpoints have been kept.",
-        "timeout": "Execution time reached. Findings and checkpoints have been kept.",
-        "error": "Execution interrupted. Findings and checkpoints have been kept."
+        "budget": "Execution budget reached. Your published messages are kept.",
+        "timeout": "Execution time reached. Your published messages are kept.",
+        "error": "Execution interrupted. Your published messages are kept."
       }
     },
     "redaction": {
@@ -1557,6 +1557,12 @@
       "preview": "Preview the copy",
       "create": "Create redacted copy",
       "working": "Redacting document"
+    },
+    "report": {
+      "title": "Specialist report",
+      "loading": "Loading the report…",
+      "unavailable": "This report is unavailable or its sources can no longer be accessed.",
+      "close": "Close report"
     }
   },
   "email": {
@@ -1786,7 +1792,9 @@
       "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically.",
       "checkingStatus": "Checking delivery status…",
       "checkStatus": "Check delivery status",
-      "statusUnavailable": "Delivery status could not be verified. Check its status before sending this proposal."
+      "statusUnavailable": "Delivery status could not be verified. Check its status before sending this proposal.",
+      "seeDetails": "See details",
+      "hideDetails": "Hide details"
     },
     "bcc": "Bcc",
     "chooseAccount": "Your email accounts",
@@ -2093,6 +2101,95 @@
       "deleteHelp": "Remove this ontology from the catalog? Its history is retained. Ontologies used by pipelines or other models cannot be deleted.",
       "deleted": "This ontology has been removed from the catalog. Its saved revisions remain accessible. Restoring it does not reactivate publication.",
       "restore": "Restore ontology"
+    },
+    "layerTypeCount": "{count} types"
+  },
+  "officialOntologies": {
+    "law_socle": {
+      "name": "Legal case foundations",
+      "resources": {
+        "law_case": "Dossier",
+        "law_case_title": "Case title",
+        "law_case_reference": "Internal case reference",
+        "law_proceeding": "Instance",
+        "law_proceeding_number": "Case number",
+        "law_proceeding_procedure": "Procedure",
+        "law_proceeding_degree": "Degree",
+        "law_proceeding_status": "Proceeding status",
+        "law_court": "Juridiction",
+        "law_court_name": "Court name",
+        "law_court_postal_address": "Court postal address",
+        "law_court_degree": "Position in the court hierarchy",
+        "law_party": "Party",
+        "law_party_name": "Person or entity name",
+        "law_party_public_postal_address": "Postal address",
+        "law_party_representation": "Representation",
+        "law_judicial_decision": "Judgment, arrêt or ordonnance",
+        "law_judicial_decision_number": "Decision number",
+        "law_judicial_decision_date": "Decision date",
+        "law_judicial_decision_kind": "Decision form",
+        "law_judicial_decision_procedure": "Procedure",
+        "law_judicial_decision_disposition": "Dispositif",
+        "law_judicial_decision_url": "Published decision URL",
+        "law_provision": "Article",
+        "law_provision_reference": "Code or source and article number",
+        "law_provision_url": "Article source URL",
+        "law_case_proceedings": "Instances",
+        "law_proceeding_court": "Court seised",
+        "law_proceeding_claimants": "Claimants",
+        "law_proceeding_defendants": "Defendants",
+        "law_proceeding_observers": "Observers and interveners",
+        "law_party_representative": "Representative, including self-representation",
+        "law_court_parent": "Higher court",
+        "law_proceeding_decisions": "Decisions rendered",
+        "law_judicial_decision_court": "Deciding court",
+        "law_proceeding_appeals": "Proceeding challenged by this appeal",
+        "law_proceeding_related": "Related proceeding"
+      }
+    },
+    "law_ecritures": {
+      "name": "Écrits and filings",
+      "resources": {
+        "law_filing": "Écrit",
+        "law_filing_kind": "Type of écrit",
+        "law_filing_title": "Title",
+        "law_filing_date": "Filing date",
+        "law_filing_subject": "Subject",
+        "law_filing_facts": "Facts presented in the écrit",
+        "law_filing_discussion": "Discussion",
+        "law_filing_conclusions": "Conclusions",
+        "law_filing_proceeding": "Instance concerned",
+        "law_filing_author": "Author",
+        "law_proceeding_filings": "Écrits filed in the instance",
+        "law_brief_responds_to": "Écrit answered"
+      }
+    },
+    "law_moyens": {
+      "name": "Moyens and legal citations",
+      "resources": {
+        "law_plea": "Moyen",
+        "law_plea_title": "Moyen title",
+        "law_plea_text": "Moyen as stated in the écrit",
+        "law_filing_pleas": "Moyens raised",
+        "law_plea_provisions": "Articles invoked",
+        "law_plea_jurisprudence": "Cited jurisprudence"
+      }
+    },
+    "law_preuves": {
+      "name": "Pièces and source documents",
+      "resources": {
+        "law_document": "Source document",
+        "law_document_file_id": "Authorized document reference",
+        "law_document_title": "Document title",
+        "law_exhibit": "Pièce",
+        "law_exhibit_number": "Bordereau number",
+        "law_exhibit_title": "Pièce title",
+        "law_exhibit_document": "Source document",
+        "law_filing_exhibits": "Pièces produced",
+        "law_plea_exhibits": "Pièces cited by the moyen",
+        "law_filing_document": "Original écrit",
+        "law_judicial_decision_document": "Original judgment"
+      }
     }
   }
 }

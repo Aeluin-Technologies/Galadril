@@ -39,7 +39,7 @@ const id = useId();
       </div>
       <slot name="actions" />
     </header>
-    <div class="p-5"><slot /></div>
+    <div v-if="$slots.default" class="p-5"><slot /></div>
     <footer v-if="$slots.footer" class="border-t border-border p-5">
       <slot name="footer" />
     </footer>

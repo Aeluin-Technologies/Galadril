@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
   StopIcon,
   PaperClipIcon,
+  DocumentTextIcon,
   GlobeAltIcon,
   ShareIcon,
   UserGroupIcon,
@@ -14,6 +15,7 @@ import {
 } from "@heroicons/vue/24/outline";
 import { useElementSize, onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
+import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
@@ -27,6 +29,33 @@ const emit = defineEmits<{
   stop: [];
 }>();
 const ui = usePengoloUi();
+const chats = usePengoloChats();
+const identity = useAccount();
+const previewFile = shallowRef<{
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+} | null>(null);
+function previewAttachment(file: FileRecord) {
+  previewFile.value = {
+    id: file.id,
+    name: file.data.name,
+    mime: file.data.mime,
+    size: file.data.size,
+  };
+}
+watch(
+  [() => identity.session.value?.subject, () => identity.session.value?.tenant],
+  () => (previewFile.value = null),
+);
+watch(
+  () => ui.files.some((file) => file.id === previewFile.value?.id),
+  (present) => {
+    if (!present) previewFile.value = null;
+  },
+);
+onDeactivated(() => (previewFile.value = null));
 const models = usePengoloModels();
 const modelLabel = computed(
   () =>
@@ -41,11 +70,6 @@ const modelLabel = computed(
     ),
 );
 const modelItems = computed<MenuItem[]>(() => [
-  {
-    id: "execution-mode",
-    label: t("pengolo.execution.research"),
-    icon: ui.executionMode === "research" ? CheckIcon : undefined,
-  },
   ...models.models.map((model) => ({
     id: `model:${model.alias}`,
     label: modelDisplayName(model.model || model.alias),
@@ -59,10 +83,6 @@ const modelItems = computed<MenuItem[]>(() => [
   },
 ]);
 function chooseModel(id: string) {
-  if (id === "execution-mode") {
-    ui.executionMode = ui.executionMode === "research" ? "chat" : "research";
-    return;
-  }
   const model = models.models.find((model) => `model:${model.alias}` === id);
   if (model) models.selected = model.alias;
 }
@@ -168,20 +188,32 @@ function submitPrompt() {
           @click="ui.graphContext = null"
         />
       </span>
-      <span v-for="file in ui.files" :key="file.id" class="p-chip"
-        ><PaperClipIcon />{{ file.data.name
-        }}<UiButton
-          variant="ghost"
-          type="button"
-          :aria-label="
-            $t('pengolo.copy.remove_value0', { value0: file.data.name })
-          "
-          @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
-          :loading="busy"
-        >
-          ×
-        </UiButton></span
+      <div
+        v-for="file in ui.files"
+        :key="file.id"
+        class="inline-flex max-w-full items-center gap-1"
       >
+        <UiButton
+          variant="secondary"
+          size="sm"
+          class="min-w-0"
+          :aria-label="file.data.name"
+          :tooltip="file.data.name"
+          @click="previewAttachment(file)"
+        >
+          <DocumentTextIcon
+            class="size-5 shrink-0 text-info"
+            aria-hidden="true"
+          />
+          <span class="max-w-64 truncate">{{ file.data.name }}</span>
+        </UiButton>
+        <UiIconButton
+          :icon="XMarkIcon"
+          :label="$t('pengolo.copy.remove_value0', { value0: file.data.name })"
+          @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
+          :disabled="busy"
+        />
+      </div>
     </div>
     <div class="p-composer-input">
       <div ref="menuElement" class="p-tools">
@@ -359,5 +391,10 @@ function submitPrompt() {
         @select="select"
     /></UiDialog>
     <AiAgentPicker :open="agentPicker" @close="agentPicker = false" />
+    <AiDocumentPreview
+      :file="previewFile"
+      :temporary-session="ui.temporary ? chats.active?.id : undefined"
+      @close="previewFile = null"
+    />
   </form>
 </template>
