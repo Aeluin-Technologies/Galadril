@@ -32,6 +32,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
 from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.errors import ToolFailure, UnavailableToolResult
 from galadril_scribe.workflows import WorkflowToolset
 
 
@@ -185,9 +186,12 @@ class AvailableToolset(WrapperToolset[Dependencies]):
                 async with asyncio.timeout(
                     self.timeout_seconds or _TOOL_TIMEOUT_SECONDS
                 ):
-                    return await self.wrapped.call_tool(
+                    result = await self.wrapped.call_tool(
                         name, tool_args, ctx, tool
                     )
+                    if isinstance(result, UnavailableToolResult):
+                        raise ToolFailure("Tool reported unavailability")
+                    return result
             except (
                 AgentRunError,
                 ApprovalRequired,

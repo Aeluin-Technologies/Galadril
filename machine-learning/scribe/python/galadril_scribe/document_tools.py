@@ -15,7 +15,7 @@ from pydantic_ai import RunContext, Tool
 from pydantic_ai_harness.ask_user import AskUserRequest, Question
 
 from galadril_scribe.dependencies import Dependencies
-from galadril_scribe.errors import ToolFailure
+from galadril_scribe.errors import ToolFailure, UnavailableToolResult
 
 
 class StrictModel(BaseModel):
@@ -137,12 +137,14 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
         try:
             return await invoke(ctx, operation, arguments)
         except ToolFailure:
-            return json.dumps(
-                {
-                    "status": "unavailable",
-                    "operation": operation,
-                    "instruction": "This operation was denied or unavailable. No action is confirmed. For template discovery use list or read; plugin administration belongs in settings. Do not repeat an unchanged failed call or claim a PDF exists.",
-                }
+            return UnavailableToolResult(
+                json.dumps(
+                    {
+                        "status": "unavailable",
+                        "operation": operation,
+                        "instruction": "This operation was denied or unavailable. No action is confirmed. For template discovery use list or read; plugin administration belongs in settings. Do not repeat an unchanged failed call or claim a PDF exists.",
+                    }
+                )
             )
 
     async def redact_document(
