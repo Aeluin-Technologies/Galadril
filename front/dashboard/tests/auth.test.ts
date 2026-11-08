@@ -36,6 +36,71 @@ import {
 
 import "./session.test.ts";
 import "./restore.test.ts";
+import {
+  parseMcpClients,
+  mcpAuthorization,
+  mcpConsent,
+  mcpClientDefinition,
+} from "../server/auth/mcp.ts";
+
+test("MCP OAuth binds client, callback, PKCE, resource and scopes", () => {
+  const clients = parseMcpClients(
+    JSON.stringify([
+      {
+        id: "fixture-mcp",
+        name: "Fixture MCP",
+        redirectUris: ["https://chatgpt.com/connector/oauth/fixture"],
+        resource: "https://mcp.example/law/mcp",
+        scopes: ["legal:read"],
+      },
+    ]),
+  );
+  const query = new URLSearchParams({
+    client_id: "fixture-mcp",
+    redirect_uri: "https://chatgpt.com/connector/oauth/fixture",
+    response_type: "code",
+    code_challenge: "a".repeat(43),
+    code_challenge_method: "S256",
+    state: "fixture-state",
+    scope: "legal:read",
+    resource: "https://mcp.example/law/mcp",
+  });
+  assert.equal(mcpAuthorization(query, clients).client.id, "fixture-mcp");
+  for (const [key, value] of [
+    ["client_id", "foreign"],
+    ["redirect_uri", "https://attacker.example/callback"],
+    ["resource", "https://mcp.example/mail/mcp"],
+    ["scope", "mail:read"],
+    ["code_challenge_method", "plain"],
+  ]) {
+    const changed = new URLSearchParams(query);
+    changed.set(key!, value!);
+    assert.throws(() => mcpAuthorization(changed, clients));
+  }
+  const consent = {
+    client: { client_id: "fixture-mcp" },
+    requested_scope: ["legal:read"],
+    requested_access_token_audience: ["https://mcp.example/law/mcp"],
+  };
+  assert.deepEqual(mcpConsent(consent, clients), {
+    scope: ["legal:read"],
+    audience: ["https://mcp.example/law/mcp"],
+  });
+  assert.throws(() =>
+    mcpConsent(
+      { ...consent, requested_access_token_audience: ["galadril"] },
+      clients,
+    ),
+  );
+  const definition = mcpClientDefinition(clients[0]!);
+  assert.equal(definition.token_endpoint_auth_method, "none");
+  assert.deepEqual(definition.audience, ["https://mcp.example/law/mcp"]);
+  assert.throws(() =>
+    parseMcpClients(
+      JSON.stringify([{ ...clients[0], resource: "http://mcp.example" }]),
+    ),
+  );
+});
 
 test("email settings support shell renewal without exposing mail or OAuth APIs", () => {
   assert.equal(isDashboardDocument("/settings/email"), true);

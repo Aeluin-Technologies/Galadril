@@ -3393,6 +3393,7 @@ mod tests {
 
 mod compiler;
 mod document_fields;
+mod mcp;
 pub(crate) use document_fields::compiler_binding_key_matches;
 mod agent_state;
 mod redaction;

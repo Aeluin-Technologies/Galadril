@@ -79,6 +79,16 @@ uv.override_package(
     target = "//plugins:galadril_plugins",
 )
 uv.override_package(
+    name = "galadril-mcp-core",
+    lock = "//:uv.lock",
+    target = "//platform/mcp:galadril_mcp_core",
+)
+uv.override_package(
+    name = "galadril-mcp-service",
+    lock = "//:uv.lock",
+    target = "//services/mcp:lib",
+)
+uv.override_package(
     name = "galadril-registry-api",
     lock = "//:uv.lock",
     target = "//platform/registry/python/galadril_registry_api",

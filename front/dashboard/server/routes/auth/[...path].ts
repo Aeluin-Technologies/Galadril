@@ -38,6 +38,7 @@ import {
   requireRefreshToken,
 } from "../../auth/renewal.ts";
 import { ensureClient } from "../../auth/client.ts";
+import { mcpConsent } from "../../auth/mcp.ts";
 import { identityCookie, localIdentity } from "../../auth/local.ts";
 import { record, records, text } from "#shared/records.ts";
 
@@ -413,9 +414,47 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, url.href, 303);
     }
     if (path === "login" && event.method === "GET") {
-      if (!session.data.state) throw new Error("Missing flow");
       const loginChallenge = param("login_challenge");
       const login = await adminRequest(config, "login", loginChallenge);
+      const mcpClient = config.mcpClients?.find(
+        (item) => item.id === record(login.client).client_id,
+      );
+      if (mcpClient) {
+        let claims;
+        try {
+          claims = await verifyAccessToken(
+            getCookie(event, tokenCookie),
+            config.issuer,
+            config.keys,
+          );
+        } catch {
+          const pending = await useSession(event, {
+            name: "__Host-galadril-mcp-login",
+            password: config.sessionSecret,
+            maxAge: 600,
+            cookie,
+          });
+          await pending.update({
+            challenge: loginChallenge,
+            createdAt: Date.now(),
+          });
+          return sendRedirect(event, "/login", 303);
+        }
+        await activeUser(config.directory, claims.tenant_id, claims.sub);
+        await config.passkeys.check(claims);
+        await session.update({
+          state: random(),
+          loginChallenge,
+          subject: claims.sub,
+          tenant: claims.tenant_id,
+          primaryMethod: "session",
+          primaryVerifiedAt: Date.now(),
+          mfaGeneration: claims.mfa_generation ?? null,
+          mcpClient: mcpClient.id,
+        });
+        return sendRedirect(event, await acceptLogin(), 303);
+      }
+      if (!session.data.state) throw new Error("Missing flow");
       if (record(login.client).client_id !== "galadril-studio")
         throw new Error("Invalid client");
       await session.update({ loginChallenge });
@@ -568,13 +607,22 @@ export default defineEventHandler(async (event) => {
     if (path === "consent" && event.method === "GET") {
       const consentChallenge = param("consent_challenge");
       const consent = await adminRequest(config, "consent", consentChallenge);
-      const grants = validateConsent(consent);
+      const mcp = record(consent.client).client_id !== "galadril-studio";
+      if (mcp && session.data.mcpClient !== record(consent.client).client_id)
+        throw new Error("MCP consent flow changed");
+      const grants = mcp
+        ? mcpConsent(consent, config.mcpClients ?? [])
+        : validateConsent(consent);
       if (
         consent.subject !== session.data.subject ||
         record(consent.context).tenant_id !== session.data.tenant
       )
         throw new Error("Invalid consent identity");
-      await activeUser(config.directory, session.data.tenant, text(consent.subject));
+      await activeUser(
+        config.directory,
+        session.data.tenant,
+        text(consent.subject),
+      );
       await config.passkeys.check({
         tenant_id: session.data.tenant,
         sub: consent.subject,
@@ -592,6 +640,7 @@ export default defineEventHandler(async (event) => {
           },
         },
       });
+      if (mcp) await session.clear();
       return sendRedirect(
         event,
         safeRedirect(accepted.redirect_to, config.origin),
@@ -666,6 +715,26 @@ export default defineEventHandler(async (event) => {
         lastActiveAt: Date.now(),
       });
       await session.clear();
+      const pending = await useSession(event, {
+        name: "__Host-galadril-mcp-login",
+        password: config.sessionSecret,
+        maxAge: 600,
+        cookie,
+      });
+      const pendingChallenge = pending.data.challenge;
+      const pendingAge = Date.now() - Number(pending.data.createdAt);
+      await pending.clear();
+      if (
+        typeof pendingChallenge === "string" &&
+        pendingChallenge.length <= 2048 &&
+        pendingAge >= 0 &&
+        pendingAge < 600000
+      )
+        return sendRedirect(
+          event,
+          `/auth/login?${new URLSearchParams({ login_challenge: pendingChallenge })}`,
+          303,
+        );
       return sendRedirect(event, "/", 303);
     }
     throw new Error("Invalid authentication route");
