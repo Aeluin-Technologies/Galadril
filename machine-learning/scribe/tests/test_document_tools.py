@@ -13,6 +13,7 @@ from galadril_scribe.document_tools import (
     TemplateRequest,
     document_tools,
 )
+from galadril_scribe.runtime import ToolFailure
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_ai import RunContext
 
@@ -88,6 +89,25 @@ class DocumentToolsTests(unittest.TestCase):
 
 
 class DocumentExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_denial_does_not_abort_the_agent(self) -> None:
+        async def denied(*args: object) -> str:
+            raise ToolFailure("Authorization refused")
+
+        selected = next(
+            tool
+            for tool in document_tools(invoke=denied)
+            if tool.name == "document_templates"
+        )
+        context = cast(
+            RunContext[Dependencies], SimpleNamespace(deps=SimpleNamespace())
+        )
+        result = await selected.function(
+            context,
+            TypeAdapter(TemplateRequest).validate_python({"action": "list"}),
+        )
+        self.assertEqual(json.loads(result)["status"], "unavailable")
+        self.assertNotIn("Authorization refused", result)
+
     async def test_document_case_update_requires_interactive_confirmation(
         self,
     ) -> None:

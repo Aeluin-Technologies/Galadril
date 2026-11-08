@@ -15,6 +15,7 @@ from pydantic_ai import RunContext, Tool
 from pydantic_ai_harness.ask_user import AskUserRequest, Question
 
 from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.errors import ToolFailure
 
 
 class StrictModel(BaseModel):
@@ -125,11 +126,30 @@ JSON = TypeAdapter(JsonValue)
 
 
 def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
+    """Keep access denials recoverable without weakening Gateway authorization."""
+
+    async def safe_invoke(
+        ctx: RunContext[Dependencies],
+        operation: str,
+        arguments: dict[str, JsonValue],
+    ) -> str:
+        """Report unavailable operations without exposing transport exceptions."""
+        try:
+            return await invoke(ctx, operation, arguments)
+        except ToolFailure:
+            return json.dumps(
+                {
+                    "status": "unavailable",
+                    "operation": operation,
+                    "instruction": "This operation was denied or unavailable. No action is confirmed. For template discovery use list or read; plugin administration belongs in settings. Do not repeat an unchanged failed call or claim a PDF exists.",
+                }
+            )
+
     async def redact_document(
         ctx: RunContext[Dependencies], request: RedactDocument
     ) -> str:
         """Create a redacted copy of an attached PDF or UTF-8 text document. Specify literal matches, bounded RE2 regex, email or phone rules. Match complete words with a bounded RE2 pattern and set case_sensitive=false when appropriate. Original bytes stay in the processing service. Return the download link and advise review of the provided rules' coverage."""
-        return await invoke(
+        return await safe_invoke(
             ctx,
             "redact_document",
             {
@@ -157,7 +177,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
             path=path,
             offset=offset,
         )
-        return await invoke(
+        return await safe_invoke(
             ctx,
             "document_templates",
             {"request": cast(JsonValue, request.model_dump(mode="json"))},
@@ -195,7 +215,9 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
         payload = cast(dict[str, JsonValue], request.model_dump(mode="json"))
         if isinstance(request, TemplatePut):
             payload["template"] = request.template.wire()
-        return await invoke(ctx, "document_templates", {"request": payload})
+        return await safe_invoke(
+            ctx, "document_templates", {"request": payload}
+        )
 
     async def document_job(
         ctx: RunContext[Dependencies], request: JobRequest
@@ -215,7 +237,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
             payload = {"action": request.action, "job_id": request.job_id}
             if request.action == "save":
                 payload["name"] = request.name
-        return await invoke(ctx, "document_job", {"request": payload})
+        return await safe_invoke(ctx, "document_job", {"request": payload})
 
     async def compile_document(
         ctx: RunContext[Dependencies], request: Compilation
@@ -239,7 +261,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
                 },
             }
             result = JSON.validate_json(
-                await invoke(ctx, "compile_document", {"request": payload})
+                await safe_invoke(ctx, "compile_document", {"request": payload})
             )
             if not isinstance(result, dict) or not isinstance(
                 result.get("job_id"), str
@@ -251,7 +273,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
         while pending and time.monotonic() < deadline:
             for identifier in tuple(pending):
                 status = JSON.validate_json(
-                    await invoke(
+                    await safe_invoke(
                         ctx,
                         "document_job",
                         {"request": {"action": "status", "job_id": identifier}},
@@ -276,7 +298,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
                 }
             )
         if len(jobs) == 1:
-            return await invoke(
+            return await safe_invoke(
                 ctx,
                 "document_job",
                 {
@@ -292,7 +314,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
             if request.name.lower().endswith(".zip")
             else request.name.rsplit(".", 1)[0] + ".zip"
         )
-        return await invoke(
+        return await safe_invoke(
             ctx,
             "document_job",
             {
