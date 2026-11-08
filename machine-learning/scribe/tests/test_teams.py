@@ -428,6 +428,7 @@ async def test_private_web_queries_are_blocked_until_exact_approval() -> None:
             public_search=search,
             web_remaining=8,
             web_approval=approve,
+            web_external=True,
             web_requires_approval=True,
         )
         context = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
@@ -467,6 +468,7 @@ def test_secret_policy_checks_keys_and_tool_context() -> None:
 @pytest.mark.parametrize("approved", [False, True])
 async def test_attachment_search_waits_for_the_owning_chat(
     approved: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from galadril_scribe.contracts import GenerationRequest
     from galadril_scribe.interactions import AnswerSubmission
@@ -474,6 +476,14 @@ async def test_attachment_search_waits_for_the_owning_chat(
     query = "official sources for a public question"
     sent: list[str] = []
     reviewed = False
+
+    async def hosted(
+        runtime: Runtime, alias: str, query: str, limit: int
+    ) -> str:
+        sent.append(query)
+        return "Public result"
+
+    monkeypatch.setattr(Runtime, "public_search", hosted)
 
     states: dict[str, object] = {}
 
@@ -508,7 +518,7 @@ async def test_attachment_search_waits_for_the_owning_chat(
         transport=httpx.MockTransport(transport)
     ) as client:
         runtime = Runtime(
-            settings(),
+            settings(web_search_provider="openai"),
             client,
             model=scripted_model(model),
             plugins=PluginRegistry.from_manifests([]),
@@ -939,6 +949,9 @@ async def test_normal_chat_reads_mail_and_proposes_a_reply_without_tool_quota() 
         messages: list[ModelMessage], info: AgentInfo
     ) -> ModelResponse:
         nonlocal turn
+        assert "Use search_emails for mailbox requests" in (
+            info.instructions or ""
+        )
         assert {"search_emails", "read_email", "propose_email"}.issubset(
             {tool.name for tool in info.function_tools}
         )
@@ -1550,3 +1563,43 @@ async def test_long_specialist_reports_reach_a_durable_orchestrator_checkpoint(
         assert len(executions) == count
     assert chunks[-1].kind == "completed"
     assert isinstance(stored.get("checkpoint"), str)
+
+
+@pytest.mark.anyio
+async def test_internal_web_search_does_not_ask_for_external_provider_consent() -> (
+    None
+):
+    from galadril_scribe.dependencies import Dependencies
+    from galadril_scribe.media import StorageMedia
+    from galadril_scribe.runtime import web_search
+    from pydantic_ai import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    calls: list[str] = []
+
+    async def approve(query: str) -> bool:
+        raise AssertionError(
+            "Internal search must not request hosted-provider consent"
+        )
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content)["query"])
+        return httpx.Response(200, json={"answer": "Public source"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        deps = Dependencies(
+            client,
+            "http://gateway/tools",
+            "a" * 64,
+            None,
+            StorageMedia(client),
+            web_approval=approve,
+            web_requires_approval=True,
+        )
+        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+        await web_search(
+            ctx, "site:legifrance.gouv.fr code éducation L613-1 jury"
+        )
+    assert calls == ["site:legifrance.gouv.fr code éducation L613-1 jury"]

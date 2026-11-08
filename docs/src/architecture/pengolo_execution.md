@@ -111,3 +111,10 @@ per-delegate budgets are useful, but its general delegation interface does not
 replace the existing sealed-review barrier. This change retains the registered
 specialist bindings and their parallel execution instead of enabling unrestricted
 self-delegation or inherited parent tools.
+
+Gateway-backed public web research uses the configured SearchXNG route without
+per-query hosted-provider consent. Credential redaction, generation leases and
+sealed-review closure remain enforced. When the operator explicitly configures
+the OpenAI web provider, private-source queries still require confirmation.
+Hosted chat sessions declare callable functions in the Responses `tools` field;
+function declarations are not substituted with deferred `additional_tools` inputs.

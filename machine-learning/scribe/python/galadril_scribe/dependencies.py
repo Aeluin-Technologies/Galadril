@@ -28,4 +28,5 @@ class Dependencies:
     answerer: Answerer | None = None
     web_approval: Callable[[str], Awaitable[bool]] | None = None
     web_requires_approval: bool = False
+    web_external: bool = False
     web_closed: bool = False
