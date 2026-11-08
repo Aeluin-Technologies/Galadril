@@ -1,0 +1,16 @@
+# gazelle:ignore
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "galadril_mcp_core",
+    srcs = glob(["src/**/*.py"]),
+    imports = ["src"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@pip//httpx",
+        "@pip//mcp",
+        "@pip//pyjwt",
+        "@pip//pydantic",
+        "@pip//opentelemetry_api",
+    ],
+)

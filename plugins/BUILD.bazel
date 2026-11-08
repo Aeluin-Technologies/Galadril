@@ -17,6 +17,7 @@ py_library(
         "@pip//pydantic",
         "@pip//jsonschema",
         "@pip//httpx",
+        "//platform/mcp:galadril_mcp_core",
         "@pip//markdown_it_py",
         "@pip//dnspython",
         "@pip//cryptography",

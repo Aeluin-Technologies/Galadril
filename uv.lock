@@ -20,6 +20,8 @@ members = [
     "galadril",
     "galadril-document-memory",
     "galadril-inference",
+    "galadril-mcp-core",
+    "galadril-mcp-service",
     "galadril-ontology",
     "galadril-pipeline",
     "galadril-plugins",
@@ -1403,6 +1405,7 @@ dependencies = [
     { name = "faststream", extra = ["confluent"] },
     { name = "fido2" },
     { name = "galadril-inference" },
+    { name = "galadril-mcp-service" },
     { name = "galadril-ontology" },
     { name = "galadril-pipeline" },
     { name = "galadril-registry-api" },
@@ -1493,6 +1496,7 @@ requires-dist = [
     { name = "faststream", extras = ["confluent"], specifier = ">=0.7.2,<0.8" },
     { name = "fido2", specifier = "==2.2.1" },
     { name = "galadril-inference", editable = "machine-learning/galadril-inference" },
+    { name = "galadril-mcp-service", editable = "services/mcp" },
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
     { name = "galadril-registry-api", editable = "platform/registry" },
@@ -1710,6 +1714,50 @@ dev = [
 ]
 
 [[package]]
+name = "galadril-mcp-core"
+version = "0.1.0"
+source = { editable = "platform/mcp" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.30,<2" },
+    { name = "opentelemetry-api", specifier = ">=1.44.0,<2" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12,<3" },
+]
+
+[[package]]
+name = "galadril-mcp-service"
+version = "0.1.0"
+source = { editable = "services/mcp" }
+dependencies = [
+    { name = "galadril-mcp-core" },
+    { name = "galadril-plugins" },
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "galadril-mcp-core", editable = "platform/mcp" },
+    { name = "galadril-plugins", editable = "plugins" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.30,<2" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "uvicorn", specifier = ">=0.34,<1" },
+]
+
+[[package]]
 name = "galadril-ontology"
 version = "0.1.0"
 source = { editable = "platform/ontology" }
@@ -1764,6 +1812,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "dnspython" },
     { name = "fastapi" },
+    { name = "galadril-mcp-core" },
     { name = "galadril-pipeline" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -1780,6 +1829,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=46.0.7" },
     { name = "dnspython", specifier = ">=2.8,<3" },
     { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "galadril-mcp-core", editable = "platform/mcp" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },

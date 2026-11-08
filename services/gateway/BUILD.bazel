@@ -7,6 +7,13 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_test(
+    name = "mcp_delegation_test",
+    srcs = ["src/application/usecases/mcp_delegation.rs"],
+    crate_root = "src/application/usecases/mcp_delegation.rs",
+    deps = crate_deps(["anyhow", "uuid"]),
+)
+
+rust_test(
     name = "document_scheduling_test",
     srcs = ["src/application/usecases/document_scheduling.rs"],
     crate_root = "src/application/usecases/document_scheduling.rs",

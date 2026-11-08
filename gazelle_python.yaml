@@ -465,4 +465,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 6ed428dae5eec83f48f4e59b3c73e38341a9472b9028e6f5194b272e19eb7525
+integrity: d28bf923aa018551ded879ea2e40782236a12ab84a030685bedc3a1cfa14660b

@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.34,<1",
     "galadril-pipeline",
     "httpx>=0.28.1",
+    "galadril-mcp-core",
     "jsonschema>=4.26.0",
     "pydantic>=2.13.4",
     "structlog>=25.5.0",

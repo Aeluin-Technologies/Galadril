@@ -5,6 +5,7 @@ pub mod authorization;
 pub mod capabilities;
 pub mod causal;
 pub mod chat_tools;
+pub mod mcp_delegation;
 pub mod control_plane;
 pub mod conversations;
 mod document_scheduling;

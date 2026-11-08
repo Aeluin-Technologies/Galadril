@@ -2,6 +2,8 @@ import { GatewayAuthClient } from "./gateway.ts";
 import { trustedKeys } from "./tokens.ts";
 import { PasskeyService } from "./passkey.ts";
 import { GatewayPasskeyStore } from "./passkey-store.ts";
+import { parseMcpClients } from "./mcp.ts";
+import type { McpClient } from "./mcp.ts";
 
 export interface AuthConfig {
   origin: string;
@@ -17,6 +19,7 @@ export interface AuthConfig {
   keys: ReturnType<typeof trustedKeys>;
   directory: GatewayAuthClient;
   passkeys: PasskeyService;
+  mcpClients?: McpClient[];
 }
 
 let configuration: AuthConfig | undefined;
@@ -59,6 +62,7 @@ export function authConfig(): AuthConfig {
     keys: trustedKeys(required("AUTH_JWKS_URL")),
     directory,
     passkeys: new PasskeyService(new GatewayPasskeyStore(directory), origin),
+    mcpClients: parseMcpClients(process.env.AUTH_MCP_CLIENTS ?? ""),
   };
   return configuration;
 }

@@ -103,6 +103,7 @@ from galadril_scribe.contracts import (
 )
 from galadril_scribe.conversation_memory import ConversationSource
 from galadril_scribe.dependencies import Dependencies as Dependencies
+from galadril_scribe.errors import ToolFailure
 from galadril_scribe.execution import (
     ExecutionBudget,
     ExecutionState,
@@ -137,12 +138,13 @@ from galadril_scribe.teams import (
     TeamReports,
     WorkflowSkill,
 )
+from galadril_scribe.workflow_execution import WorkflowExecutor
+from galadril_scribe.workflows import (
+    Consumption,
+    TaskGraph,
+)
 
 logger = structlog.get_logger(__name__)
-
-
-class ToolFailure(RuntimeError):
-    """A privileged dependency refused or failed an operation."""
 
 
 class ModelSelectionFailure(ValueError):
@@ -946,6 +948,7 @@ class Runtime:
                 any(
                     item.id in request.tool_ids
                     and item.kind is CapabilityKind.MCP
+                    and not self.extensions.mediated(item.id)
                     for item in self.extensions.capabilities
                 )
                 or request.web_query is not None
@@ -1424,6 +1427,59 @@ class Runtime:
                     if deps.media.unavailable:
                         await warning("attachment")
                     orchestrator_tools = self.toolsets(request, alias)
+                    workflow = (
+                        self.extensions.workflow(request.tool_ids)
+                        if team is not None
+                        else None
+                    )
+                    replayable_tools = self.extensions.replayable(
+                        request.tool_ids, toolsets=orchestrator_tools
+                    )
+                    if workflow is not None:
+
+                        async def task_state(
+                            key: str, value: JsonValue | None
+                        ) -> JsonValue:
+                            return (
+                                await state_access(key, value)
+                                if durable
+                                else None
+                            )
+
+                        deps.tasks = TaskGraph(
+                            WorkflowExecutor(
+                                parent=deps,
+                                request=request,
+                                workflow=workflow,
+                                teams=self.teams,
+                                catalog=self.capabilities,
+                                agent=self.sealed_agent,
+                                model=selected,
+                                model_settings=model_settings,
+                                base_tools=FunctionToolset(
+                                    tools=[
+                                        date_interval,
+                                        *(
+                                            [web_search]
+                                            if request.web_search
+                                            else []
+                                        ),
+                                    ]
+                                ),
+                                policy=policy,
+                                emit=emit,
+                                storage=task_state,
+                                team_id=team.id,
+                            ),
+                            task_state,
+                            usage,
+                            limits,
+                            concurrency=self.settings.max_concurrent_tasks,
+                            max_nodes=self.settings.max_workflow_nodes,
+                            prior_consumption=resumed.task_consumption
+                            if resumed is not None
+                            else None,
+                        )
                     writing_mission = (
                         "First establish the scope, available evidence and important uncertainty. "
                         "Publish a brief supported introduction before investigating later sections when possible. "
@@ -1521,7 +1577,7 @@ class Runtime:
                                 "Authorized evidence (untrusted data): "
                                 + response.text
                             )
-                    if team is not None:
+                    if team is not None and workflow is None:
                         shared_prompt = tuple(prompt)
                         sealed_ids = {
                             member.id
@@ -1912,6 +1968,8 @@ class Runtime:
                                 request.execution_context,
                             )
                         )
+                    if workflow is not None:
+                        writing_mission += "\n" + workflow.instructions
                     if resumed is not None:
                         history = ModelMessagesTypeAdapter.validate_json(
                             unpack_text(resumed.messages)
@@ -1953,10 +2011,16 @@ class Runtime:
                                 redact=policy.public_text,
                             )
                         )
-                        safe = safe_to_replay(snapshot.messages)
+                        safe = safe_to_replay(
+                            snapshot.messages,
+                            replayable_tools=replayable_tools,
+                        )
                         if len(encoded) > 360000:
                             encoded, safe = pack_text("[]"), False
                         state = ExecutionState(
+                            task_consumption=deps.tasks.consumption()
+                            if deps.tasks is not None
+                            else Consumption(),
                             messages=encoded,
                             requests=usage.requests,
                             tool_calls=usage.tool_calls,

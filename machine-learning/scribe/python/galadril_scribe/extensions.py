@@ -32,6 +32,14 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
 from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.errors import ToolFailure, UnavailableToolResult
+from galadril_scribe.workflows import WorkflowToolset
+
+
+class MediatedToolset(FunctionToolset[Dependencies]):
+    """Registered adapters exchange authority through Gateway before MCP calls."""
+
+    replayable_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +186,12 @@ class AvailableToolset(WrapperToolset[Dependencies]):
                 async with asyncio.timeout(
                     self.timeout_seconds or _TOOL_TIMEOUT_SECONDS
                 ):
-                    return await self.wrapped.call_tool(
+                    result = await self.wrapped.call_tool(
                         name, tool_args, ctx, tool
                     )
+                    if isinstance(result, UnavailableToolResult):
+                        raise ToolFailure("Tool reported unavailability")
+                    return result
             except (
                 AgentRunError,
                 ApprovalRequired,
@@ -253,6 +264,9 @@ class ToolRegistry:
                 bounded = AvailableToolset(
                     wrapped,
                     identifier,
+                    timeout_seconds=86400
+                    if isinstance(wrapped, WorkflowToolset)
+                    else None,
                     reconnect_after_failure=self._extensions[
                         identifier
                     ].capability.kind
@@ -272,3 +286,65 @@ class ToolRegistry:
                 bounded._failed(error)
             result.append(bounded.prefixed(_prefix(identifier)))
         return result
+
+    def workflow(self, identifiers: tuple[str, ...]) -> WorkflowToolset | None:
+        """Resolve delegation only from selected, registered plugin factories."""
+        workflows: list[WorkflowToolset] = []
+        for identifier in identifiers:
+            if identifier in self._extensions:
+                item = self._extensions[identifier].factory()
+                if isinstance(item, WorkflowToolset):
+                    item.namespace = _prefix(identifier)
+                    workflows.append(item)
+        if len(workflows) > 1:
+            raise ValueError("Select one orchestration workflow per execution")
+        return workflows[0] if workflows else None
+
+    def mediated(self, identifier: str) -> bool:
+        extension = self._extensions.get(identifier)
+        return extension is not None and isinstance(
+            extension.factory(), MediatedToolset
+        )
+
+    def replayable(
+        self,
+        identifiers: tuple[str, ...],
+        *,
+        toolsets: Sequence[AbstractToolset[Dependencies]] | None = None,
+    ) -> tuple[str, ...]:
+        """Accept replay guarantees only for a selected factory's own registered tools."""
+        owned: dict[str, AbstractToolset[Dependencies]] = {}
+        for item in toolsets or ():
+            while isinstance(item, WrapperToolset):
+                if isinstance(item, AvailableToolset):
+                    owned[item.capability_id] = item.wrapped
+                    break
+                item = item.wrapped
+        names: list[str] = []
+        for identifier in identifiers:
+            extension = self._extensions.get(identifier)
+            if extension is None:
+                continue
+            try:
+                toolset = (
+                    extension.factory()
+                    if toolsets is None
+                    else owned.get(identifier)
+                )
+            except Exception as error:
+                logger.warning(
+                    "scribe.replay.policy_unavailable",
+                    capability_id=identifier,
+                    error_type=type(error).__name__,
+                )
+                continue
+            if isinstance(toolset, WorkflowToolset):
+                toolset.namespace = _prefix(identifier)
+                names.extend(toolset.replayable_tools())
+            elif isinstance(toolset, MediatedToolset):
+                names.extend(
+                    _prefix(identifier) + "_" + name
+                    for name in toolset.replayable_names
+                    if name in toolset.tools
+                )
+        return tuple(names)

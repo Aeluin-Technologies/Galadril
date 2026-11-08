@@ -1,0 +1,36 @@
+# gazelle:ignore
+load("@rules_python//python:defs.bzl", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
+
+py_library(
+    name = "lib",
+    srcs = glob(["src/**/*.py"]),
+    imports = ["src"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/mcp:galadril_mcp_core",
+        "//plugins:galadril_plugins",
+        "@pip//httpx",
+        "@pip//mcp",
+        "@pip//pydantic",
+        "@pip//uvicorn",
+        "@pip//starlette",
+        "@pip//opentelemetry_api",
+    ],
+)
+
+py_binary(
+    name = "server",
+    srcs = ["src/galadril_mcp_service/server.py"],
+    main = "src/galadril_mcp_service/server.py",
+    deps = [":lib"],
+    visibility = ["//visibility:public"],
+)
+py_image_layer(name = "server_layers", binary = ":server")
+oci_image(name = "service_linux", base = "@bristroless_python", entrypoint = ["/app"], tars = [":server_layers"])
+platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"], target_platform = "//:linux_amd64")
+platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
+oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
+oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-mcp", visibility = ["//visibility:public"])

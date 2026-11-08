@@ -2,6 +2,22 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "dynamic_workflow_test",
+    srcs = ["test_dynamic_workflow.py"],
+    main = "test_dynamic_workflow.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//httpx", "@pip//pydantic_ai_slim"],
+)
+
+py_test(
+    name = "workflows_test",
+    srcs = ["test_workflows.py"],
+    main = "test_workflows.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//pydantic_ai_slim"],
+)
+
+py_test(
     name = "model_residency_test",
     srcs = ["test_model_residency.py"],
     main = "test_model_residency.py",

@@ -80,13 +80,22 @@ class ProxyStartupTest(unittest.IsolatedAsyncioTestCase):
                     cadata=identity_files()["identity/gateway/ca.pem"].decode()
                 )
                 async with httpx.AsyncClient(
-                    verify=trust, timeout=5.0
+                    verify=trust, timeout=5.0, trust_env=False
                 ) as client:
                     response = await client.post(
                         f"https://{address.strip()}/graphql",
                         json={"query": "{ __typename }"},
                     )
             self.assertEqual(response.status_code, 401)
+        except Exception as error:
+            logs = await _run(
+                (*environment._command, "logs", "--tail", "80", "api-proxy"),
+                environment=environment._environment,
+                check=False,
+            )
+            raise AssertionError(
+                f"Proxy startup failed; Envoy logs:\n{logs}"
+            ) from error
         finally:
             await environment.close()
 

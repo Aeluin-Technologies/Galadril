@@ -32,6 +32,7 @@ export function isPublicRoute(path: string) {
     path.startsWith("/__nuxt") ||
     path.startsWith("/favicon") ||
     path === "/healthz" ||
+    path === "/.well-known/oauth-authorization-server" ||
     translationAsset.test(path)
   );
 }

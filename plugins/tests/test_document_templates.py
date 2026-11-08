@@ -66,6 +66,7 @@ class PackagedTemplatesTest(unittest.TestCase):
             set(skills),
             {
                 "law.skill.coordination",
+                "law.skill.raisonnement",
                 "law.skill.faits",
                 "law.skill.recevabilite",
                 "law.skill.jurisprudence",
@@ -76,9 +77,10 @@ class PackagedTemplatesTest(unittest.TestCase):
                 "law.skill.relecture",
             },
         )
-        prompt = skills["law.skill.redaction"]
+        prompt = skills["law.skill.raisonnement"]
         examples = prompt.split("\n### ")[1:]
         self.assertEqual(len(examples), 3)
+        self.assertNotIn("### Jean Lessi", skills["law.skill.redaction"])
         for example in examples:
             self.assertEqual(
                 sum(line.startswith("> «") for line in example.splitlines()), 1

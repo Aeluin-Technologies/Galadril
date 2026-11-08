@@ -5,6 +5,7 @@ description = "All Galadril services."
 
 dependencies = [
     "galadril-scribe",
+    "galadril-mcp-service",
     "pydantic-ai-slim[openai,mcp]==2.62.0",
     "pydantic-monty==1.4.0",
     "fastapi>=0.115,<1",
@@ -102,6 +103,8 @@ override-dependencies = [
 
 [tool.uv.sources]
 galadril-scribe = { workspace = true }
+galadril-mcp-core = { workspace = true }
+galadril-mcp-service = { workspace = true }
 eru = { workspace = true }
 timesfm = { git = "https://github.com/google-research/timesfm.git" }
 geoclip = { git = "https://github.com/YelloooBlue/geo-clip.git" }
@@ -116,6 +119,7 @@ vision = { workspace = true }
 [tool.uv.workspace]
 members = [
     "plugins",
+    "services/mcp",
     "third_party/hipporag",
     "machine-learning/scribe",
     "machine-learning/galadril-inference",

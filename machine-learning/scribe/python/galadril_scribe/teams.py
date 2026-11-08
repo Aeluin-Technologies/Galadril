@@ -175,6 +175,12 @@ class TeamRegistry:
                     "Capability unavailable for this execution context"
                 )
         if team is not None:
+            if any(
+                not catalog.execution_allowed(identifier, context_id)
+                for agent in team.agents
+                for identifier in agent.skill_ids
+            ):
+                raise ValueError("Skill unavailable for this execution context")
             if sum(self.sealed_member(agent) for agent in team.agents) > 1:
                 raise ValueError("Only one sealed reviewer is allowed")
             for agent in team.agents:
@@ -263,3 +269,20 @@ class TeamRegistry:
         self, identifiers: tuple[str, ...]
     ) -> list[NativeCapability[Dependencies]]:
         return [self._skills[identifier].native() for identifier in identifiers]
+
+    def instructions(
+        self,
+        identifiers: tuple[str, ...],
+        catalog: CapabilityCatalog,
+        context: str | None,
+    ) -> str:
+        """Eagerly load mandatory child skills before the first model request."""
+        if any(
+            identifier not in self._skills
+            or not catalog.execution_allowed(identifier, context)
+            for identifier in identifiers
+        ):
+            raise ValueError("Delegated skill unavailable in this context")
+        return "\n\n".join(
+            self._skills[identifier].instructions for identifier in identifiers
+        )

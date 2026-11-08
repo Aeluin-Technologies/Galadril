@@ -29,6 +29,7 @@ services:
       HOST: 127.0.0.1
       AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
       AUTH_ISSUER: https://aeluin.gravitalia.com
+      AUTH_MCP_CLIENTS: ${AUTH_MCP_CLIENTS:-}
       AUTH_LOCAL_LOGIN_ENABLED: ${AUTH_LOCAL_LOGIN_ENABLED:-false}
       AUTH_KRATOS_PUBLIC_URL: http://127.0.0.1:4433
       AUTH_KRATOS_ADMIN_URL: http://127.0.0.1:4434

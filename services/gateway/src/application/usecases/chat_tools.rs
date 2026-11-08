@@ -105,6 +105,14 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    McpDelegate {
+        capability_id: String,
+        resource: String,
+    },
+    McpAuthorize {
+        capability_id: String,
+        resource: String,
+    },
     ConversationMemory {
         id: Option<String>,
     },
@@ -174,6 +182,7 @@ const fn default_depth() -> u8 {
 }
 
 pub struct ChatTools {
+    mcp: super::mcp_delegation::McpDelegations,
     compiler: OnceLock<
         Arc<
             dyn crate::application::ports::document_compiler::DocumentCompiler,
@@ -264,6 +273,7 @@ impl ChatTools {
         store: Arc<dyn ConversationStore>,
     ) -> Self {
         Self {
+            mcp: super::mcp_delegation::McpDelegations::default(),
             compiler: OnceLock::new(),
             email: OnceLock::new(),
             capabilities: Arc::new(Capabilities::default()),
@@ -313,6 +323,44 @@ impl ChatTools {
         token: &str,
         request: ToolRequest,
     ) -> Result<Value> {
+        if let ToolRequest::McpAuthorize {
+            capability_id,
+            resource,
+        } = &request
+        {
+            let grant = self.mcp.resolve(token, capability_id, resource)?;
+            let service = self.pengolo_service()?;
+            let generation = service.store.get(&grant.tenant, crate::application::ports::pengolo_store::Collection::Generation, &grant.generation, grant.temporary).await?.context("MCP generation unavailable")?;
+            let mut context: QueryContext = serde_json::from_value(
+                generation
+                    .data
+                    .get("authorization")
+                    .cloned()
+                    .context("Missing MCP authority")?,
+            )?;
+            context.hour_utc = i64::from(chrono::Utc::now().hour());
+            let actor = crate::application::usecases::pengolo::Principal {
+                tenant: &grant.tenant,
+                user: &grant.user,
+                context: &context,
+            };
+            self.identity
+                .verify_user(&grant.tenant, &grant.user)
+                .await?;
+            let scopes = service
+                .authorize_mcp(
+                    &actor,
+                    &generation,
+                    grant.temporary,
+                    capability_id,
+                    resource,
+                )
+                .await?;
+            tracing::info!(event.name="mcp.delegation.authorized", mcp_id=%capability_id, generation_id=%grant.generation);
+            return Ok(
+                json!({"active":true,"subject":grant.user,"tenant":grant.tenant,"generation":grant.generation,"resource":resource,"scopes":scopes,"expires_in":grant.expires.saturating_duration_since(Instant::now()).as_secs()}),
+            );
+        }
         let output_limit =
             if matches!(&request, ToolRequest::AgentState { .. }) {
                 crate::domain::pengolo::MAX_AGENT_STATE_BYTES
@@ -377,6 +425,16 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::McpDelegate { capability_id, resource } => {
+                    ensure!(scope.pengolo, "MCP delegation requires Pengolo");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("MCP generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
+                    service.authorize_mcp(&actor,&generation,scope.temporary,&capability_id,&resource).await?;
+                    let token = self.mcp.issue(super::mcp_delegation::McpContext {tenant:scope.tenant_id.clone(),user:scope.user_id.clone(),generation:scope.generation_id.clone(),temporary:scope.temporary,capability:capability_id,resource,expires:Instant::now()+Duration::from_secs(60)})?;
+                    Ok(json!({"token":token,"expires_in":60}))
+                },
+                ToolRequest::McpAuthorize { .. } => anyhow::bail!("MCP delegation denied"),
                 ToolRequest::ConversationMemory { id } => {
                     ensure!(scope.pengolo && !scope.temporary, "Conversation memory unavailable");
                     let service = self.pengolo_service()?;
