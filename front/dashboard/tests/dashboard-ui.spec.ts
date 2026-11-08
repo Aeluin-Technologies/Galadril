@@ -2262,6 +2262,9 @@ test("specialist report citations open an authorized panel on the right", async 
     .getByRole("button", { name: "Close report", exact: true })
     .click();
   await expect(panel).toBeHidden();
+  await citation.click();
+  await page.locator(".p-header h1").click();
+  await expect(panel).toBeHidden();
 });
 
 test("colored task cards keep model wording and animate their checked state", async ({

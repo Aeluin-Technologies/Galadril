@@ -49,12 +49,24 @@ async function synchronize() {
       dialog.value.show();
       dialog.value.focus();
       document.addEventListener("keydown", nonModalEscape);
+      document.addEventListener("pointerdown", nonModalOutside);
     }
   } else if (!props.open && dialog.value?.open) {
     dialog.value.close();
     document.removeEventListener("keydown", nonModalEscape);
+    document.removeEventListener("pointerdown", nonModalOutside);
     opener?.focus();
   }
+}
+function nonModalOutside(event: PointerEvent) {
+  if (
+    active &&
+    props.open &&
+    !props.modal &&
+    event.target instanceof Node &&
+    !dialog.value?.contains(event.target)
+  )
+    close();
 }
 function nonModalEscape(event: KeyboardEvent) {
   if (
@@ -130,10 +142,12 @@ onActivated(() => {
 onDeactivated(() => {
   active = false;
   document.removeEventListener("keydown", nonModalEscape);
+  document.removeEventListener("pointerdown", nonModalOutside);
   dialog.value?.close();
 });
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", nonModalEscape);
+  document.removeEventListener("pointerdown", nonModalOutside);
   dialog.value?.close();
   if (opener?.isConnected) opener.focus();
 });
