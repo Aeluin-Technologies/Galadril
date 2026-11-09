@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from . import accounts, runtime, tex_bundle
+from . import accounts, mcp_credentials, runtime, tex_bundle
 from .bootstrap import Bootstrap
 from .files import BootstrapError, read
 from .identity import certificates
@@ -55,6 +55,7 @@ def parser() -> argparse.ArgumentParser:
             "bundle",
             "tenant",
             "token",
+            "mcp-keys",
         ),
     )
     result.add_argument(
@@ -141,7 +142,7 @@ async def execute(arguments: Arguments, console: Console) -> None:
         )
         action = Prompt.ask(
             "Action",
-            choices=("up", "init", "doctor", "tenant", "down"),
+            choices=("up", "init", "doctor", "tenant", "down", "mcp-keys"),
             default="up",
             console=console,
         )
@@ -160,6 +161,16 @@ async def execute(arguments: Arguments, console: Console) -> None:
                 default=True,
                 console=console,
             )
+    if action == "mcp-keys":
+        if arguments.no_input or not sys.stdin.isatty():
+            raise BootstrapError(
+                "MCP credential setup requires a private terminal"
+            )
+        await asyncio.to_thread(
+            mcp_credentials.configure, bootstrap.root / ".local", console
+        )
+        console.print("Run up to apply the MCP credential mounts.")
+        return
     if action in {"init", "up", "bundle", "certificates", "trust"}:
         state = await bootstrap.initialize(
             import_env=arguments.import_env, openai_key=key

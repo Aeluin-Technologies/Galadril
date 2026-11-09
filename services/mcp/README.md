@@ -1,12 +1,12 @@
 # Galadril MCP
 
-One supervised service hosts separately authorized MCP resources behind the
-existing Envoy and Cloudflare Tunnel. Plugins consume registered capabilities;
-they do not own public listeners or receive user credentials.
+The public MCP at https://mcp.gravitalia.com/ serves Galadril tools through the
+existing Envoy and Cloudflare Tunnel. The service also accepts legacy resource
+URLs and generation grants scoped to native Pengolo tools.
 
 ## Workspace tools
 
-`https://mcp.gravitalia.com/workspace/mcp` exposes mailbox reads, draft preparation,
+`https://mcp.gravitalia.com/` exposes legal search, mailbox reads, draft preparation,
 email review, authorized data search, template discovery and management, LaTeX
 compilation and job publication. Tool arguments have bounded schemas. Gateway
 derives the actor and tenant from verified identity, then checks current IAM for
@@ -15,19 +15,19 @@ every operation. An OAuth scope is an additional restriction, never an IAM grant
 | Scope | Operations |
 | --- | --- |
 | `workspace:use` | Required for this MCP resource |
-| `mail:read` | Accessible accounts, contacts, messages, threads and attachments |
-| `mail:draft` | Save a draft, without approval or delivery |
-| `mail:send` | Request review of one exact draft revision |
+| `legal:read` | Search public law and verify citations against Légifrance |
+| `email:read` | Accessible accounts, contacts, messages, threads and attachments |
+| `email:write` | Prepare drafts and request review of an exact revision |
 | `documents:read` | Read permitted templates; attach an authorized stored file |
 | `documents:write` | Manage templates, compile and publish artifacts |
 | `data:read` | Permission-filtered indexed data search |
 
 Configure an operator-owned OAuth client named
-`galadril-mcp-chatgpt-workspace` in `AUTH_MCP_CLIENTS`, using the exact callback
-shown by ChatGPT, this resource URL, and the desired subset of the scopes above.
-The existing legal client retains its separate resource and scopes. Clients use
-the Galadril authorization-code flow with PKCE S256 and no client secret. Do not
-put PISTE credentials, workspace bearer tokens or signing keys in tool arguments.
+`galadril-mcp-chatgpt` in `AUTH_MCP_CLIENTS`, using the exact callback shown by
+ChatGPT, the resource URL including its trailing slash, and `workspace:use` plus
+the desired tool scopes. Enter the client ID manually and use PKCE S256 with
+token endpoint authentication method `none`. Existing connections can keep
+using `/law/mcp` or `/workspace/mcp` with their original clients and scopes.
 
 ### Sending email
 
@@ -79,7 +79,22 @@ grant. The parent capability stays inside Gateway. The internal adapter is hidde
 from the public tool catalogue. Gateway rechecks the generation, project and
 specialized-context restrictions before forwarding each native operation.
 
-## Optional legal provider
+## Federated legal search
+
+The default legal search queries Légifrance and LibreJustice concurrently. It
+returns up to five hits in each provider’s ranking and skips cross-provider
+duplicates identified by official document ID. LibreJustice uses its reranker
+for decisions and the requested version date for dated normative searches.
+The development CLI action `mcp-keys` can add the LibreJustice and PISTE keys
+individually. `up` mounts them as read-only files. Other deployments can set
+`LIBREJUSTICE_API_KEY_FILE` to a mounted private file or supply
+`LIBREJUSTICE_API_KEY` through the service environment. Send only public legal
+search terms to these services.
+
+Each provider can be unavailable independently. The citation verifier always
+re-fetches from Légifrance and never uses LibreJustice or Judilibre as proof.
+
+### Optional PISTE credentials
 
 `/law/mcp` remains registered even without PISTE credentials so previously
 connected clients can recover gracefully. Missing, invalid or unavailable
