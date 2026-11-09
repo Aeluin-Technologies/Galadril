@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-218280ba.js";
+            window.path_to_searchindex_js = "../searchindex-2e36a25a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e13b2548.js"></script>
@@ -219,9 +219,10 @@ invoke the other chat tools and expire after Gateway restarts.</p>
 <h2 id="deployment"><a class="header" href="#deployment">Deployment</a></h2>
 <p>The root CI publication target includes <code>//services/mcp:push</code>.
 For a local image, build and load <code>//services/mcp:load_local</code>.</p>
-<p>Build <code>//services/mcp:images</code>. Add <code>infrastructure/docker/law-mcp.yaml</code> to the
-normal Compose files only on deployments configured for MCP. The overlay adds only
-the read-only unprivileged MCP service. The existing API Envoy process owns the
+<p>Build <code>//services/mcp:images</code>. The normal Compose configuration includes the
+read-only unprivileged MCP service through <code>infrastructure/docker/mcp.yaml</code>.
+It exposes the workspace resource at <code>/workspace/mcp</code> and the optional legal
+provider at <code>/law/mcp</code>. The existing API Envoy process owns the
 loopback MCP listener on port 8098, with an exact host match for
 <code>mcp.gravitalia.com</code>. No additional proxy or tunnel container is needed.</p>
 <p>Add a public hostname to the existing Cloudflare Tunnel configuration:
@@ -232,8 +233,10 @@ connector <code>utils-email-tunnel</code> shares the API proxy network namespace
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.</p>
-<p>The managed development bootstrap includes the MCP overlay when both
-<code>.local/piste-key</code> and <code>.local/piste-oauth-key</code> exist. When
+<p>The managed development bootstrap mounts each available PISTE credential file
+independently. Neither file is required for MCP startup. Without usable legal
+credentials, legal tools return <code>status: unavailable</code>, without verifying any
+source, and callers can continue with authorized Web research. When
 <code>.local/cloudflared-token</code> exists, it enables the existing connector and mounts
 that file without copying its contents into configuration or arguments.</p>
 <p>For public Galadril login, set <code>GALADRIL_DEV_PUBLIC_ORIGIN</code> in the managed
@@ -250,6 +253,13 @@ PKCE S256, token endpoint authentication <code>none</code>, no client secret, an
 scopes and allowed clients. These are operator settings, never tool arguments.
 The service validates each namespace independently and returns 404 for unknown
 paths. Future providers use this registration contract and the shared verifier.</p>
+<p>The workspace resource uses its own OAuth client and <code>workspace:use</code> scope,
+plus granular mail, document and data scopes. Native Pengolo operations use the
+same MCP transport with generation-scoped grants. External email sends require
+review of the exact draft revision in a primary Galadril session; MCP annotations
+are descriptive hints, not approval authority. See
+<a href="../../../services/mcp/README.html">the service guide</a> for tools, scopes,
+private attachment handling and compilation workflow.</p>
 <p>PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
 Envoy or a model prompt. Default file mounts are <code>.local/piste-key</code> and
 <code>.local/piste-oauth-key</code>; they must be regular files with mode 0600, readable by
