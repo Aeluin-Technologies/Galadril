@@ -1,0 +1,10 @@
+# gazelle:ignore
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "workspace_test",
+    srcs = ["test_workspace.py"],
+    main = "test_workspace.py",
+    legacy_create_init = False,
+    deps = ["//services/mcp:lib", "@pip//httpx", "@pip//mcp"],
+)
