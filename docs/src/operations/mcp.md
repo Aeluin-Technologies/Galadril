@@ -102,7 +102,9 @@ private attachment handling and compilation workflow.
 PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
 Envoy or a model prompt. Default file mounts are `.local/piste-key` and
 `.local/piste-oauth-key`; they must be regular files with mode 0600, readable by
-the configured service UID. The API key authenticates Judilibre. Légifrance uses
+the configured service UID. The API key authenticates Judilibre. When it is
+missing, Judilibre calls return `status: unavailable` without a network request.
+Légifrance uses
 the OAuth client ID and secret. `SECRET_KEY` in the API-key file is not the OAuth
 secret; use the separate OAuth file. JSON credential files are also supported.
 Server deployments may instead provide `LAW_PISTE_API_KEY`,

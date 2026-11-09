@@ -357,6 +357,30 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                             {"items": []},
                         )
                         search.assert_awaited_once()
+                    for tool, arguments in (
+                        ("search", {"query": "vice de procédure"}),
+                        ("fetch", {"identifier": "fixture-decision"}),
+                    ):
+                        response = await http.post(
+                            "/law/mcp",
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": tool,
+                                "method": "tools/call",
+                                "params": {
+                                    "name": tool,
+                                    "arguments": {
+                                        "provider": "judilibre",
+                                        **arguments,
+                                    },
+                                },
+                            },
+                        )
+                        result = response.json()["result"]
+                        self.assertFalse(result.get("isError", False))
+                        self.assertEqual(
+                            result["structuredContent"]["status"], "unavailable"
+                        )
 
     def test_internal_jwks_ca_preserves_certificate_and_hostname_verification(
         self,

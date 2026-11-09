@@ -20,6 +20,10 @@ class MCPDeploymentTest(unittest.TestCase):
         self.assertEqual(service["network_mode"], "service:api-proxy")
         self.assertTrue(service["read_only"])
         self.assertNotIn("ports", service)
+        self.assertEqual(
+            service["environment"]["LAW_PISTE_API_KEY"],
+            "${LAW_PISTE_API_KEY:-}",
+        )
         self.assertTrue(
             all("piste" not in str(volume) for volume in service["volumes"])
         )

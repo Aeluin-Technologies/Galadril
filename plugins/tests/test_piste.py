@@ -18,6 +18,7 @@ from galadril_mcp_service.providers.piste_references import (
     Citation,
     verify_reference,
 )
+from pydantic import SecretStr
 
 
 class PisteTest(unittest.IsolatedAsyncioTestCase):
@@ -350,6 +351,30 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(search["citation_verified"])
             with self.assertRaises(ValueError):
                 await client.decision("legifrance", "https://attacker.invalid/")
+
+    def test_unavailable_judilibre_file_does_not_disable_legifrance(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "piste-key"
+            with patch.dict(
+                os.environ,
+                {
+                    "LAW_PISTE_CREDENTIALS_FILE": str(path),
+                    "LAW_PISTE_CLIENT_ID": "fixture-id",
+                    "LAW_PISTE_CLIENT_SECRET": "fixture-secret",
+                },
+                clear=True,
+            ):
+                for content in (None, "SECRET_KEY=unused\n", "API_KEY=\n"):
+                    if content is not None:
+                        path.write_text(content)
+                        path.chmod(0o600)
+                    credentials = PisteCredentials.load()
+                    self.assertIsNone(credentials.judilibre_key)
+                    self.assertEqual(
+                        credentials.client_id, SecretStr("fixture-id")
+                    )
 
     async def test_oauth_token_is_reused_and_search_is_not_a_verified_citation(
         self,

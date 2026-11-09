@@ -52,6 +52,19 @@ def read_private_credential(location: str) -> str:
         ) from None
 
 
+def _optional_credential_file(variable: str) -> str:
+    """Keep a missing provider file from disabling the other provider."""
+    if not (location := os.environ.get(variable)):
+        return ""
+    try:
+        return read_private_credential(location)
+    except PisteUnavailable:
+        trace.get_current_span().add_event(
+            "mcp.credential.unavailable", {"credential.setting": variable}
+        )
+        return ""
+
+
 class PisteCredentials(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, hide_input_in_errors=True
@@ -64,20 +77,15 @@ class PisteCredentials(BaseModel):
     @classmethod
     def load(cls) -> PisteCredentials:
         """Read operator secrets without exposing them to model arguments."""
-        location = os.environ.get("LAW_PISTE_CREDENTIALS_FILE", "")
-        value = read_private_credential(location) if location else ""
+        value = _optional_credential_file("LAW_PISTE_CREDENTIALS_FILE")
         if value.startswith("{"):
             return cls.model_validate_json(value)
         values = cls._fields(value)
-        oauth_path = os.environ.get("LAW_PISTE_OAUTH_FILE", "")
-        oauth = (
-            cls._fields(read_private_credential(oauth_path))
-            if oauth_path
-            else {}
-        )
+        oauth = cls._fields(_optional_credential_file("LAW_PISTE_OAUTH_FILE"))
         credentials = {
-            "judilibre_key": values.get("API_KEY", value)
-            or os.environ.get("LAW_PISTE_API_KEY"),
+            "judilibre_key": (values.get("API_KEY", "") if values else value)
+            or os.environ.get("LAW_PISTE_API_KEY", "").strip()
+            or None,
             "client_id": oauth.get("CLIENT_ID", oauth.get("CLIENT_KEY"))
             or os.environ.get("LAW_PISTE_CLIENT_ID"),
             "client_secret": oauth.get("SECRET_KEY")
@@ -186,11 +194,11 @@ class PisteClient:
 
     async def _headers(self, provider: Provider) -> dict[str, str]:
         """Serialize token renewal and keep credentials in transport headers only."""
-        if (
-            provider == "judilibre"
-            and self.credentials.judilibre_key is not None
-        ):
-            return {"KeyId": self.credentials.judilibre_key.get_secret_value()}
+        if provider == "judilibre":
+            key = self.credentials.judilibre_key
+            if key is None or not (value := key.get_secret_value().strip()):
+                raise PisteUnavailable("Judilibre requires its own API key")
+            return {"KeyId": value}
         async with self.lock:
             if self.token is None or time.monotonic() >= self.expires:
                 if (
