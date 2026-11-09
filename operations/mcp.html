@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-e012c616.js";
+            window.path_to_searchindex_js = "../searchindex-218280ba.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e13b2548.js"></script>
@@ -217,6 +217,8 @@ access, selected registered capability, execution context and resource. A user,
 session or MCP identifier alone never authorizes an invocation. Grants cannot
 invoke the other chat tools and expire after Gateway restarts.</p>
 <h2 id="deployment"><a class="header" href="#deployment">Deployment</a></h2>
+<p>The root CI publication target includes <code>//services/mcp:push</code>.
+For a local image, build and load <code>//services/mcp:load_local</code>.</p>
 <p>Build <code>//services/mcp:images</code>. Add <code>infrastructure/docker/law-mcp.yaml</code> to the
 normal Compose files only on deployments configured for MCP. The overlay adds only
 the read-only unprivileged MCP service. The existing API Envoy process owns the
@@ -225,11 +227,25 @@ loopback MCP listener on port 8098, with an exact host match for
 <p>Add a public hostname to the existing Cloudflare Tunnel configuration:
 <code>mcp.gravitalia.com</code> → <code>http://127.0.0.1:8098</code>, preserving the original Host
 header (or explicitly setting it to <code>mcp.gravitalia.com</code>). The existing Compose
-connector <code>utils-email-tunnel</code> shares the API proxy network namespace; its current
-email-tracking profile and token mount remain unchanged. An independently managed
+connector <code>utils-email-tunnel</code> shares the API proxy network namespace. Its
+<code>tunnel</code> profile enables the connector independently of email tracking. An independently managed
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.</p>
+<p>The managed development bootstrap includes the MCP overlay when both
+<code>.local/piste-key</code> and <code>.local/piste-oauth-key</code> exist. When
+<code>.local/cloudflared-token</code> exists, it enables the existing connector and mounts
+that file without copying its contents into configuration or arguments.</p>
+<p>For public Galadril login, set <code>GALADRIL_DEV_PUBLIC_ORIGIN</code> in the managed
+owner-only <code>.local/dev/compose.env</code>, then regenerate with the development CLI.
+The bootstrap adds an exact-host HTTP listener at <code>127.0.0.1:8099</code> to the same
+Envoy process. Point a second tunnel hostname to that listener. HTTPS terminates
+at Cloudflare; this HTTP hop remains inside the shared loopback namespace. The
+public issuer is consistent across Hydra, the dashboard and Envoy, while the
+local diagnostic JWT issuer remains separate. Register the exact callback shown
+by ChatGPT using <code>AUTH_MCP_CLIENTS</code>. Use a predefined public OAuth client with
+PKCE S256, token endpoint authentication <code>none</code>, no client secret, and scope
+<code>legal:read</code>. OAuth discovery is routed to the dashboard, not the GraphQL API.</p>
 <p><code>MCP_NAMESPACES</code> declares installed providers, capability identities, paths, OAuth
 scopes and allowed clients. These are operator settings, never tool arguments.
 The service validates each namespace independently and returns 404 for unknown
