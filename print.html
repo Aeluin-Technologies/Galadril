@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-2e36a25a.js";
+            window.path_to_searchindex_js = "searchindex-47543022.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-e13b2548.js"></script>
@@ -2749,24 +2749,24 @@ The static team roster remains for compatibility; it is not the dynamic task
 count. Report identities use the existing authorized report reader in Pengolo.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="authenticated-mcp-hub"><a class="header" href="#authenticated-mcp-hub">Authenticated MCP hub</a></h1>
-<p>The MCP server belongs to <code>services/mcp</code>; shared authorization and the native
-client belong to <code>platform/mcp</code>. Plugins declare client capabilities and never
-host public servers. The first provider supplies Légifrance and Judilibre through
-PISTE. Installed providers register tools in separately authorized namespaces.</p>
+<p>The public MCP at <code>https://mcp.gravitalia.com/</code> combines workspace and legal
+tools. Légifrance and LibreJustice are searched in parallel. Citation checks
+fetch directly from Légifrance.</p>
 <h2 id="authority"><a class="header" href="#authority">Authority</a></h2>
 <p>Public clients use the Galadril login and OAuth authorization code with PKCE
 S256. Configure <code>AUTH_MCP_CLIENTS</code> on the dashboard with a JSON array:</p>
 <pre><code class="language-json">[
   {
-    "id": "galadril-mcp-chatgpt-law",
-    "name": "Galadril legal research",
+    "id": "galadril-mcp-chatgpt",
+    "name": "Galadril",
     "redirectUris": ["https://REPLACE-WITH-THE-EXACT-CHATGPT-CALLBACK"],
-    "resource": "https://mcp.gravitalia.com/law/mcp",
-    "scopes": ["legal:read"]
+    "resource": "https://mcp.gravitalia.com/",
+    "scopes": ["workspace:use", "legal:read", "email:read", "email:write"]
   }
 ]
 </code></pre>
-<p>Copy the exact callback displayed when creating the ChatGPT connection. This is
+<p>Copy the exact callback displayed when creating the ChatGPT connection and
+enter the predefined client ID manually. This is
 a public OAuth client, with token endpoint authentication method <code>none</code>; it has
 no shared client secret. Registration is deployment controlled, not anonymous.
 The dashboard reconciles this policy with Hydra and refuses conflicting existing
@@ -2789,8 +2789,9 @@ invoke the other chat tools and expire after Gateway restarts.</p>
 For a local image, build and load <code>//services/mcp:load_local</code>.</p>
 <p>Build <code>//services/mcp:images</code>. The normal Compose configuration includes the
 read-only unprivileged MCP service through <code>infrastructure/docker/mcp.yaml</code>.
-It exposes the workspace resource at <code>/workspace/mcp</code> and the optional legal
-provider at <code>/law/mcp</code>. The existing API Envoy process owns the
+The root URL exposes the combined catalog. The former <code>/workspace/mcp</code> and
+<code>/law/mcp</code> URLs keep their own OAuth audiences for existing integrations.
+The existing API Envoy process owns the
 loopback MCP listener on port 8098, with an exact host match for
 <code>mcp.gravitalia.com</code>. No additional proxy or tunnel container is needed.</p>
 <p>Add a public hostname to the existing Cloudflare Tunnel configuration:
@@ -2801,10 +2802,12 @@ connector <code>utils-email-tunnel</code> shares the API proxy network namespace
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.</p>
-<p>The managed development bootstrap mounts each available PISTE credential file
-independently. Neither file is required for MCP startup. Without usable legal
-credentials, legal tools return <code>status: unavailable</code>, without verifying any
-source, and callers can continue with authorized Web research. When
+<p>Run <code>uv run infrastructure/dev/galadril.py mcp-keys</code> to select LibreJustice,
+PISTE OAuth or the PISTE API key. Prompts hide input and preserve existing files
+unless replacement is confirmed. The next <code>uv run infrastructure/dev/galadril.py up</code>
+mounts the available private files into MCP and refreshes the mounts after rotation.
+Each file is optional. Without usable legal credentials, legal tools report their
+availability and callers can continue with authorized Web research. When
 <code>.local/cloudflared-token</code> exists, it enables the existing connector and mounts
 that file without copying its contents into configuration or arguments.</p>
 <p>For public Galadril login, set <code>GALADRIL_DEV_PUBLIC_ORIGIN</code> in the managed
@@ -2815,14 +2818,15 @@ at Cloudflare; this HTTP hop remains inside the shared loopback namespace. The
 public issuer is consistent across Hydra, the dashboard and Envoy, while the
 local diagnostic JWT issuer remains separate. Register the exact callback shown
 by ChatGPT using <code>AUTH_MCP_CLIENTS</code>. Use a predefined public OAuth client with
-PKCE S256, token endpoint authentication <code>none</code>, no client secret, and scope
-<code>legal:read</code>. OAuth discovery is routed to the dashboard, not the GraphQL API.</p>
+PKCE S256, token endpoint authentication <code>none</code>, no client secret, and the
+scopes listed above. OAuth discovery is routed to the dashboard.</p>
 <p><code>MCP_NAMESPACES</code> declares installed providers, capability identities, paths, OAuth
 scopes and allowed clients. These are operator settings, never tool arguments.
 The service validates each namespace independently and returns 404 for unknown
 paths. Future providers use this registration contract and the shared verifier.</p>
-<p>The workspace resource uses its own OAuth client and <code>workspace:use</code> scope,
-plus granular mail, document and data scopes. Native Pengolo operations use the
+<p>The root resource requires <code>workspace:use</code> and a scope for each tool family.
+Add <code>documents:read</code>, <code>documents:write</code> or <code>data:read</code> for those tools.
+Native Pengolo operations use the
 same MCP transport with generation-scoped grants. External email sends require
 review of the exact draft revision in a primary Galadril session; MCP annotations
 are descriptive hints, not approval authority. See
@@ -2831,13 +2835,23 @@ private attachment handling and compilation workflow.</p>
 <p>PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
 Envoy or a model prompt. Default file mounts are <code>.local/piste-key</code> and
 <code>.local/piste-oauth-key</code>; they must be regular files with mode 0600, readable by
-the configured service UID. The API key authenticates Judilibre. Légifrance uses
+the configured service UID. The API key authenticates Judilibre. When it is
+missing, Judilibre calls return <code>status: unavailable</code> without a network request.
+Légifrance uses
 the OAuth client ID and secret. <code>SECRET_KEY</code> in the API-key file is not the OAuth
 secret; use the separate OAuth file. JSON credential files are also supported.
 Server deployments may instead provide <code>LAW_PISTE_API_KEY</code>,
 <code>LAW_PISTE_CLIENT_ID</code>, <code>LAW_PISTE_CLIENT_SECRET</code> and
 <code>LAW_PISTE_ENVIRONMENT=production|sandbox</code>. Never put these values in a plugin
 manifest or repository.</p>
+<p>The development CLI stores the LibreJustice token in <code>.local/librejustice-key</code>.
+Other deployments can mount a mode-0600 token file and set
+<code>LIBREJUSTICE_API_KEY_FILE</code> to its absolute path in the container, or inject
+<code>LIBREJUSTICE_API_KEY</code> via the service environment. A missing key, timeout or
+rate limit leaves Légifrance search available. If Légifrance is unavailable,
+LibreJustice can still return leads for later verification.</p>
+<p>Mount credential files directly in <code>/run/secrets</code>. For a custom mount
+directory, set <code>MCP_CREDENTIALS_DIR</code> in the MCP service environment.</p>
 <p>The API adapters use fixed PISTE origins, bounded responses and timeouts, cached
 OAuth tokens and no redirects. Search results are leads, not verified citations.
 <code>verify_citation</code> re-fetches a source and separately checks identity and quotation;
