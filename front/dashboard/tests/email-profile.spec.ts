@@ -2,6 +2,151 @@ import { test, expect } from "@playwright/test";
 
 test.use({ channel: "chromium" });
 
+for (const scenario of ["ready", "stale", "forbidden"] as const) {
+  test(`MCP email review requires an explicit click and exact revision (${scenario})`, async ({
+    page,
+  }, testInfo) => {
+    const accountId = "a".repeat(32),
+      draftId = "b".repeat(32);
+    const actions: string[] = [];
+    let status = "draft";
+    await page.route("**/auth/session", (route) =>
+      route.fulfill({
+        json: {
+          subject: "owner",
+          tenant: "tenant",
+          displayName: "Owner",
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
+          requiresPasskey: false,
+        },
+      }),
+    );
+    await page.routeWebSocket("**/graphql", (socket) =>
+      socket.onMessage(() => {}),
+    );
+    await page.route("**/graphql", (route) => {
+      const { query, variables } = route.request().postDataJSON();
+      if (!query.includes("emailOperation"))
+        return route.fulfill({ json: { data: {} } });
+      const request = JSON.parse(variables.request);
+      let result: unknown = null;
+      if (request.operation === "accounts")
+        result = [
+          {
+            id: accountId,
+            revision: 1,
+            rights:
+              scenario === "forbidden" ? ["read"] : ["read", "approve", "send"],
+            has_credentials: true,
+            sync_status: "idle",
+            last_sync: 0,
+            config: {
+              name: "Personal mailbox",
+              address: "owner@example.org",
+              imap_port: 993,
+              smtp_host: "smtp.example.org",
+              smtp_port: 587,
+              folders: ["INBOX"],
+              enabled: true,
+              ingest: false,
+              poll_seconds: 120,
+            },
+          },
+        ];
+      if (request.operation === "draft")
+        result = {
+          id: draftId,
+          revision: scenario === "stale" ? 2 : 1,
+          status,
+          delivery_id: "",
+          automatic: false,
+          content: {
+            to: ["recipient@example.org"],
+            cc: [],
+            bcc: ["copy@example.org"],
+            subject: "Review this exact draft",
+            body: "Message prepared through MCP.",
+            reply_to_message_id: "",
+            references: "",
+            attachments: [
+              {
+                name: "letter.pdf",
+                content_type: "application/pdf",
+                content: "JVBERg==",
+              },
+            ],
+          },
+        };
+      if (["approve", "send"].includes(request.operation)) {
+        expect(request.account).toBe(accountId);
+        expect(request.draft).toBe(draftId);
+        expect(request.revision).toBe(1);
+        actions.push(request.operation);
+        status = request.operation === "approve" ? "approved" : "sent";
+      }
+      return route.fulfill({ json: { data: { emailOperation: result } } });
+    });
+    const shell = await page.request.get("/login");
+    await page.route(/\/mcp\/email\//, (route) =>
+      route.request().isNavigationRequest()
+        ? route.fulfill({ response: shell })
+        : route.continue(),
+    );
+    await page.goto(`/mcp/email/${accountId}/${draftId}/1`);
+    await expect(
+      page.getByRole("heading", {
+        name: "Review email prepared through MCP",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15000 });
+    if (scenario !== "ready") {
+      await expect(page.getByRole("alert")).toContainText(
+        "unavailable or has changed",
+      );
+      expect(actions).toEqual([]);
+      return;
+    }
+    await expect(
+      page.getByRole("heading", { name: "Review this exact draft" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("copy@example.org", { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByText("letter.pdf", { exact: true })).toBeVisible();
+    const send = page.getByRole("button", {
+      name: "Approve and send",
+      exact: true,
+    });
+    await expect(send).toBeDisabled();
+    expect(actions).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("mcp-email-review-desktop.png"),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(send).toBeVisible();
+    expect(
+      await page
+        .locator("body")
+        .evaluate((body) => body.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("mcp-email-review-mobile.png"),
+      fullPage: true,
+    });
+    await page.getByRole("checkbox", { name: /I have reviewed/ }).check();
+    await send.click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Email sent" }),
+    ).toBeVisible();
+    expect(actions).toEqual(["approve", "send"]);
+    await page.reload();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Email sent" }),
+    ).toBeVisible();
+    expect(actions).toEqual(["approve", "send"]);
+  });
+}
+
 function previewPdf(): Buffer {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
