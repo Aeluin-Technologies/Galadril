@@ -32,7 +32,12 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
             )
             oauth.chmod(0o600)
             with patch.dict(
-                os.environ, {"LAW_PISTE_OAUTH_FILE": str(oauth)}, clear=True
+                os.environ,
+                {
+                    "LAW_PISTE_OAUTH_FILE": str(oauth),
+                    "MCP_CREDENTIALS_DIR": temporary,
+                },
+                clear=True,
             ):
                 credentials = PisteCredentials.load()
             self.assertIsNone(credentials.judilibre_key)
@@ -66,7 +71,10 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
             self.assertRaises(PisteUnavailable),
         ):
             PisteCredentials.load()
-        with tempfile.TemporaryDirectory() as temporary:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"MCP_CREDENTIALS_DIR": temporary}),
+        ):
             source = Path(temporary) / "credentials"
             source.write_text(
                 json.dumps(
@@ -76,7 +84,10 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
             source.chmod(0o600)
             with patch.dict(
                 os.environ,
-                {"LAW_PISTE_CREDENTIALS_FILE": str(source)},
+                {
+                    "LAW_PISTE_CREDENTIALS_FILE": str(source),
+                    "MCP_CREDENTIALS_DIR": temporary,
+                },
                 clear=True,
             ):
                 self.assertEqual(
@@ -87,6 +98,15 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(PisteUnavailable):
                 read_private_credential(str(source))
             source.chmod(0o600)
+            with tempfile.TemporaryDirectory() as outside:
+                foreign = Path(outside) / "credentials"
+                foreign.write_text("fixture")
+                foreign.chmod(0o600)
+                directory_link = source.with_name("redirected")
+                directory_link.symlink_to(outside, target_is_directory=True)
+                for path in (foreign, directory_link / foreign.name):
+                    with self.assertRaises(PisteUnavailable):
+                        read_private_credential(str(path))
             link = source.with_name("linked")
             link.symlink_to(source)
             with self.assertRaises(PisteUnavailable):
@@ -309,6 +329,7 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
                 os.environ,
                 {
                     "LAW_PISTE_CREDENTIALS_FILE": str(key),
+                    "MCP_CREDENTIALS_DIR": temporary,
                     "LAW_PISTE_OAUTH_FILE": str(oauth),
                 },
             ):
@@ -361,6 +382,7 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
                 os.environ,
                 {
                     "LAW_PISTE_CREDENTIALS_FILE": str(path),
+                    "MCP_CREDENTIALS_DIR": temporary,
                     "LAW_PISTE_CLIENT_ID": "fixture-id",
                     "LAW_PISTE_CLIENT_SECRET": "fixture-secret",
                 },

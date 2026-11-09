@@ -119,6 +119,9 @@ Other deployments can mount a mode-0600 token file and set
 rate limit leaves Légifrance search available. If Légifrance is unavailable,
 LibreJustice can still return leads for later verification.
 
+Mount credential files directly in `/run/secrets`. For a custom mount
+directory, set `MCP_CREDENTIALS_DIR` in the MCP service environment.
+
 The API adapters use fixed PISTE origins, bounded responses and timeouts, cached
 OAuth tokens and no redirects. Search results are leads, not verified citations.
 `verify_citation` re-fetches a source and separately checks identity and quotation;

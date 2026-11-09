@@ -28,10 +28,26 @@ class PisteUnavailable(RuntimeError):
 def read_private_credential(location: str) -> str:
     """Read a bounded secret from a regular, private file without following links."""
     path = Path(location)
-    if not path.is_absolute():
-        raise PisteUnavailable("An absolute credential path is required")
+    directory = Path(os.environ.get("MCP_CREDENTIALS_DIR", "/run/secrets"))
+    if (
+        not directory.is_absolute()
+        or ".." in directory.parts
+        or path.parent != directory
+        or path.name in {"", ".."}
+    ):
+        raise PisteUnavailable(
+            "Credential must be inside the configured secrets directory"
+        )
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            descriptor = os.open(
+                path.name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=root,
+            )
+        finally:
+            os.close(root)
         with os.fdopen(descriptor, "rb") as source:
             info = os.fstat(source.fileno())
             if (

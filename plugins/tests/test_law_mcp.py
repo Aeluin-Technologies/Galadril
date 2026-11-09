@@ -102,6 +102,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                         Path(secrets) / "librejustice-key"
                     ),
                     "LIBREJUSTICE_API_KEY": "",
+                    "MCP_CREDENTIALS_DIR": secrets,
                 },
             ),
             patch("galadril_mcp_service.providers.piste.PisteCredentials.load"),
@@ -478,9 +479,9 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                         assertions.assertEqual(
                             metadata.json()["resource"], "https://mcp.example/"
                         )
-                        assertions.assertTrue(
-                            {"legal:read", "email:read", "email:write"}
-                            <= set(metadata.json()["scopes_supported"])
+                        assertions.assertLessEqual(
+                            {"legal:read", "email:read", "email:write"},
+                            set(metadata.json()["scopes_supported"]),
                         )
                         root = await http.post(
                             "/", json={"method": "tools/list"}
