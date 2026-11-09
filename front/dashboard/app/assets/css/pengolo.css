@@ -339,7 +339,7 @@
   flex: 0 1 auto;
   min-width: 0;
   line-height: 1.7;
-  font-size: 16px;
+  font-size: 15px;
 }
 .p-message.assistant .p-message-body {
   flex: 1;
@@ -361,7 +361,7 @@
   overflow-wrap: anywhere;
 }
 .p-markdown {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -423,7 +423,7 @@
   min-width: 100%;
   border-collapse: collapse;
   margin: 1.25em 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 .p-markdown :is(td, th) {
@@ -1072,7 +1072,7 @@
     margin-bottom: 10px;
   }
   .p-message-body {
-    font-size: 16px;
+    font-size: 15px;
   }
   .p-library-page {
     padding: 28px 16px;

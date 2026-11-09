@@ -2227,7 +2227,7 @@ test("specialist report citations open an authorized panel on the right", async 
   await expect(panel).toContainText("Rapport vérifiable.");
   await expect(panel.locator(".p-markdown p").first()).toHaveCSS(
     "font-size",
-    "14px",
+    "15px",
   );
   const heading = panel.getByRole("heading", {
     name: "Specialist report",
@@ -2297,7 +2297,7 @@ test("colored task cards keep model wording and animate their checked state", as
     name: "Pengolo response",
     exact: true,
   });
-  await expect(article.locator("table")).toHaveCSS("font-size", "13px");
+  await expect(article.locator("table")).toHaveCSS("font-size", "14px");
   await expect(article.locator("td").first()).toHaveCSS("padding-top", "8px");
   await expect(article.locator(".p-tone-warning")).toHaveText("À vérifier");
   await expect(article.locator(".p-tone-warning")).toHaveCSS(
@@ -2378,3 +2378,52 @@ for (const entry of ["document", "password"] as const) {
     expect(continuations).toBe(1);
   });
 }
+
+test("Pengolo typography keeps user messages, responses and tables proportionate", async ({
+  page,
+}, info) => {
+  const chat = chatFixture();
+  const record = {
+    ...chat,
+    data: {
+      ...chat.data,
+      messages: {
+        items: [
+          {
+            ...chat.data.messages.items[0]!,
+            id: "user-fixture",
+            role: "user",
+            text: "Pouvez-vous présenter ces résultats ?",
+          },
+          {
+            ...chat.data.messages.items[0]!,
+            text: "Voici les résultats vérifiés.\n\n| Élément | Résultat |\n| --- | --- |\n| Exemple | Donnée fictive |",
+          },
+        ],
+        after: null,
+      },
+    },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chat.id);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(page.locator(".p-user-text")).toHaveCSS("font-size", "15px");
+    await expect(page.locator(".p-message.assistant .p-markdown p")).toHaveCSS(
+      "font-size",
+      "15px",
+    );
+    await expect(page.locator(".p-markdown table")).toHaveCSS(
+      "font-size",
+      "14px",
+    );
+  }
+  await page.screenshot({
+    path: info.outputPath("pengolo-typography-mobile.png"),
+    animations: "disabled",
+  });
+});
