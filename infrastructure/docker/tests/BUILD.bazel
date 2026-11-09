@@ -55,6 +55,7 @@ py_test(
     srcs = ["test_compose.py"],
     data = [
         "//front/dashboard:apollo/default.ts",
+        "//build:multirun.bzl",
         "//infrastructure/docker:compose_configuration",
         "//infrastructure/observability:tempo.yaml",
     ],

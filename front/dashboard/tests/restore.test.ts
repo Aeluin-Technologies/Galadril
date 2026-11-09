@@ -95,6 +95,8 @@ test("protected SPA documents can restore only authentic, active sealed sessions
   let renewal = await seal(state);
   let token: string | undefined;
   let path = "/settings/sso";
+  let requestOrigin = "https://app.example";
+  let destination: string | undefined;
   let method: "GET" | "POST" = "GET";
   const environment = {
     AUTH_PUBLIC_ORIGIN: "https://app.example",
@@ -129,14 +131,17 @@ test("protected SPA documents can restore only authentic, active sealed sessions
     .sign(privateKey);
   const replacements = {
     defineEventHandler: (handler: EventHandler) => handler,
-    getRequestURL: () => new URL(path, "https://app.example"),
+    getRequestURL: () => new URL(path, requestOrigin),
     setResponseHeader() {},
     getCookie: (_event: unknown, cookie: string) =>
       cookie === name ? renewal : token,
     getHeader: () => "text/html",
     createError: (details: Partial<H3Error>) =>
       Object.assign(new Error("Request failed"), details),
-    sendRedirect: () => "redirected",
+    sendRedirect: (_event: unknown, target: string) => {
+      destination = target;
+      return "redirected";
+    },
     unsealSession,
     setCookie() {
       assert.fail("A shell GET must not publish credentials");
@@ -157,6 +162,19 @@ test("protected SPA documents can restore only authentic, active sealed sessions
     Object.assign(globalThis, replacements);
     const { default: middleware } =
       await import("../server/middleware/auth.ts");
+    requestOrigin = "https://localhost:8080";
+    path = "/login?flow=stale&next=https://attacker.example";
+    assert.equal(await middleware(testEvent(method)), "redirected");
+    assert.equal(destination, "https://app.example/login");
+    requestOrigin = "http://app.example";
+    path = "/login";
+    assert.equal(
+      await middleware(testEvent(method)),
+      undefined,
+      "TLS termination must not create a redirect loop",
+    );
+    requestOrigin = "https://app.example";
+    path = "/settings/sso";
     assert.equal(await middleware(testEvent(method)), undefined);
     token = expired;
     assert.equal(await middleware(testEvent(method)), undefined);

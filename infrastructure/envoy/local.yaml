@@ -122,7 +122,7 @@ static_resources:
               - match: {path: /.well-known/openid-configuration}
                 route: {cluster: hydra, timeout: 5s}
               - match: {path: /.well-known/oauth-authorization-server}
-                route: {cluster: application, timeout: 5s}
+                route: {cluster: studio, timeout: 5s}
               - match: {path: /.well-known/jwks.json}
                 route: {cluster: hydra, timeout: 5s}
               - match: {path: /api/oauth/authorize}

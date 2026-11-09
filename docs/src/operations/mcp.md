@@ -45,6 +45,9 @@ invoke the other chat tools and expire after Gateway restarts.
 
 ## Deployment
 
+The root CI publication target includes `//services/mcp:push`.
+For a local image, build and load `//services/mcp:load_local`.
+
 Build `//services/mcp:images`. Add `infrastructure/docker/law-mcp.yaml` to the
 normal Compose files only on deployments configured for MCP. The overlay adds only
 the read-only unprivileged MCP service. The existing API Envoy process owns the
@@ -54,11 +57,27 @@ loopback MCP listener on port 8098, with an exact host match for
 Add a public hostname to the existing Cloudflare Tunnel configuration:
 `mcp.gravitalia.com` → `http://127.0.0.1:8098`, preserving the original Host
 header (or explicitly setting it to `mcp.gravitalia.com`). The existing Compose
-connector `utils-email-tunnel` shares the API proxy network namespace; its current
-email-tracking profile and token mount remain unchanged. An independently managed
+connector `utils-email-tunnel` shares the API proxy network namespace. Its
+`tunnel` profile enables the connector independently of email tracking. An independently managed
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.
+
+The managed development bootstrap includes the MCP overlay when both
+`.local/piste-key` and `.local/piste-oauth-key` exist. When
+`.local/cloudflared-token` exists, it enables the existing connector and mounts
+that file without copying its contents into configuration or arguments.
+
+For public Galadril login, set `GALADRIL_DEV_PUBLIC_ORIGIN` in the managed
+owner-only `.local/dev/compose.env`, then regenerate with the development CLI.
+The bootstrap adds an exact-host HTTP listener at `127.0.0.1:8099` to the same
+Envoy process. Point a second tunnel hostname to that listener. HTTPS terminates
+at Cloudflare; this HTTP hop remains inside the shared loopback namespace. The
+public issuer is consistent across Hydra, the dashboard and Envoy, while the
+local diagnostic JWT issuer remains separate. Register the exact callback shown
+by ChatGPT using `AUTH_MCP_CLIENTS`. Use a predefined public OAuth client with
+PKCE S256, token endpoint authentication `none`, no client secret, and scope
+`legal:read`. OAuth discovery is routed to the dashboard, not the GraphQL API.
 
 `MCP_NAMESPACES` declares installed providers, capability identities, paths, OAuth
 scopes and allowed clients. These are operator settings, never tool arguments.

@@ -101,7 +101,11 @@ class TrackerDeployment(unittest.TestCase):
         tracker = config["services"]["utils-email-tracker"]
         tunnel = config["services"]["utils-email-tunnel"]
         self.assertEqual(tracker["profiles"], ["email-tracking"])
-        self.assertEqual(tunnel["profiles"], ["email-tracking"])
+        self.assertEqual(tunnel["profiles"], ["email-tracking", "tunnel"])
+        self.assertEqual(
+            tunnel["depends_on"],
+            {"api-proxy": {"condition": "service_started"}},
+        )
         self.assertNotIn("ports", tracker)
         self.assertEqual(
             tracker["environment"]["UTILS_TRACKER_BIND"], "127.0.0.1:8096"

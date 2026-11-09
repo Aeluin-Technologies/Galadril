@@ -6,6 +6,7 @@ import asyncio
 import importlib
 import os
 import re
+import ssl
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import cast
@@ -104,6 +105,15 @@ class Hub:
         await app(scope, receive, send)
 
 
+def client_tls_context() -> ssl.SSLContext:
+    """Internal JWKS discovery needs workload trust without weakening public TLS verification."""
+    context = ssl.create_default_context()
+    authority = os.environ.get("MCP_TLS_CA_FILE")
+    if authority:
+        context.load_verify_locations(cafile=authority)
+    return context
+
+
 async def serve() -> None:
     """Keep namespace lifespans and their shared HTTP client under one supervisor."""
     origin = os.environ["MCP_PUBLIC_ORIGIN"].rstrip("/")
@@ -116,7 +126,9 @@ async def serve() -> None:
         or len({item.path for item in namespaces}) != len(namespaces)
     ):
         raise ValueError("MCP namespaces must be bounded and unique")
-    async with httpx.AsyncClient(trust_env=False) as http:
+    async with httpx.AsyncClient(
+        trust_env=False, verify=client_tls_context()
+    ) as http:
         apps: list[Starlette] = []
         routes: dict[str, ASGIApp] = {}
         for namespace in namespaces:

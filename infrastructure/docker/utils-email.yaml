@@ -85,7 +85,7 @@ services:
 
   utils-email-tunnel:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
-    profiles: [email-tracking]
+    profiles: [email-tracking, tunnel]
     network_mode: service:api-proxy
     user: "${GALADRIL_UTILS_UID:-1000}:${GALADRIL_UTILS_GID:-1000}"
     command: [tunnel, --no-autoupdate, run, --token-file, /run/tunnel/token]
@@ -105,5 +105,5 @@ services:
         bind:
           create_host_path: false
     depends_on:
-      utils-email-tracker:
-        condition: service_healthy
+      api-proxy:
+        condition: service_started

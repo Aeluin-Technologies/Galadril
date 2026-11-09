@@ -2323,3 +2323,58 @@ test("colored task cards keep model wording and animate their checked state", as
     animations: "disabled",
   });
 });
+
+for (const entry of ["document", "password"] as const) {
+  test(`MCP callback continues through document navigation after ${entry} sign-in`, async ({
+    page,
+  }) => {
+    await mockDashboard(page);
+    let continuations = 0;
+    await page.route("**/auth/mcp/continue", (route) => {
+      expect(route.request().isNavigationRequest()).toBe(true);
+      continuations += 1;
+      return route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>MCP callback</title><h1>MCP client callback</h1>",
+      });
+    });
+    if (entry === "document") {
+      await page.goto("/login?mcp=1");
+    } else {
+      await page.addInitScript(() => {
+        const request = window.fetch.bind(window);
+        window.fetch = async (input, options) => {
+          const response = await request(input, options);
+          const target = new URL(
+            input instanceof Request ? input.url : String(input),
+            location.origin,
+          );
+          if (
+            target.pathname === "/identity/self-service/login" &&
+            response.ok
+          ) {
+            if (options?.mode !== "same-origin")
+              throw new Error("Credentials must stay same-origin");
+            Object.defineProperty(response, "url", {
+              value: `${location.origin}/login?mcp=1`,
+            });
+          }
+          return response;
+        };
+      });
+      await page.goto("/login");
+      await page
+        .getByRole("textbox", { name: "Work email", exact: true })
+        .fill("ui@example.test");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page
+        .locator('input[name="password"]')
+        .fill("Fixture-only-password");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    }
+    await expect(
+      page.getByRole("heading", { name: "MCP client callback" }),
+    ).toBeVisible();
+    expect(continuations).toBe(1);
+  });
+}
