@@ -893,6 +893,14 @@ static_resources:
               - '*'
               routes:
               - match:
+                  path: /internal/mcp/tools
+                  headers: [{name: ':method', string_match: {exact: POST}}]
+                route: {cluster: gateway_tools, timeout: 120s}
+              - match:
+                  path: /internal/mcp/delegated
+                  headers: [{name: ':method', string_match: {exact: POST}}]
+                route: {cluster: gateway_tools, timeout: 120s}
+              - match:
                   path: /internal/chat/tools
                   headers:
                   - name: :method
@@ -944,7 +952,58 @@ static_resources:
                 - remove: x-galadril-device-trust
                 - remove: x-galadril-acr
                 - remove: x-galadril-mfa-generation
+                - remove: x-galadril-mcp-client
+                - remove: x-galadril-mcp-scopes
                 - remove: x-forwarded-client-cert
+          - name: envoy.filters.http.jwt_authn
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+              providers:
+                workspace:
+                  issuer: https://aeluin.gravitalia.com
+                  audiences: [https://mcp.gravitalia.com/workspace/mcp]
+                  require_expiration: true
+                  clock_skew_seconds: 1
+                  remote_jwks:
+                    http_uri:
+                      uri: https://hydra-proxy:4444/.well-known/jwks.json
+                      cluster: hydra
+                      timeout: 3s
+                    cache_duration: 300s
+                  from_headers: [{name: Authorization, value_prefix: 'Bearer '}]
+                  forward: false
+                  payload_in_metadata: workspace
+                  claim_to_headers:
+                  - {header_name: x-galadril-sub, claim_name: sub}
+                  - {header_name: x-galadril-tenant, claim_name: tenant_id}
+                  - {header_name: x-galadril-exp, claim_name: exp}
+                  - {header_name: x-galadril-issuer, claim_name: iss}
+                  - {header_name: x-galadril-role, claim_name: role}
+                  - {header_name: x-galadril-region, claim_name: region}
+                  - {header_name: x-galadril-device-trust, claim_name: device_trust}
+              rules:
+              - match: {path: /internal/mcp/tools}
+                requires: {provider_name: workspace}
+          - name: galadril.mcp_claims
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                -- Only signature-verified metadata may supply MCP identity and scopes.
+                function envoy_on_request(handle)
+                  local headers = handle:headers()
+                  if headers:get(":path") ~= "/internal/mcp/tools" then return end
+                  local metadata = handle:streamInfo():dynamicMetadata():get("envoy.filters.http.jwt_authn") or {}
+                  local claims = metadata["workspace"] or {}
+                  local client = claims["client_id"] or claims["azp"]
+                  local scopes = claims["scope"] or claims["scp"]
+                  if type(scopes) == "table" then scopes = table.concat(scopes, " ") end
+                  if type(client) ~= "string" or type(scopes) ~= "string" then
+                    handle:respond({[":status"] = "401"}, "MCP identity required")
+                    return
+                  end
+                  headers:replace("x-galadril-mcp-client", client)
+                  headers:replace("x-galadril-mcp-scopes", scopes)
+                end
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

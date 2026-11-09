@@ -54,6 +54,8 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         environment = self.bootstrap.environment()
         self.assertEqual(environment["GALADRIL_PROXY_UID"], "1234")
         self.assertEqual(environment["GALADRIL_PROXY_GID"], "5678")
+        self.assertEqual(environment["GALADRIL_MCP_UID"], "1234")
+        self.assertEqual(environment["GALADRIL_MCP_GID"], "5678")
 
     async def test_fresh_clone_creates_private_state_without_static_templates(
         self,
@@ -277,6 +279,15 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                     ):
                         if item["name"] == "envoy.filters.http.jwt_authn":
                             for rule in item["typed_config"]["rules"]:
+                                if (
+                                    "workspace"
+                                    in item["typed_config"]["providers"]
+                                ):
+                                    self.assertEqual(
+                                        rule["requires"],
+                                        {"provider_name": "workspace"},
+                                    )
+                                    continue
                                 alternative = rule["requires"]["requires_any"]
                                 self.assertIsInstance(alternative, dict)
                                 self.assertEqual(
@@ -359,6 +370,21 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         config = yaml.safe_load(
             (self.bootstrap.state / "envoy.yaml").read_text()
         )
+        tools = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "egress_tools"
+        )["filter_chains"][0]["filters"][0]["typed_config"]
+        workspace_auth = next(
+            item["typed_config"]
+            for item in tools["http_filters"]
+            if item["name"] == "envoy.filters.http.jwt_authn"
+        )
+        self.assertEqual(set(workspace_auth["providers"]), {"workspace"})
+        self.assertEqual(
+            workspace_auth["providers"]["workspace"]["issuer"],
+            "https://galadril.example/",
+        )
         listener = next(
             item
             for item in config["static_resources"]["listeners"]
@@ -433,6 +459,37 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             str(self.root / "infrastructure/docker/law-mcp.yaml"), args
         )
         self.assertNotIn("synthetic-secret", " ".join(args))
+
+    async def test_each_legal_credential_file_is_optional_and_mounted_independently(
+        self,
+    ) -> None:
+        for filename, variable, target in (
+            (
+                "piste-key",
+                "LAW_PISTE_CREDENTIALS_FILE",
+                "/run/secrets/piste-key",
+            ),
+            (
+                "piste-oauth-key",
+                "LAW_PISTE_OAUTH_FILE",
+                "/run/secrets/piste-oauth",
+            ),
+        ):
+            await self.bootstrap.initialize()
+            source = self.root / ".local" / filename
+            source.write_text("synthetic-private-credential")
+            source.chmod(0o600)
+            await self.bootstrap.initialize()
+            overlay = yaml.safe_load(
+                (self.bootstrap.state / "compose.yaml").read_text()
+            )
+            service = overlay["services"]["mcp"]
+            self.assertEqual(service["environment"], {variable: target})
+            self.assertEqual(
+                [volume["target"] for volume in service["volumes"]], [target]
+            )
+            self.assertNotIn("synthetic-private-credential", str(overlay))
+            source.unlink()
 
     async def test_cli_compose_arguments_use_managed_state_and_compiler_profile(
         self,

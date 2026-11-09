@@ -1,0 +1,37 @@
+services:
+  mcp:
+    container_name: mcp
+    image: ${GALADRIL_MCP_IMAGE:-ghcr.io/aeluin-technologies/galadril-mcp:latest}
+    network_mode: service:api-proxy
+    user: ${GALADRIL_MCP_UID:-1000}:${GALADRIL_MCP_GID:-1000}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 64
+    cpus: 1
+    environment:
+      MCP_HOST: 127.0.0.1
+      MCP_PORT: "8097"
+      MCP_PUBLIC_ORIGIN: https://mcp.gravitalia.com
+      MCP_NAMESPACES: '[{"provider":"workspace","capability_id":"core.mcp.workspace","path":"/workspace/mcp","scopes":["workspace:use"],"clients":["galadril-mcp-chatgpt-workspace"],"request_body_limit":1048576},{"provider":"piste","capability_id":"law.mcp.research","path":"/law/mcp","scopes":["legal:read"],"clients":["galadril-mcp-chatgpt-law"]}]'
+      MCP_WORKSPACE_GATEWAY_URL: http://127.0.0.1:8082/internal/mcp/tools
+      MCP_WORKSPACE_DELEGATED_URL: http://127.0.0.1:8082/internal/mcp/delegated
+      MCP_DOWNLOAD_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
+      MCP_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
+      MCP_OAUTH_ISSUER: ${AUTH_ISSUER:-https://aeluin.gravitalia.com}
+      MCP_JWKS_URL: ${MCP_JWKS_URL:-https://127.0.0.1:4444/.well-known/jwks.json}
+      MCP_TLS_CA_FILE: /run/trust/galadril-ca.pem
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - type: bind
+        source: ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/hydra/ca.pem
+        target: /run/trust/galadril-ca.pem
+        read_only: true
+        bind: {create_host_path: false}
+    depends_on:
+      api-proxy: {condition: service_started}
+      otel-collector: {condition: service_started}

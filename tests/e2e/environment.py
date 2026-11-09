@@ -301,6 +301,7 @@ class ComposeEnvironment:
             ("tests/e2e/load_registry.sh", 600.0),
             ("tests/e2e/load_vision.sh", 1200.0),
             ("tests/e2e/load_scribe.sh", 600.0),
+            ("tests/e2e/load_mcp.sh", 600.0),
             ("tests/e2e/load_chat_model.sh", 600.0),
             ("tests/e2e/load_studio.sh", 600.0),
         ):
@@ -482,6 +483,12 @@ class ComposeEnvironment:
                 "intake",
                 "vision",
             ),
+            environment=self._environment,
+            check=False,
+            timeout_seconds=90.0,
+        )
+        application_logs += await _run(
+            (*self._command, "logs", "--no-color", "--tail", "100", "mcp"),
             environment=self._environment,
             check=False,
             timeout_seconds=90.0,

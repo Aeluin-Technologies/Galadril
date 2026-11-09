@@ -225,6 +225,12 @@ class Bootstrap:
         env["GALADRIL_PROXY_GID"] = preserved.get("GALADRIL_PROXY_GID") or str(
             os.getgid()
         )
+        env["GALADRIL_MCP_UID"] = preserved.get("GALADRIL_MCP_UID") or str(
+            os.getuid()
+        )
+        env["GALADRIL_MCP_GID"] = preserved.get("GALADRIL_MCP_GID") or str(
+            os.getgid()
+        )
         if (
             re.fullmatch(
                 r"[a-z0-9][a-z0-9_-]{0,62}", env["COMPOSE_PROJECT_NAME"]
@@ -323,7 +329,7 @@ class Bootstrap:
         return destination
 
     def compose_arguments(self) -> tuple[str, ...]:
-        # Optional credentials enable the service without breaking fresh clones.
+        """Optional legal credentials never become a shared MCP startup prerequisite."""
         mcp = (
             ("-f", str(self.root / "infrastructure/docker/law-mcp.yaml"))
             if all(
@@ -501,6 +507,12 @@ class Bootstrap:
                             continue
                         auth = mapping(item["typed_config"])
                         providers = mapping(auth["providers"])
+                        if "identity" not in providers:
+                            for configured in providers.values():
+                                mapping(configured)["issuer"] = env[
+                                    "AUTH_ISSUER"
+                                ]
+                            continue
                         provider = copy.deepcopy(mapping(providers["identity"]))
                         del provider["remote_jwks"]
                         provider["local_jwks"] = {"inline_string": jwks}
@@ -593,6 +605,28 @@ class Bootstrap:
             }
         }
         services = mapping(overlay["services"])
+        for filename, variable, target in (
+            (
+                "piste-key",
+                "LAW_PISTE_CREDENTIALS_FILE",
+                "/run/secrets/piste-key",
+            ),
+            (
+                "piste-oauth-key",
+                "LAW_PISTE_OAUTH_FILE",
+                "/run/secrets/piste-oauth",
+            ),
+        ):
+            source = self.root / ".local" / filename
+            if source.is_file() and not source.is_symlink():
+                service = mapping(services.setdefault("mcp", {}))
+                mapping(service.setdefault("environment", {}))[variable] = (
+                    target
+                )
+                volumes = service.setdefault("volumes", [])
+                if not isinstance(volumes, list):
+                    raise BootstrapError("Invalid MCP secret mounts")
+                volumes.append(bind(source, target))
         for name in (
             "api-proxy",
             "gateway",
@@ -600,6 +634,7 @@ class Bootstrap:
             "intake",
             "vision",
             "scribe",
+            "mcp",
             "hydra",
             "polis",
             "kratos",

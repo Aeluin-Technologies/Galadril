@@ -8,6 +8,28 @@ import yaml
 
 
 class MCPDeploymentTest(unittest.TestCase):
+    def test_workspace_mcp_starts_without_legal_provider_credentials(
+        self,
+    ) -> None:
+        root = Path(__file__).absolute().parents[2]
+        base = yaml.safe_load(
+            (root / "infrastructure/docker/mcp.yaml").read_text()
+        )
+        service = base["services"]["mcp"]
+        self.assertEqual(service["network_mode"], "service:api-proxy")
+        self.assertTrue(service["read_only"])
+        self.assertNotIn("ports", service)
+        self.assertTrue(
+            all("piste" not in str(volume) for volume in service["volumes"])
+        )
+        self.assertIn(
+            "core.mcp.workspace", service["environment"]["MCP_NAMESPACES"]
+        )
+        compose = yaml.safe_load(
+            (root / "infrastructure/docker/docker-compose.yaml").read_text()
+        )
+        self.assertIn({"path": "mcp.yaml"}, compose["include"])
+
     def test_tunnel_only_reaches_envoy_and_secrets_only_reach_the_service(
         self,
     ) -> None:
@@ -15,12 +37,17 @@ class MCPDeploymentTest(unittest.TestCase):
         compose = yaml.safe_load(
             (root / "infrastructure/docker/law-mcp.yaml").read_text()
         )
-        services = compose["services"]
-        self.assertEqual(set(services), {"law-mcp"})
-        for name in ("law-mcp",):
+        self.assertEqual(set(compose["services"]), {"mcp"})
+        services = yaml.safe_load(
+            (root / "infrastructure/docker/mcp.yaml").read_text()
+        )["services"]
+        for name in ("mcp",):
             self.assertNotIn("ports", services[name])
             self.assertTrue(services[name]["read_only"])
-        for volume in services["law-mcp"]["volumes"]:
+        for volume in [
+            *services["mcp"]["volumes"],
+            *compose["services"]["mcp"]["volumes"],
+        ]:
             self.assertTrue(volume["read_only"])
             self.assertFalse(volume["bind"]["create_host_path"])
         proxy = yaml.safe_load(

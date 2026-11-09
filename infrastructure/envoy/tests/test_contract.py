@@ -24,6 +24,42 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_workspace_oauth_cannot_authenticate_graphql_or_the_native_grant_route(
+        self,
+    ) -> None:
+        configuration = yaml.safe_load((ROOT / "local.yaml").read_text())
+        listeners = configuration["static_resources"]["listeners"]
+        manager = next(
+            item for item in listeners if item["name"] == "egress_tools"
+        )["filter_chains"][0]["filters"][0]["typed_config"]
+        filters = manager["http_filters"]
+        auth = next(
+            item["typed_config"]
+            for item in filters
+            if item["name"] == "envoy.filters.http.jwt_authn"
+        )
+        self.assertEqual(
+            auth["providers"]["workspace"]["audiences"],
+            ["https://mcp.gravitalia.com/workspace/mcp"],
+        )
+        self.assertEqual(
+            auth["rules"],
+            [
+                {
+                    "match": {"path": "/internal/mcp/tools"},
+                    "requires": {"provider_name": "workspace"},
+                }
+            ],
+        )
+        mutations = filters[0]["typed_config"]["mutations"]["request_mutations"]
+        self.assertIn({"remove": "x-galadril-mcp-scopes"}, mutations)
+        self.assertIn({"remove": "x-galadril-mcp-client"}, mutations)
+        routes = manager["route_config"]["virtual_hosts"][0]["routes"]
+        for path in ("/internal/mcp/tools", "/internal/mcp/delegated"):
+            self.assertTrue(
+                any(item["match"].get("path") == path for item in routes)
+            )
+
     def test_tenant_discovery_is_reserved_to_pipeline_workloads(self) -> None:
         method = "/galadril.registry.v1.Registry/ListTenants"
         for filename in ("registry.yaml", "local.yaml"):

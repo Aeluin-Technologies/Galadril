@@ -71,6 +71,8 @@ services:
       SSO_PROVISIONING_KEY: ${SSO_PROVISIONING_KEY:?Set SSO_PROVISIONING_KEY}
       AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
       SCRIBE__ENABLED: ${SCRIBE_ENABLED:-true}
+      MCP_DOWNLOAD_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
+      MCP_WORKSPACE_RESOURCE: https://mcp.gravitalia.com/workspace/mcp
       PENGOLO_CHATGPT_ENABLED: ${GALADRIL_CHATGPT_ENABLED:-false}
       PENGOLO_CHATGPT_CALLBACK_BIND: 0.0.0.0:${GALADRIL_CHATGPT_CALLBACK_PORT:-1455}
       PENGOLO_WEB_SEARCH_PROVIDER: ${PENGOLO_WEB_SEARCH_PROVIDER:-searxng}
@@ -127,6 +129,8 @@ services:
       UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       SCRIBE_HOST: "127.0.0.1"
       SCRIBE_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
+      SCRIBE_WORKSPACE_MCP_URL: http://127.0.0.1:8097/workspace/mcp
+      SCRIBE_WORKSPACE_MCP_RESOURCE: https://mcp.gravitalia.com/workspace/mcp
       SCRIBE_MODELS: '${SCRIBE_MODELS:-{"local":{"model":"local","base_url":"http://host.docker.internal:8080/v1"}}}'
       SCRIBE_DEFAULT_MODEL: ${SCRIBE_DEFAULT_MODEL-local}
       SCRIBE_OPENAI_API_KEY: ${SCRIBE_OPENAI_API_KEY:-}
@@ -174,6 +178,8 @@ services:
           create_host_path: false
     depends_on:
       api-proxy:
+        condition: service_started
+      mcp:
         condition: service_started
       otel-collector:
         condition: service_started
