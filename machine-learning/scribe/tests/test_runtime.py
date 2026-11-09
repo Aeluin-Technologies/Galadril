@@ -1981,3 +1981,98 @@ async def test_durable_state_denial_stays_fatal_and_logs_only_bounded_metadata()
             "write",
         }
     assert "private-state-canary" not in str(logs) + str(chunks)
+
+
+@pytest.mark.anyio
+async def test_document_generation_remains_discoverable_after_a_previous_refusal() -> (
+    None
+):
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    calls: list[str] = []
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        calls.append(payload["operation"])
+        assert payload["request"]["action"] == "list"
+        return httpx.Response(200, json={"templates": []})
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        assert "document_templates" in {
+            tool.name for tool in info.function_tools
+        }
+        assert "Document generation tools are available" in (
+            info.instructions or ""
+        )
+        assert "previous assistant" in (info.instructions or "")
+        assert "Remaining tool calls: unlimited" in (info.instructions or "")
+        assert "Remaining tool calls: None" not in (info.instructions or "")
+        if any(
+            isinstance(message, ModelRequest)
+            and any(isinstance(part, ToolReturnPart) for part in message.parts)
+            for message in messages
+        ):
+            yield "No published template was returned by the catalog."
+        else:
+            yield {
+                0: DeltaToolCall(
+                    name="document_templates",
+                    json_args='{"request":{"action":"list"}}',
+                )
+            }
+
+    selected = RunRequest.model_validate(
+        request().model_dump()
+        | {
+            "prompt": "Use LaTeX and the published template to generate a downloadable document.",
+            "library_enabled": True,
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "No tool calls remain in this session; document generation is unavailable.",
+                }
+            ],
+        }
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    assert calls == ["document_templates"]
+
+
+@pytest.mark.anyio
+async def test_disabled_document_tools_are_not_advertised_in_generation_instructions() -> (
+    None
+):
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    async def response(messages: object, info: AgentInfo) -> AsyncIterator[str]:
+        assert "document_templates" not in {
+            tool.name for tool in info.function_tools
+        }
+        assert "Document generation tools are available" not in (
+            info.instructions or ""
+        )
+        yield "Document generation tools are not enabled in this run."
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"library_enabled": False}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"

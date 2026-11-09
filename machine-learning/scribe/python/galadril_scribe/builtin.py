@@ -86,8 +86,10 @@ def _budget_instructions(ctx: RunContext[Dependencies]) -> str:
         else "Keep plans concise, reuse results and do not repeat unchanged searches."
     )
     return (
-        f"Remaining tool calls: {tools}; remaining model requests: {requests}. "
-        "Planning and questions also consume tool calls. " + warning
+        f"Remaining tool calls: {tools if tools is not None else 'unlimited'}; "
+        f"remaining model requests: {requests if requests is not None else 'unlimited'}. "
+        "No fixed tool-call quota applies when unlimited; model-request, token, cost and time limits still apply. "
+        "Planning and questions count as tools. " + warning
     )
 
 
