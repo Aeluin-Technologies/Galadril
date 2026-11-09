@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
 from galadril_mcp_service.providers.piste_api import (
     Fund,
     PisteClient,
     PisteCredentials,
+    PisteUnavailable,
     Provider,
 )
 from galadril_mcp_service.providers.piste_references import (
@@ -40,8 +42,25 @@ def register(server: FastMCP, http: httpx.AsyncClient) -> None:
         """Load secrets only when a verified caller actually invokes a research tool."""
         nonlocal client
         if client is None:
-            client = PisteClient(http, PisteCredentials.load())
+            try:
+                client = PisteClient(http, PisteCredentials.load())
+            except ValidationError:
+                raise PisteUnavailable(
+                    "PISTE configuration unavailable"
+                ) from None
         return client
+
+    def unavailable() -> dict[str, JsonValue]:
+        """Missing credentials are an availability result, never a fabricated legal source."""
+        logging.getLogger("galadril_plugins.mcp").warning(
+            "Legal provider unavailable",
+            extra={"event.name": "mcp.legal.unavailable"},
+        )
+        return {
+            "status": "unavailable",
+            "verified": False,
+            "fallback": "Continue with authorized public web research or other tools. This call verified no source or citation.",
+        }
 
     @server.tool(annotations=annotations, meta=metadata)
     async def search(
@@ -52,24 +71,35 @@ def register(server: FastMCP, http: httpx.AsyncClient) -> None:
         page: int = 1,
     ) -> dict[str, JsonValue]:
         """Search Légifrance decisions, codes, legislation, or Judilibre. Use dated funds with the relevant date for norms. Search results are leads; fetch the exact ID before citing. Never send private party details when a legal query suffices."""
-        async with concurrency:
-            return await piste().search(
-                provider, query, fund=fund, at_date=at_date, page=page
-            )
+        try:
+            async with concurrency:
+                return await piste().search(
+                    provider, query, fund=fund, at_date=at_date, page=page
+                )
+        except PisteUnavailable:
+            return unavailable()
 
     @server.tool(annotations=annotations, meta=metadata)
     async def fetch(
         identifier: str, provider: Provider = "legifrance"
     ) -> dict[str, JsonValue]:
         """Retrieve an exact official decision or article by ID. Returns its original metadata, text, retrieval date and source hash. Distinguish grounds, abstracts, rapporteur conclusions and doctrine."""
-        async with concurrency:
-            return await piste().decision(provider, identifier)
+        try:
+            async with concurrency:
+                return await piste().decision(provider, identifier)
+        except PisteUnavailable:
+            return unavailable()
 
     @server.tool(annotations=annotations, meta=metadata)
     async def verify_citation(citation: Citation) -> dict[str, JsonValue]:
         """Re-fetch the source and verify the claimed identity and passage. Applicability and temporal/material scope still require separate legal analysis."""
-        async with concurrency:
-            return verify_reference(
-                citation,
-                await piste().decision(citation.provider, citation.identifier),
-            )
+        try:
+            async with concurrency:
+                return verify_reference(
+                    citation,
+                    await piste().decision(
+                        citation.provider, citation.identifier
+                    ),
+                )
+        except PisteUnavailable:
+            return unavailable()
