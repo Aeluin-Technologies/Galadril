@@ -221,7 +221,9 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
         for capability in manifest["capabilities"]:
             if capability["id"] == defense:
                 capability["compatibility"] = {"requires": []}
-            for context in capability["execution_profile"].get("contexts", []):
+            for context in capability.get("execution_profile", {}).get(
+                "contexts", []
+            ):
                 context["privacy"] = "standard"
         registry = PluginRegistry.from_manifests([manifest])
         runtime = Runtime(

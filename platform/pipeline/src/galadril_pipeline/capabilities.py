@@ -115,6 +115,19 @@ class Capability(BaseModel):
     ) = None
     model_class: str | None = Field(default=None, min_length=1, max_length=256)
 
+    def default_mcp(self) -> bool:
+        """Only an installed, context-free MCP may opt into the chat baseline."""
+        binding = self.parameters_schema.get("x-galadril-mcp")
+        return (
+            self.kind is CapabilityKind.MCP
+            and self.execution == "registered"
+            and self.plugin_id is not None
+            and self.execution_profile.requires_context is None
+            and CapabilityTarget.SCRIBE in self.targets
+            and isinstance(binding, dict)
+            and binding.get("available_by_default") is True
+        )
+
     @model_validator(mode="after")
     def coherent_metadata(self) -> Capability:
         """Rejects ambiguous ownership and schemas unsuitable for configuration forms."""
@@ -222,7 +235,10 @@ class CapabilityCatalog(BaseModel):
     def execution_allowed(self, identifier: str, context: str | None) -> bool:
         return any(
             item.id == identifier
-            and item.execution_profile.requires_context == context
+            and (
+                item.default_mcp()
+                or item.execution_profile.requires_context == context
+            )
             for item in self.capabilities
         )
 

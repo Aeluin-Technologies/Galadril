@@ -25,10 +25,8 @@ pub fn generation_operation_allowed(
         "redact_document" | "read_file" | "document_search" => {
             library || specialized
         },
-        "web" => true,
-        "email" | "search" | "evidence" | "graph" | "causal" | "context" => {
-            !specialized
-        },
+        "web" | "email" => true,
+        "search" | "evidence" | "graph" | "causal" | "context" => !specialized,
         _ => false,
     }
 }

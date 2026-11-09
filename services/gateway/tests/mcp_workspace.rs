@@ -108,13 +108,13 @@ fn execution_scope_is_stable_but_separates_users_tenants_clients_and_projects()
 }
 
 #[test]
-fn native_mcp_cannot_escape_a_specialized_context_or_enable_the_library() {
+fn native_mcp_allows_mail_without_enabling_unrestricted_retrieval() {
     assert!(policy::generation_operation_allowed(
         "compile_document",
         true,
         true
     ));
-    assert!(!policy::generation_operation_allowed("email", true, true));
+    assert!(policy::generation_operation_allowed("email", true, true));
     assert!(!policy::generation_operation_allowed("search", true, true));
     assert!(!policy::generation_operation_allowed(
         "document_templates",

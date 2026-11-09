@@ -393,6 +393,45 @@ _LAW_TEAM = {
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("context", [None, "law.administratif"])
+async def test_pengolo_exposes_mail_and_public_legal_research_without_a_team(
+    context: str | None,
+) -> None:
+    from collections.abc import AsyncIterator
+
+    from galadril_scribe.contracts import RunRequest
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    offered: set[str] = set()
+
+    async def respond(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        offered.update(tool.name for tool in info.function_tools)
+        yield "Ready."
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=respond)
+        )
+        request = RunRequest(
+            prompt="List my recent email and find the relevant public law.",
+            capability="a" * 64,
+            execution_context=context,
+        )
+        chunks = [chunk async for chunk in runtime.stream(request)]
+    assert chunks[-1].kind == "completed"
+    assert {
+        "search_emails",
+        "read_email",
+        "propose_email",
+        "law_mcp_research_search_official_law",
+    } <= offered
+    assert "law_algorithm_dossier_validate_dossier" not in offered
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "kind,media_type",
     [

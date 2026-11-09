@@ -1039,10 +1039,32 @@ class Runtime:
                 )
         return evidence
 
+    def chat_tool_ids(self, request: RunRequest) -> tuple[str, ...]:
+        """Offer shared MCP tools without enrolling the chat in a workflow."""
+        return (
+            *request.tool_ids,
+            *(
+                item.id
+                for item in self.extensions.capabilities
+                if item.default_mcp() and item.id not in request.tool_ids
+            ),
+        )
+
     def toolsets(
         self, request: RunRequest, alias: str
     ) -> list[AbstractToolset[Dependencies]]:
         """Each agent owns sessions while inheriting exactly the same tool selection."""
+        from galadril_scribe.contacts import search_contacts
+        from galadril_scribe.email import (
+            propose_email,
+            read_email,
+            search_emails,
+        )
+
+        mail_tools = FunctionToolset[Dependencies](
+            tools=[propose_email, search_contacts, search_emails, read_email]
+        )
+        tool_ids = self.chat_tool_ids(request)
         if request.execution_context is not None:
             tools = [Tool[Dependencies](date_interval), *self.document_tools]
             if request.library_enabled:
@@ -1054,6 +1076,7 @@ class Runtime:
                     tools=tools,
                     timeout=90,
                 ),
+                AvailableToolset(mail_tools, "core.toolset.email"),
                 *(
                     [
                         FunctionToolset[Dependencies](
@@ -1063,7 +1086,7 @@ class Runtime:
                     if request.web_search
                     else []
                 ),
-                *self.extensions.toolsets(request.tool_ids, model=alias),
+                *self.extensions.toolsets(tool_ids, model=alias),
             ]
         result: list[AbstractToolset[Dependencies]] = [
             MCPToolset[Dependencies](
@@ -1091,23 +1114,7 @@ class Runtime:
                 timeout=90,
             )
         )
-        from galadril_scribe.contacts import search_contacts
-        from galadril_scribe.email import (
-            propose_email,
-            read_email,
-            search_emails,
-        )
-
-        result.append(
-            FunctionToolset[Dependencies](
-                tools=[
-                    propose_email,
-                    search_contacts,
-                    search_emails,
-                    read_email,
-                ]
-            )
-        )
+        result.append(mail_tools)
         if request.web_search:
             result.append(
                 FunctionToolset[Dependencies](
@@ -1142,9 +1149,9 @@ class Runtime:
                         item.id
                         for item in self.extensions.capabilities
                         if item.id == "utils.mcp.email"
-                        and item.id not in request.tool_ids
+                        and item.id not in tool_ids
                     ),
-                    *request.tool_ids,
+                    *tool_ids,
                 ),
                 model=alias,
             ),
@@ -1454,7 +1461,7 @@ class Runtime:
                         else None
                     )
                     replayable_tools = self.extensions.replayable(
-                        request.tool_ids, toolsets=orchestrator_tools
+                        self.chat_tool_ids(request), toolsets=orchestrator_tools
                     )
                     if workflow is not None:
 
