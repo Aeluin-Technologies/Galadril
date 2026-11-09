@@ -47,6 +47,8 @@ SECRET_NAMES = (
     "LAKEFS_SECRET_ACCESS_KEY",
     "LAKEFS_AUTH_ENCRYPT_SECRET_KEY",
     "DOCUMENT_COMPILER_S3_SECRET_KEY",
+    "PENGOLO_DOCUMENT_VAULT_KEY",
+    "DOCUMENT_COMPILER_BINDING_KEY",
 )
 
 
@@ -157,6 +159,8 @@ class Bootstrap:
                 env[name] = base64.urlsafe_b64encode(
                     secrets.token_bytes(32)
                 ).decode()
+            elif name == "PENGOLO_DOCUMENT_VAULT_KEY":
+                env[name] = base64.b64encode(secrets.token_bytes(32)).decode()
             elif name in {"POLIS_ENCRYPTION_KEY", "KRATOS_CIPHER_SECRET"}:
                 env[name] = secrets.token_hex(16)
             else:

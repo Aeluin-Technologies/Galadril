@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import shutil
 import stat
@@ -87,6 +88,21 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             connectors["spicedb"]["token"], env["SPICEDB_GRPC_PRESHARED_KEY"]
         )
         self.assertFalse((state / "templates").exists())
+
+    async def test_document_secrets_use_compiler_formats_and_survive_reinitialization(
+        self,
+    ) -> None:
+        await self.bootstrap.initialize()
+        environment = self.bootstrap.environment()
+        vault = environment["PENGOLO_DOCUMENT_VAULT_KEY"]
+        binding = environment["DOCUMENT_COMPILER_BINDING_KEY"]
+        self.assertEqual(len(base64.b64decode(vault, validate=True)), 32)
+        self.assertEqual(len(bytes.fromhex(binding)), 32)
+        self.assertNotEqual(vault, binding)
+        await self.bootstrap.initialize()
+        repeated = self.bootstrap.environment()
+        self.assertEqual(repeated["PENGOLO_DOCUMENT_VAULT_KEY"], vault)
+        self.assertEqual(repeated["DOCUMENT_COMPILER_BINDING_KEY"], binding)
 
     async def test_reinitialization_preserves_keys_credentials_and_provider_key(
         self,
