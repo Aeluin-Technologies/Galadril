@@ -1820,9 +1820,10 @@ impl PengoloService {
         ensure!(
             !private ||
                 (input.web_query.is_none() &&
-                    !catalog.capabilities.iter().any(
-                        |item| item.kind == CapabilityKind::Mcp &&
-                            tool_ids.contains(&item.id)
+                    mcp::mediated_tools(
+                        &catalog,
+                        &tool_ids,
+                        branch.as_deref()
                     )),
             "Private contexts require mediated tools"
         );

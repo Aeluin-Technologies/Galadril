@@ -365,10 +365,67 @@ async def _exercise_project_permissions(
     )
 
 
+async def _exercise_private_specialist_send(gateway: GatewayClient) -> None:
+    """Cross the public send boundary; catalog tests alone cannot prove selection works."""
+    available = await gateway.execute(
+        authenticated_token(UPLOADER_ID),
+        "query { pengoloAgents { id data { skillIds } } }",
+    )
+    agents = require_sequence(available.get("pengoloAgents"), "specialists")
+    specialist = next(
+        _object(item)
+        for item in agents
+        if "law.skill.jurisprudence"
+        in require_sequence(
+            _object(_object(item).get("data")).get("skillIds"), "skills"
+        )
+    )
+    project = await _object_mutation(
+        gateway,
+        "savePengoloProject",
+        {
+            "name": "Private specialist regression",
+            "icon": "folder",
+            "color": "#d97706",
+            "shared": False,
+            "roles": [],
+            "contextMode": "project",
+            "executionContext": "law.administratif",
+        },
+    )
+    result = await _object_mutation(
+        gateway,
+        "sendPengolo",
+        {
+            "idempotencyKey": str(uuid.uuid4()),
+            "projectId": _text(project, "id"),
+            "agentIds": [_text(specialist, "id")],
+            "modelAlias": "fixture",
+            "prompt": json.dumps(
+                {
+                    "entity_id": "unused",
+                    "causal_entity_id": "unused",
+                    "question": "Synthetic private attachment lookup",
+                    "library": True,
+                    "pengolo": True,
+                }
+            ),
+        },
+    )
+    generation = _text(_object(result.get("generation")), "id")
+    await eventually(
+        lambda: _completed(gateway, generation),
+        timeout_seconds=60,
+        description="private specialist with a delegated MCP selected",
+        abort_on=(GenerationFailure,),
+    )
+
+
 async def exercise_pengolo(
     gateway: GatewayClient, state: DerivedPipelineState, *, administrator: str
 ) -> None:
     """Uses real auth, roles, S3, PostgreSQL and Scribe without provider credentials."""
+    await _exercise_private_specialist_send(gateway)
     token = authenticated_token(UPLOADER_ID)
     preference_query = "query { pengoloPreferences { revision instructions } }"
     current_preferences = require_mapping(
