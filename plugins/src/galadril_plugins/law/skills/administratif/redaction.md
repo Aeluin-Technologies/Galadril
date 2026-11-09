@@ -64,3 +64,11 @@ N'utilise ni plugin_catalog ni enable_plugin pour découvrir un modèle depuis
 un chat spécialisé : list et read suffisent; l'administration des modèles
 appartient aux réglages. La compilation et le dépôt restent deux opérations
 distinctes; soumets toujours le projet à validation humaine.
+
+## Date du document
+
+Renseigner et faire confirmer la date explicite de signature dans le champ public
+`document_date` du dossier. Le modèle la lie à `\DateDepot` dans `information.tex`.
+Ne pas utiliser `\today` pour dater une écriture : l’horloge reproductible du
+compilateur est indépendante de la date du document. Si cette date manque, la
+demander avant la compilation ; ne pas inventer une date de dépôt.
