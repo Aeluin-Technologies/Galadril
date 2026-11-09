@@ -125,6 +125,41 @@ fn file_evidence_visible(result: Result<Record>) -> Result<bool> {
     }
 }
 
+/// Keep history positions stable without exposing content derived from revoked
+/// sources.
+fn unavailable_message(message: &Value) -> Result<Value> {
+    Ok(json!({
+        "id":string(message, "id")?,
+        "role":string(message, "role")?,
+        "text":"",
+        "sourceUnavailable":true
+    }))
+}
+
+/// Generated outputs may contain vault bindings and must not be implicitly
+/// re-ingested.
+fn history_file_ids(message: &Value) -> impl Iterator<Item = &str> {
+    message
+        .get("fileIds")
+        .filter(|_| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+        })
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+/// Stored outputs remain readable by their author after attachment expiry or
+/// deletion.
+fn retains_deleted_sources(
+    status: Option<&str>,
+    owns_generation: bool,
+) -> bool {
+    owns_generation &&
+        matches!(status, Some("completed" | "failed" | "cancelled"))
+}
+
 pub struct Principal<'a> {
     pub tenant: &'a str,
     pub user: &'a str,
@@ -1463,6 +1498,7 @@ impl PengoloService {
         &self,
         actor: &Principal<'_>,
         sources: &[EvidenceSource],
+        retain_deleted: bool,
     ) -> Result<bool> {
         for source in sources {
             if source.resource_type == "pengolo_chat" {
@@ -1489,6 +1525,19 @@ impl PengoloService {
                 source.resource_type.as_str(),
                 "pengolo_file" | "pengolo_temporary_file"
             ) {
+                if retain_deleted &&
+                    self.store
+                        .get(
+                            actor.tenant,
+                            Collection::File,
+                            &source.resource_id,
+                            source.resource_type == "pengolo_temporary_file",
+                        )
+                        .await?
+                        .is_none()
+                {
+                    continue;
+                }
                 if !file_evidence_visible(
                     self.file(
                         actor,
@@ -1498,7 +1547,7 @@ impl PengoloService {
                         } else {
                             None
                         },
-                        true,
+                        !retain_deleted,
                     )
                     .await,
                 )? {
@@ -1534,6 +1583,49 @@ impl PengoloService {
         Ok(true)
     }
 
+    /// Revalidate live grants before allowing an author's retained history
+    /// fallback.
+    async fn message_evidence_visible(
+        &self,
+        actor: &Principal<'_>,
+        chat: &Record,
+        message: &Value,
+        sources: &[EvidenceSource],
+        temporary: bool,
+    ) -> Result<bool> {
+        if self.evidence_visible(actor, sources, false).await? {
+            return Ok(true);
+        }
+        let generation_id = message
+            .get("generationId")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                (message.get("role").and_then(Value::as_str) == Some("user"))
+                    .then(|| message.get("id").and_then(Value::as_str))
+                    .flatten()
+            });
+        let Some(id) = generation_id else {
+            return Ok(false);
+        };
+        let Some(generation) = self
+            .store
+            .get(actor.tenant, Collection::Generation, id, temporary)
+            .await?
+        else {
+            return Ok(false);
+        };
+        if !retains_deleted_sources(
+            generation.data.get("status").and_then(Value::as_str),
+            generation.owner_id == actor.user,
+        ) || generation.data.get("chatId").and_then(Value::as_str) !=
+            Some(chat.id.as_str()) ||
+            generation.project_id != chat.project_id
+        {
+            return Ok(false);
+        }
+        self.evidence_visible(actor, sources, true).await
+    }
+
     pub async fn chat(
         &self,
         actor: &Principal<'_>,
@@ -1557,8 +1649,15 @@ impl PengoloService {
                     .map(serde_json::from_value)
                     .transpose()?
                     .unwrap_or_default();
-                if self.evidence_visible(actor, &evidence).await? {
+                if self
+                    .message_evidence_visible(
+                        actor, &chat, message, &evidence, temporary,
+                    )
+                    .await?
+                {
                     visible.push(message.clone());
+                } else {
+                    visible.push(unavailable_message(message)?);
                 }
             }
         }
@@ -1864,6 +1963,13 @@ impl PengoloService {
                 chat.data.get("messages").and_then(Value::as_array)
             {
                 for message in messages.iter().rev() {
+                    if message
+                        .get("sourceUnavailable")
+                        .and_then(Value::as_bool) ==
+                        Some(true)
+                    {
+                        continue;
+                    }
                     let text = string(message, "text")?;
                     if bytes + text.len() > 32768 || history.len() >= 64 {
                         break;
@@ -1881,25 +1987,21 @@ impl PengoloService {
                         .map(serde_json::from_value)
                         .transpose()?
                         .unwrap_or_default();
-                    if !self.evidence_visible(actor, &evidence).await? {
+                    if !self.evidence_visible(actor, &evidence, false).await? {
                         continue;
                     }
                     let mut files = Vec::new();
                     let mut visible = true;
-                    if let Some(ids) =
-                        message.get("fileIds").and_then(Value::as_array)
-                    {
-                        for id in ids.iter().filter_map(Value::as_str) {
-                            match self.attachment(actor, &input, id).await {
-                                Ok((file, source, _)) => {
-                                    files.push(file);
-                                    sources.push(source);
-                                },
-                                Err(_) => {
-                                    visible = false;
-                                    break;
-                                },
-                            }
+                    for id in history_file_ids(message) {
+                        match self.attachment(actor, &input, id).await {
+                            Ok((file, source, _)) => {
+                                files.push(file);
+                                sources.push(source);
+                            },
+                            Err(_) => {
+                                visible = false;
+                                break;
+                            },
                         }
                     }
                     if !visible {
@@ -2047,7 +2149,15 @@ impl PengoloService {
                 .context("Missing generation provenance")?,
         )?;
         ensure!(
-            self.evidence_visible(actor, &sources).await?,
+            self.evidence_visible(
+                actor,
+                &sources,
+                retains_deleted_sources(
+                    generation.data.get("status").and_then(Value::as_str),
+                    generation.owner_id == actor.user,
+                )
+            )
+            .await?,
             "Generation evidence is no longer available"
         );
         Ok(chat)
@@ -2894,6 +3004,47 @@ mod tests {
                 {"origin":"https://example.com","result_count":2},
                 {"origin":"https://other.example.org","result_count":1}
             ]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_terminal_outputs_retain_deleted_file_sources() {
+        for status in ["completed", "failed", "cancelled"] {
+            assert!(retains_deleted_sources(Some(status), true));
+            assert!(!retains_deleted_sources(Some(status), false));
+        }
+        for status in [None, Some("running"), Some("pending"), Some("unknown")]
+        {
+            assert!(!retains_deleted_sources(status, true));
+        }
+    }
+
+    #[test]
+    fn generated_outputs_never_become_implicit_model_inputs() {
+        let user = json!({"role":"user", "fileIds":["input"]});
+        assert_eq!(history_file_ids(&user).collect::<Vec<_>>(), ["input"]);
+        let assistant =
+            json!({"role":"assistant", "fileIds":["private-output"]});
+        assert_eq!(history_file_ids(&assistant).count(), 0);
+        assert_eq!(history_file_ids(&json!({"role":"user"})).count(), 0);
+    }
+
+    #[test]
+    fn unavailable_message_preserves_position_without_revealing_derived_content()
+    -> Result<()> {
+        let hidden = unavailable_message(&json!({
+            "id":"message-id", "role":"assistant", "text":"private finding",
+            "generationId":"private-generation", "status":"completed",
+            "parts":[{"text":"private part"}], "fileIds":["private-file"],
+            "emailDrafts":["private draft"], "evidence":[{"resource_id":"private-source"}]
+        }))?;
+        ensure!(
+            hidden ==
+                json!({
+                    "id":"message-id", "role":"assistant", "text":"",
+                    "sourceUnavailable":true
+                })
         );
         Ok(())
     }

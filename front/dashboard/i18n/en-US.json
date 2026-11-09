@@ -1477,6 +1477,7 @@
     "pluginSpecialistsHelp": "Plugin specialists are provided by installed plugins. Their Skills and instructions are read-only.",
     "documentSource": "Source document",
     "evidenceSource": "Evidence source",
+    "sourceUnavailable": "This message depends on a source that is no longer available.",
     "viewCalculations": "View calculations and activity",
     "viewActivity": "View activity",
     "copyResponse": "Copy response",
@@ -1893,7 +1894,8 @@
     "name": "Name",
     "upload": "Upload files",
     "previewLoading": "Loading document preview…",
-    "previewUnavailable": "Preview could not be opened. Check your access, retry, or download the document. Supported previews include PDF, images and plain text up to 50 MB.",
+    "previewUnavailable": "This document is unavailable or you no longer have access. Retry if the issue is temporary.",
+    "attachmentLabel": "Document",
     "attachmentUnavailable": "Unavailable document",
     "attachmentLoading": "Loading document…"
   },

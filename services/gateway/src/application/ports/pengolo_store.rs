@@ -219,6 +219,17 @@ pub trait PengoloStore: Send + Sync {
         tenant: &str,
         id: &str,
     ) -> Result<Option<String>>;
+    /// Generated outputs remain references, never inputs required to reread an
+    /// answer.
+    async fn record_generated_file(
+        &self,
+        _tenant: &str,
+        _generation: &str,
+        _temporary: bool,
+        _file: &str,
+    ) -> Result<()> {
+        anyhow::bail!("Generated attachment recording unavailable")
+    }
     async fn record_evidence(
         &self,
         tenant: &str,

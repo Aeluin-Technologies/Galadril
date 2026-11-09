@@ -3,6 +3,7 @@ subscription LibraryChanges($project: String) {
 }
 
 fragment Message on PengoloMessage {
+  sourceUnavailable
   emailDrafts
   activityKinds
   toolCheckpoints {

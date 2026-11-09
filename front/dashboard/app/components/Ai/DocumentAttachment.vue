@@ -9,6 +9,7 @@ const props = defineProps<{
   referencedText?: string;
 }>();
 const account = useAccount();
+const { t } = useI18n();
 const file = shallowRef<{
   id: string;
   name: string;
@@ -18,11 +19,15 @@ const file = shallowRef<{
 const cited = computed(
   () =>
     props.referencedText === undefined ||
-    (!!file.value &&
-      documentMentioned(props.referencedText, props.id, file.value.name)),
+    documentMentioned(props.referencedText, props.id, file.value?.name ?? ""),
 );
 const loading = ref(false),
   opened = ref(false);
+const preview = computed(() =>
+  opened.value
+    ? (file.value ?? { id: props.id, name: t("documents.attachmentLabel") })
+    : null,
+);
 let epoch = 0,
   active = true;
 let controller: AbortController | undefined;
@@ -88,24 +93,20 @@ onBeforeUnmount(clear);
     v-if="cited"
     variant="secondary"
     size="sm"
-    :disabled="!file"
+    :disabled="loading"
     :loading="loading"
-    :tooltip="file?.name ?? $t('documents.attachmentUnavailable')"
+    :tooltip="file?.name ?? $t('documents.attachmentLabel')"
     class="max-w-full"
     @click="opened = true"
   >
     <DocumentTextIcon aria-hidden="true" />
     <span class="min-w-0 max-w-56 truncate">{{
       file?.name ??
-      $t(
-        loading
-          ? "documents.attachmentLoading"
-          : "documents.attachmentUnavailable",
-      )
+      $t(loading ? "documents.attachmentLoading" : "documents.attachmentLabel")
     }}</span>
   </UiButton>
   <AiDocumentPreview
-    :file="opened ? file : null"
+    :file="preview"
     :temporary-session="temporarySession"
     @close="opened = false"
   />

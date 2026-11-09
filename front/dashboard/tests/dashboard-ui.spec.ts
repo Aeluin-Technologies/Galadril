@@ -2427,3 +2427,84 @@ test("Pengolo typography keeps user messages, responses and tables proportionate
     animations: "disabled",
   });
 });
+
+test("deleting a generated attachment keeps the answer and report citation visible", async ({
+  page,
+}) => {
+  const base = chatFixture();
+  const message = {
+    ...base.data.messages.items[0]!,
+    fileIds: ["c".repeat(32)],
+    text:
+      "Document généré. [PDF de démonstration](/pengolo/files/" +
+      "c".repeat(32) +
+      "). Voir le [rapport](#report-" +
+      "a".repeat(64) +
+      ").",
+  };
+  const record = {
+    ...base,
+    data: { ...base.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + record.id);
+  const answer = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  await expect(answer).toContainText("Document généré.");
+  await expect(
+    answer.getByRole("link", { name: "rapport", exact: true }),
+  ).toBeVisible();
+  await answer.getByRole("button", { name: "Document", exact: true }).click();
+  const preview = page.getByRole("dialog", { name: "Document", exact: true });
+  await expect(preview).toContainText(
+    "This document is unavailable or you no longer have access.",
+  );
+  await expect(answer).toContainText("Document généré.");
+  await preview
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await answer
+    .getByRole("link", { name: "PDF de démonstration", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "PDF de démonstration", exact: true }),
+  ).toContainText("This document is unavailable or you no longer have access.");
+});
+
+test("revoked source leaves a message placeholder without report or content", async ({
+  page,
+}) => {
+  const base = chatFixture();
+  const message = {
+    id: "d".repeat(32),
+    role: "assistant",
+    text: "",
+    sourceUnavailable: true,
+  };
+  const record = {
+    ...base,
+    data: { ...base.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + record.id);
+  const answer = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  await expect(answer).toContainText(
+    "This message depends on a source that is no longer available.",
+  );
+  await expect(
+    answer.getByRole("button", { name: "Copy response", exact: true }),
+  ).toHaveCount(0);
+});

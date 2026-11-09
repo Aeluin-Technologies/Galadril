@@ -365,6 +365,14 @@ impl PengoloService {
         );
         if file.data.get("status").and_then(Value::as_str) == Some("ready") {
             self.authorize_record(actor, &file).await?;
+            self.store
+                .record_generated_file(
+                    actor.tenant,
+                    &generation.id,
+                    temporary,
+                    &file.id,
+                )
+                .await?;
             return Ok(
                 json!({"file":file_projection(file.clone()),"download":download_projection(&file,session.as_deref())}),
             );
@@ -389,23 +397,11 @@ impl PengoloService {
             .await?;
         self.authorize_record(actor, &file).await?;
         self.store
-            .record_evidence(
+            .record_generated_file(
                 actor.tenant,
                 &generation.id,
                 temporary,
-                &[EvidenceSource {
-                    resource_type: if temporary {
-                        "pengolo_temporary_file"
-                    } else {
-                        "pengolo_file"
-                    }
-                    .into(),
-                    resource_id: file.id.clone(),
-                    manage: false,
-                    entity_id: session.clone(),
-                    modality: None,
-                    state_type: None,
-                }],
+                &file.id,
             )
             .await?;
         tracing::info!(event.name = "document_compiler.pdf.published");

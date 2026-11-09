@@ -1061,7 +1061,7 @@ impl PengoloStore for PgPengoloStore {
                 {
                     message.insert("status".into(), json!(event.kind));
                 }
-                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence"),"emailDrafts":data.get("emailDrafts").cloned().unwrap_or_else(|| json!([])),"activityKinds":data.get("activityKinds").cloned().unwrap_or_else(|| json!([])),"toolCheckpoints":data.get("toolCheckpoints").cloned().unwrap_or_else(|| json!([]))}));
+                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence"),"fileIds":data.get("artifactIds").cloned().unwrap_or_else(|| json!([])),"emailDrafts":data.get("emailDrafts").cloned().unwrap_or_else(|| json!([])),"activityKinds":data.get("activityKinds").cloned().unwrap_or_else(|| json!([])),"toolCheckpoints":data.get("toolCheckpoints").cloned().unwrap_or_else(|| json!([]))}));
                 Self::write(
                     &mut tx,
                     tenant,
@@ -1128,6 +1128,74 @@ impl PengoloStore for PgPengoloStore {
             "Generation is terminal"
         );
         Ok((tenant, record, temporary))
+    }
+
+    async fn record_generated_file(
+        &self,
+        tenant: &str,
+        id: &str,
+        temporary: bool,
+        file_id: &str,
+    ) -> Result<()> {
+        let mut tx = self.database.tenant(tenant).await?;
+        let mut generation =
+            Self::read(&mut tx, Collection::Generation, id, temporary, true)
+                .await?
+                .context("Generation unavailable")?;
+        ensure!(
+            matches!(
+                generation.data.get("status").and_then(Value::as_str),
+                Some("pending" | "running")
+            ),
+            "Generation is no longer active"
+        );
+        let file =
+            Self::read(&mut tx, Collection::File, file_id, temporary, false)
+                .await?
+                .context("Generated file unavailable")?;
+        ensure!(
+            file.owner_id == generation.owner_id &&
+                file.project_id == generation.project_id &&
+                file.data.get("status").and_then(Value::as_str) ==
+                    Some("ready") &&
+                file.data
+                    .get("compilationJob")
+                    .and_then(Value::as_str)
+                    .is_some(),
+            "Generated file scope changed"
+        );
+        let revision = generation.revision;
+        let artifacts = generation
+            .data
+            .as_object_mut()
+            .context("Invalid generation")?
+            .entry("artifactIds")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .context("Invalid generated attachments")?;
+        let value = json!(file_id);
+        if !artifacts.contains(&value) {
+            ensure!(
+                artifacts.len() < 64,
+                "Generated attachment limit reached"
+            );
+            artifacts.push(value);
+            Self::write(
+                &mut tx,
+                tenant,
+                Collection::Generation,
+                &generation,
+                temporary,
+                Some(revision),
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        tracing::info!(
+            event.name = "pengolo.generated_attachment.linked",
+            temporary
+        );
+        Ok(())
     }
 
     async fn record_evidence(
@@ -1284,6 +1352,149 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn generated_attachments_survive_deletion_without_becoming_input_evidence()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgPengoloStore::new(database);
+        let chat = Record {
+            id: "a".repeat(32),
+            owner_id: "alice".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 1,
+            updated_at: now(),
+            data: json!({"messages":[],"activeGeneration":"b".repeat(32)}),
+        };
+        store
+            .save("tenant_a", Collection::Chat, &chat, false, None)
+            .await?;
+        let generation = Record {
+            id: "b".repeat(32),
+            data: json!({"chatId":chat.id,"status":"running","sequence":0,"response":"","evidence":[]}),
+            ..chat.clone()
+        };
+        store
+            .save("tenant_a", Collection::Generation, &generation, false, None)
+            .await?;
+        let file = Record {
+            id: "c".repeat(32),
+            expires_at: Some(now() + 60000),
+            data: json!({"status":"ready","compilationJob":"d".repeat(32),"key":"tenant_a/alice/demo.pdf"}),
+            ..chat.clone()
+        };
+        store
+            .save("tenant_a", Collection::File, &file, false, None)
+            .await?;
+        let (first, second) = tokio::join!(
+            store.record_generated_file(
+                "tenant_a",
+                &generation.id,
+                false,
+                &file.id
+            ),
+            store.record_generated_file(
+                "tenant_a",
+                &generation.id,
+                false,
+                &file.id
+            )
+        );
+        first?;
+        second?;
+        assert!(
+            store
+                .record_generated_file(
+                    "tenant_b",
+                    &generation.id,
+                    false,
+                    &file.id
+                )
+                .await
+                .is_err()
+        );
+        let foreign = Record {
+            id: "e".repeat(32),
+            owner_id: "bob".into(),
+            ..file.clone()
+        };
+        store
+            .save("tenant_a", Collection::File, &foreign, false, None)
+            .await?;
+        assert!(
+            store
+                .record_generated_file(
+                    "tenant_a",
+                    &generation.id,
+                    false,
+                    &foreign.id
+                )
+                .await
+                .is_err()
+        );
+        store
+            .remove("tenant_a", Collection::File, &file.id, false)
+            .await?;
+        store
+            .append(
+                "tenant_a",
+                &generation.id,
+                false,
+                &OutputEvent {
+                    sequence: 1,
+                    kind: "content".into(),
+                    content: "See the generated document.".into(),
+                },
+            )
+            .await?;
+        store
+            .append(
+                "tenant_a",
+                &generation.id,
+                false,
+                &OutputEvent {
+                    sequence: 2,
+                    kind: "completed".into(),
+                    content: String::new(),
+                },
+            )
+            .await?;
+        let saved = store
+            .get("tenant_a", Collection::Chat, &chat.id, false)
+            .await?
+            .context("Missing chat")?;
+        let answer = saved
+            .data
+            .get("messages")
+            .and_then(Value::as_array)
+            .and_then(|items| items.last())
+            .context("Missing answer")?;
+        assert_eq!(
+            answer.get("text"),
+            Some(&json!("See the generated document."))
+        );
+        assert_eq!(answer.get("fileIds"), Some(&json!([file.id])));
+        assert_eq!(answer.get("evidence"), Some(&json!([])));
+        assert!(
+            store
+                .record_generated_file(
+                    "tenant_a",
+                    &generation.id,
+                    false,
+                    &foreign.id
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn generated_file_reservation_is_atomic_idempotent_and_payload_bound()
