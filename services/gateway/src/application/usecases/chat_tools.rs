@@ -29,6 +29,11 @@ use crate::application::usecases::search::{
 
 const MAX_CAPABILITIES: usize = 256;
 
+#[path = "workspace_tools.rs"]
+mod workspace;
+
+pub use workspace::{WorkspaceIdentity, WorkspaceScope};
+
 pub struct Scope {
     pub tenant_id: String,
     pub user_id: String,
@@ -38,6 +43,7 @@ pub struct Scope {
     pub expires: Instant,
     pub pengolo: bool,
     pub temporary: bool,
+    pub workspace: Option<WorkspaceScope>,
 }
 
 #[derive(Default)]
@@ -48,11 +54,19 @@ pub struct Capabilities {
 pub struct CapabilityLease {
     token: String,
     registry: Arc<Capabilities>,
+    revoke: bool,
 }
 
 impl CapabilityLease {
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    /// Queued compiler jobs retain bounded authority until expiry, not merely
+    /// until HTTP returns.
+    pub fn retain_until_expiry(mut self) -> String {
+        self.revoke = false;
+        self.token.clone()
     }
 }
 
@@ -60,6 +74,9 @@ impl Drop for CapabilityLease {
     /// Revocation follows stream ownership, including early transport
     /// failures.
     fn drop(&mut self) {
+        if !self.revoke {
+            return;
+        }
         match self.registry.scopes.lock() {
             Ok(mut scopes) => {
                 scopes.remove(&self.token);
@@ -79,6 +96,24 @@ impl Capabilities {
             .lock()
             .map_err(|_| anyhow::anyhow!("Capability registry unavailable"))?;
         scopes.retain(|_, scope| scope.expires > Instant::now());
+        if scope.workspace.is_some() &&
+            let Some((token, _)) = scopes.iter().find(|(_, current)| {
+                current.workspace == scope.workspace &&
+                    current.tenant_id == scope.tenant_id &&
+                    current.user_id == scope.user_id &&
+                    current.generation_id == scope.generation_id &&
+                    current.context == scope.context &&
+                    current.expires >
+                        Instant::now() + Duration::from_secs(5) &&
+                    current.expires <= scope.expires
+            })
+        {
+            return Ok(CapabilityLease {
+                token: token.clone(),
+                registry: Arc::clone(self),
+                revoke: false,
+            });
+        }
         ensure!(scopes.len() < MAX_CAPABILITIES, "Chat capacity exceeded");
         let token =
             format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -86,6 +121,7 @@ impl Capabilities {
         Ok(CapabilityLease {
             token,
             registry: Arc::clone(self),
+            revoke: true,
         })
     }
 
@@ -304,6 +340,7 @@ impl ChatTools {
             expires: Instant::now() + Duration::from_secs(900),
             pengolo: false,
             temporary: false,
+            workspace: None,
         })
     }
 
@@ -329,6 +366,11 @@ impl ChatTools {
         } = &request
         {
             let grant = self.mcp.resolve(token, capability_id, resource)?;
+            if self.authorize_conversation_mcp(&grant).await? {
+                return Ok(
+                    json!({"active":true,"subject":grant.user,"tenant":grant.tenant,"generation":grant.generation,"resource":resource,"scopes":["workspace:use"],"expires_in":grant.expires.saturating_duration_since(Instant::now()).as_secs()}),
+                );
+            }
             let service = self.pengolo_service()?;
             let generation = service.store.get(&grant.tenant, crate::application::ports::pengolo_store::Collection::Generation, &grant.generation, grant.temporary).await?.context("MCP generation unavailable")?;
             let mut context: QueryContext = serde_json::from_value(
@@ -402,6 +444,7 @@ impl ChatTools {
                     expires: Instant::now() + Duration::from_secs(30),
                     pengolo: true,
                     temporary,
+                    workspace: None,
                 })
             },
         };
@@ -426,12 +469,15 @@ impl ChatTools {
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
                 ToolRequest::McpDelegate { capability_id, resource } => {
-                    ensure!(scope.pengolo, "MCP delegation requires Pengolo");
-                    let service = self.pengolo_service()?;
-                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("MCP generation unavailable")?;
-                    let actor = crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
-                    service.authorize_mcp(&actor,&generation,scope.temporary,&capability_id,&resource).await?;
-                    let token = self.mcp.issue(super::mcp_delegation::McpContext {tenant:scope.tenant_id.clone(),user:scope.user_id.clone(),generation:scope.generation_id.clone(),temporary:scope.temporary,capability:capability_id,resource,expires:Instant::now()+Duration::from_secs(60)})?;
+                    if scope.pengolo {
+                        let service = self.pengolo_service()?;
+                        let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("MCP generation unavailable")?;
+                        let actor = crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
+                        service.authorize_mcp(&actor,&generation,scope.temporary,&capability_id,&resource).await?;
+                    } else {
+                        ensure!(scope.workspace.is_none() && capability_id == crate::domain::mcp_workspace::CAPABILITY && resource == crate::domain::mcp_workspace::resource(), "MCP delegation denied");
+                    }
+                    let token = self.mcp.issue(super::mcp_delegation::McpContext {tenant:scope.tenant_id.clone(),user:scope.user_id.clone(),generation:scope.generation_id.clone(),temporary:scope.temporary,capability:capability_id,resource,expires:Instant::now()+Duration::from_secs(60),parent:token.into()})?;
                     Ok(json!({"token":token,"expires_in":60}))
                 },
                 ToolRequest::McpAuthorize { .. } => anyhow::bail!("MCP delegation denied"),
@@ -730,7 +776,30 @@ mod tests {
             expires: Instant::now() + Duration::from_secs(60),
             pengolo: false,
             temporary: false,
+            workspace: None,
         }
+    }
+
+    #[test]
+    fn workspace_compiler_jobs_reuse_scoped_authority_without_consuming_chat_capacity()
+    -> Result<()> {
+        let registry = Arc::new(Capabilities::default());
+        let make = || {
+            let mut value = scope();
+            value.workspace = Some(WorkspaceScope { project_id: None });
+            value
+        };
+        let token = registry.issue(make())?.retain_until_expiry();
+        for _ in 0..512 {
+            assert_eq!(registry.issue(make())?.retain_until_expiry(), token);
+        }
+        let mut other = make();
+        other.user_id = "foreign_user".into();
+        assert_ne!(registry.issue(other)?.retain_until_expiry(), token);
+        let mut other = make();
+        other.context.role = Some("changed_role".into());
+        assert_ne!(registry.issue(other)?.retain_until_expiry(), token);
+        Ok(())
     }
 
     #[test]

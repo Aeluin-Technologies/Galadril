@@ -15,6 +15,7 @@ pub struct McpContext {
     pub capability: String,
     pub resource: String,
     pub expires: Instant,
+    pub parent: String,
 }
 
 #[derive(Default)]
@@ -38,6 +39,18 @@ impl McpDelegations {
             anyhow::anyhow!("MCP delegation registry unavailable")
         })?;
         grants.retain(|_, entry| entry.expires > now);
+        if let Some((token, _)) = grants.iter().find(|(_, entry)| {
+            entry.expires > now + Duration::from_secs(5) &&
+                entry.parent == context.parent &&
+                entry.capability == context.capability &&
+                entry.resource == context.resource &&
+                entry.user == context.user &&
+                entry.tenant == context.tenant &&
+                entry.generation == context.generation &&
+                entry.temporary == context.temporary
+        }) {
+            return Ok(token.clone());
+        }
         ensure!(grants.len() < 256, "MCP delegation capacity exceeded");
         let token =
             format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -75,6 +88,27 @@ mod tests {
     use super::{McpContext, McpDelegations};
 
     #[test]
+    fn repeated_tools_reuse_live_authority_instead_of_exhausting_the_registry()
+    -> Result<()> {
+        let grants = McpDelegations::default();
+        let scope = || McpContext {
+            tenant: "tenant".into(),
+            user: "user".into(),
+            generation: "run".into(),
+            temporary: false,
+            capability: "core.mcp.workspace".into(),
+            resource: "https://mcp.example/workspace/mcp".into(),
+            expires: Instant::now() + Duration::from_secs(60),
+            parent: "parent".into(),
+        };
+        let token = grants.issue(scope())?;
+        for _ in 0..512 {
+            assert_eq!(grants.issue(scope())?, token);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn delegated_token_is_bound_to_user_mcp_resource_and_expiration()
     -> Result<()> {
         let grants = McpDelegations::default();
@@ -86,6 +120,7 @@ mod tests {
             capability: "fixture.mcp.research".into(),
             resource: "https://mcp.example/research".into(),
             expires: Instant::now() + Duration::from_secs(30),
+            parent: "generation-only-authority".into(),
         })?;
         let context = grants.resolve(
             &token,

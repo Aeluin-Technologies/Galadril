@@ -1336,6 +1336,8 @@ class MailService:
             "thread",
             "attachment",
             "drafts",
+            "draft",
+            "proposal_status",
             "save_draft",
             "label",
         }:

@@ -23,6 +23,13 @@ impl PengoloService {
                 ),
             "MCP generation is no longer active"
         );
+        if capability_id == crate::domain::mcp_workspace::CAPABILITY {
+            ensure!(
+                resource == crate::domain::mcp_workspace::resource(),
+                "MCP resource mismatch"
+            );
+            return Ok(vec!["workspace:use".into()]);
+        }
         let input: SendInput = parse(
             generation
                 .data
@@ -48,6 +55,40 @@ impl PengoloService {
             capability_id,
             resource,
         )
+    }
+
+    pub(crate) async fn authorize_workspace_operation(
+        &self,
+        actor: &Principal<'_>,
+        generation: &Record,
+        temporary: bool,
+        operation: &str,
+    ) -> Result<()> {
+        let chat = self
+            .authorize_generation(actor, generation, temporary)
+            .await?;
+        let input: SendInput = parse(
+            generation
+                .data
+                .get("input")
+                .cloned()
+                .context("Missing generation input")?,
+        )?;
+        let project = match generation.project_id.as_deref() {
+            Some(id) => Some(self.project(actor, id).await?),
+            None => None,
+        };
+        let specialized =
+            execution_context(project.as_ref().unwrap_or(&chat))?.is_some();
+        ensure!(
+            crate::domain::mcp_workspace::generation_operation_allowed(
+                operation,
+                specialized,
+                !input.temporary || input.with_library
+            ),
+            "MCP operation outside generation scope"
+        );
+        Ok(())
     }
 }
 
