@@ -244,6 +244,17 @@ impl PengoloService {
         );
         self.authorize_generation(actor, &generation, input.temporary)
             .await?;
+        let sources: Vec<EvidenceSource> = parse(
+            generation
+                .data
+                .get("evidence")
+                .cloned()
+                .context("Missing recovery provenance")?,
+        )?;
+        ensure!(
+            self.evidence_visible(actor, &sources, false).await?,
+            "Recovery sources are no longer available"
+        );
         let value = self
             .agent_state(actor, &generation, "checkpoint", None)
             .await?;

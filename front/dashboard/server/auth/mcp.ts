@@ -177,3 +177,17 @@ export async function ensureMcpClient(client: McpClient, admin: string) {
     if (JSON.stringify(existing[field]) !== JSON.stringify(definition[field]))
       throw new Error("MCP OAuth registration differs from deployment policy");
 }
+
+/** Keep the pending client challenge server-owned while the browser exits credential fetches. */
+export function pendingMcpChallenge(value: unknown, now = Date.now()) {
+  const pending = record(value);
+  const age = now - Number(pending.createdAt);
+  return typeof pending.challenge === "string" &&
+    pending.challenge.length > 0 &&
+    pending.challenge.length <= 2048 &&
+    Number.isFinite(age) &&
+    age >= 0 &&
+    age < 600000
+    ? pending.challenge
+    : undefined;
+}

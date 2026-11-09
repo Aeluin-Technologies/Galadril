@@ -40,6 +40,7 @@ import {
   parseMcpClients,
   mcpAuthorization,
   mcpConsent,
+  pendingMcpChallenge,
   mcpClientDefinition,
 } from "../server/auth/mcp.ts";
 
@@ -905,4 +906,38 @@ test("JWT verification rejects forged signatures and wrong issuer or audience", 
     verifyAccessToken(otherAudience, "https://issuer.example", resolve),
   );
   assert.equal(jwk.kty, "RSA");
+});
+
+test("password login hands MCP continuation to a same-origin document navigation", async () => {
+  let calls = 0;
+  const destination = await completePasswordSignIn(
+    "https://app.example/identity/self-service/login?flow=fixture",
+    new URLSearchParams({ method: "password" }),
+    "https://app.example",
+    async (url, options) => {
+      calls += 1;
+      assert.equal(new URL(url).origin, "https://app.example");
+      assert.equal(options.mode, "same-origin");
+      return { ok: true, url: "https://app.example/login?mcp=1" };
+    },
+  );
+  assert.equal(calls, 1);
+  assert.equal(destination, "/auth/mcp/continue");
+});
+
+test("MCP continuation only consumes a bounded fresh server-owned challenge", () => {
+  assert.equal(
+    pendingMcpChallenge({ challenge: "fixture", createdAt: 1000 }, 2000),
+    "fixture",
+  );
+  for (const data of [
+    {},
+    { challenge: "", createdAt: 1000 },
+    { challenge: "x".repeat(2049), createdAt: 1000 },
+    { challenge: "fixture", createdAt: 2001 },
+    { challenge: "fixture", createdAt: -600000 },
+    { challenge: "fixture", createdAt: "invalid" },
+  ]) {
+    assert.equal(pendingMcpChallenge(data, 2000), undefined);
+  }
 });

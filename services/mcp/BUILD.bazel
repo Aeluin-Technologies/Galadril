@@ -2,7 +2,7 @@
 load("@rules_python//python:defs.bzl", "py_library")
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push", "oci_load")
 
 py_library(
     name = "lib",
@@ -34,3 +34,12 @@ platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"],
 platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
 oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
 oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-mcp", visibility = ["//visibility:public"])
+
+oci_load(
+    name = "load_local",
+    image = select({
+        "@platforms//cpu:arm64": ":service_arm64",
+        "//conditions:default": ":service_amd64",
+    }),
+    repo_tags = ["local/galadril-mcp:dev"],
+)

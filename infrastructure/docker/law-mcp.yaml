@@ -18,7 +18,8 @@ services:
       MCP_NAMESPACES: '[{"provider":"piste","capability_id":"law.mcp.research","path":"/law/mcp","scopes":["legal:read"],"clients":["galadril-mcp-chatgpt-law"]}]'
       MCP_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
       MCP_OAUTH_ISSUER: ${AUTH_ISSUER:-https://aeluin.gravitalia.com}
-      MCP_JWKS_URL: ${MCP_JWKS_URL:-https://aeluin.gravitalia.com/.well-known/jwks.json}
+      MCP_JWKS_URL: ${MCP_JWKS_URL:-https://127.0.0.1:4444/.well-known/jwks.json}
+      MCP_TLS_CA_FILE: /run/trust/galadril-ca.pem
       MCP_REQUIRED_SCOPES: legal:read
       MCP_ALLOWED_CLIENTS: ${MCP_ALLOWED_CLIENTS:-galadril-mcp-chatgpt-law}
       LAW_PISTE_CREDENTIALS_FILE: /run/secrets/piste-key
@@ -26,6 +27,11 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     volumes:
+      - type: bind
+        source: ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/hydra/ca.pem
+        target: /run/trust/galadril-ca.pem
+        read_only: true
+        bind: {create_host_path: false}
       - type: bind
         source: ${GALADRIL_PISTE_KEY_FILE:-../../.local/piste-key}
         target: /run/secrets/piste-key

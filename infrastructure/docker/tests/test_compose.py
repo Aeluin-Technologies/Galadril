@@ -25,6 +25,10 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_mcp_image_is_published_by_the_ci_entrypoint(self) -> None:
+        publication = (ROOT.parents[1] / "build/multirun.bzl").read_text()
+        self.assertIn('"//services/mcp:push"', publication)
+
     def test_gateway_enables_the_available_scribe_runtime_by_default(
         self,
     ) -> None:

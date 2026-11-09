@@ -29,6 +29,8 @@ function trustedTarget(value: unknown, origin: string, paths: string[]) {
 function navigationPath(response: NavigationResponse, origin: string) {
   if (!response.ok) throw new Error("Authentication unavailable");
   const url = trustedTarget(response.url, origin, ["/login", "/"]);
+  if (url.pathname === "/login" && url.search === "?mcp=1")
+    return "/auth/mcp/continue";
   if (
     url.pathname === "/login" &&
     !url.searchParams.get("flow") &&
@@ -105,7 +107,8 @@ export async function beginSignIn(
   if (!result.local)
     return { path: target.pathname + target.search, external: true };
   const flow = await request(target.href, requestOptions());
-  return { path: navigationPath(flow, origin), external: false };
+  const path = navigationPath(flow, origin);
+  return { path, external: path === "/auth/mcp/continue" };
 }
 
 /** Fetch processes Ory's cookies while native form fields preserve its CSRF contract. */

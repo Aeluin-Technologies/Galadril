@@ -16,6 +16,10 @@ import type { IdentityForm } from "~/types/auth";
 /** Keeps authentication transitions together so each form retains its native submission contract. */
 export function useSignIn() {
   const route = useRoute();
+  onMounted(async () => {
+    if (route.query.mcp === "1")
+      await navigateTo("/auth/mcp/continue", { external: true });
+  });
   const submitting = ref(false);
   const mfa = computed(() => route.query.mfa === "1");
   type PasskeyStep =
@@ -57,9 +61,13 @@ export function useSignIn() {
         startAuthentication,
       });
       stage = "verification";
-      await navigateTo(
-        await completePasskeySignIn(proof, window.location.origin),
+      const destination = await completePasskeySignIn(
+        proof,
+        window.location.origin,
       );
+      await navigateTo(destination, {
+        external: destination === "/auth/mcp/continue",
+      });
     } catch (error) {
       const failure = passkeyFailure(error);
       loginError.value = failure.message;
@@ -155,7 +163,10 @@ export function useSignIn() {
         typeof route.query.flow === "string"
       )
         await loadLocalForm(route.query.flow);
-      else await navigateTo(destination);
+      else
+        await navigateTo(destination, {
+          external: destination === "/auth/mcp/continue",
+        });
     } catch {
       loginError.value = "Sign-in could not be completed. Please try again.";
       console.warn(JSON.stringify({ event: "auth.navigation.rejected" }));

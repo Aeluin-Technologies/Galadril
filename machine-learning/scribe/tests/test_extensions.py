@@ -616,3 +616,27 @@ async def test_plugin_failure_preserves_other_tools_without_repeating_actions() 
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
+
+
+def test_nested_extension_failure_diagnostics_never_include_error_messages() -> (
+    None
+):
+    from galadril_scribe.extensions import failure_types
+
+    private = "synthetic-private-value-that-must-not-be-logged"
+    error = ExceptionGroup(
+        private,
+        [ValueError(private), ExceptionGroup(private, [RuntimeError(private)])],
+    )
+    assert failure_types(error) == ("ValueError", "RuntimeError")
+    assert private not in repr(failure_types(error))
+    assert (
+        len(
+            failure_types(
+                ExceptionGroup(
+                    private, [ValueError(private) for _ in range(100)]
+                )
+            )
+        )
+        <= 8
+    )

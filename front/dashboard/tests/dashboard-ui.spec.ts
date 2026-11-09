@@ -2227,7 +2227,7 @@ test("specialist report citations open an authorized panel on the right", async 
   await expect(panel).toContainText("Rapport vérifiable.");
   await expect(panel.locator(".p-markdown p").first()).toHaveCSS(
     "font-size",
-    "14px",
+    "15px",
   );
   const heading = panel.getByRole("heading", {
     name: "Specialist report",
@@ -2297,7 +2297,7 @@ test("colored task cards keep model wording and animate their checked state", as
     name: "Pengolo response",
     exact: true,
   });
-  await expect(article.locator("table")).toHaveCSS("font-size", "13px");
+  await expect(article.locator("table")).toHaveCSS("font-size", "14px");
   await expect(article.locator("td").first()).toHaveCSS("padding-top", "8px");
   await expect(article.locator(".p-tone-warning")).toHaveText("À vérifier");
   await expect(article.locator(".p-tone-warning")).toHaveCSS(
@@ -2322,4 +2322,189 @@ test("colored task cards keep model wording and animate their checked state", as
     path: info.outputPath("colored-task-cards.png"),
     animations: "disabled",
   });
+});
+
+for (const entry of ["document", "password"] as const) {
+  test(`MCP callback continues through document navigation after ${entry} sign-in`, async ({
+    page,
+  }) => {
+    await mockDashboard(page);
+    let continuations = 0;
+    await page.route("**/auth/mcp/continue", (route) => {
+      expect(route.request().isNavigationRequest()).toBe(true);
+      continuations += 1;
+      return route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>MCP callback</title><h1>MCP client callback</h1>",
+      });
+    });
+    if (entry === "document") {
+      await page.goto("/login?mcp=1");
+    } else {
+      await page.addInitScript(() => {
+        const request = window.fetch.bind(window);
+        window.fetch = async (input, options) => {
+          const response = await request(input, options);
+          const target = new URL(
+            input instanceof Request ? input.url : String(input),
+            location.origin,
+          );
+          if (
+            target.pathname === "/identity/self-service/login" &&
+            response.ok
+          ) {
+            if (options?.mode !== "same-origin")
+              throw new Error("Credentials must stay same-origin");
+            Object.defineProperty(response, "url", {
+              value: `${location.origin}/login?mcp=1`,
+            });
+          }
+          return response;
+        };
+      });
+      await page.goto("/login");
+      await page
+        .getByRole("textbox", { name: "Work email", exact: true })
+        .fill("ui@example.test");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page
+        .locator('input[name="password"]')
+        .fill("Fixture-only-password");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    }
+    await expect(
+      page.getByRole("heading", { name: "MCP client callback" }),
+    ).toBeVisible();
+    expect(continuations).toBe(1);
+  });
+}
+
+test("Pengolo typography keeps user messages, responses and tables proportionate", async ({
+  page,
+}, info) => {
+  const chat = chatFixture();
+  const record = {
+    ...chat,
+    data: {
+      ...chat.data,
+      messages: {
+        items: [
+          {
+            ...chat.data.messages.items[0]!,
+            id: "user-fixture",
+            role: "user",
+            text: "Pouvez-vous présenter ces résultats ?",
+          },
+          {
+            ...chat.data.messages.items[0]!,
+            text: "Voici les résultats vérifiés.\n\n| Élément | Résultat |\n| --- | --- |\n| Exemple | Donnée fictive |",
+          },
+        ],
+        after: null,
+      },
+    },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chat.id);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(page.locator(".p-user-text")).toHaveCSS("font-size", "15px");
+    await expect(page.locator(".p-message.assistant .p-markdown p")).toHaveCSS(
+      "font-size",
+      "15px",
+    );
+    await expect(page.locator(".p-markdown table")).toHaveCSS(
+      "font-size",
+      "14px",
+    );
+  }
+  await page.screenshot({
+    path: info.outputPath("pengolo-typography-mobile.png"),
+    animations: "disabled",
+  });
+});
+
+test("deleting a generated attachment keeps the answer and report citation visible", async ({
+  page,
+}) => {
+  const base = chatFixture();
+  const message = {
+    ...base.data.messages.items[0]!,
+    fileIds: ["c".repeat(32)],
+    text:
+      "Document généré. [PDF de démonstration](/pengolo/files/" +
+      "c".repeat(32) +
+      "). Voir le [rapport](#report-" +
+      "a".repeat(64) +
+      ").",
+  };
+  const record = {
+    ...base,
+    data: { ...base.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + record.id);
+  const answer = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  await expect(answer).toContainText("Document généré.");
+  await expect(
+    answer.getByRole("link", { name: "rapport", exact: true }),
+  ).toBeVisible();
+  await answer.getByRole("button", { name: "Document", exact: true }).click();
+  const preview = page.getByRole("dialog", { name: "Document", exact: true });
+  await expect(preview).toContainText(
+    "This document is unavailable or you no longer have access.",
+  );
+  await expect(answer).toContainText("Document généré.");
+  await preview
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await answer
+    .getByRole("link", { name: "PDF de démonstration", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "PDF de démonstration", exact: true }),
+  ).toContainText("This document is unavailable or you no longer have access.");
+});
+
+test("revoked source leaves a message placeholder without report or content", async ({
+  page,
+}) => {
+  const base = chatFixture();
+  const message = {
+    id: "d".repeat(32),
+    role: "assistant",
+    text: "",
+    sourceUnavailable: true,
+  };
+  const record = {
+    ...base,
+    data: { ...base.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + record.id);
+  const answer = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  await expect(answer).toContainText(
+    "This message depends on a source that is no longer available.",
+  );
+  await expect(
+    answer.getByRole("button", { name: "Copy response", exact: true }),
+  ).toHaveCount(0);
 });

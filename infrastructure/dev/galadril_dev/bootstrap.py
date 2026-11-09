@@ -13,6 +13,7 @@ import secrets
 from io import StringIO
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 import yaml
 from dotenv import dotenv_values
@@ -47,6 +48,8 @@ SECRET_NAMES = (
     "LAKEFS_SECRET_ACCESS_KEY",
     "LAKEFS_AUTH_ENCRYPT_SECRET_KEY",
     "DOCUMENT_COMPILER_S3_SECRET_KEY",
+    "PENGOLO_DOCUMENT_VAULT_KEY",
+    "DOCUMENT_COMPILER_BINDING_KEY",
 )
 
 
@@ -88,6 +91,49 @@ def parse_environment(path: Path) -> dict[str, str]:
     if any(value is None for value in values.values()):
         raise BootstrapError("Every dotenv setting must have an explicit value")
     return {key: value for key, value in values.items() if value is not None}
+
+
+def public_origin(value: str) -> str:
+    """A tunnel may select a public HTTPS origin, never a credential-bearing URL."""
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise BootstrapError("Public origin must be a canonical HTTPS origin")
+    return value.rstrip("/")
+
+
+def tunnel_listener(resources: dict[str, object], origin: str) -> None:
+    """TLS ends at the tunnel; only its shared loopback namespace may reach this listener."""
+    listener = copy.deepcopy(
+        next(
+            item
+            for item in records(resources["listeners"])
+            if item["name"] == "public"
+        )
+    )
+    listener["name"] = "cloudflare_app"
+    listener["address"] = {
+        "socket_address": {"address": "127.0.0.1", "port_value": 8099}
+    }
+    for chain in records(listener["filter_chains"]):
+        chain.pop("transport_socket", None)
+        for network_filter in records(chain["filters"]):
+            manager = mapping(network_filter["typed_config"])
+            manager["stat_prefix"] = "cloudflare_app"
+            route = mapping(manager["route_config"])
+            for host in records(route["virtual_hosts"]):
+                host["domains"] = [urlsplit(origin).netloc]
+    records_list = resources["listeners"]
+    if not isinstance(records_list, list):
+        raise BootstrapError("Invalid listeners")
+    records_list.append(listener)
 
 
 class Bootstrap:
@@ -150,6 +196,9 @@ class Bootstrap:
                     incoming[name] = defaults[name]
         preserved.update(incoming)
         env.update(preserved)
+        tunnel = self.root / ".local/cloudflared-token"
+        if tunnel.is_file():
+            env["GALADRIL_UTILS_TUNNEL_TOKEN_FILE"] = str(tunnel)
         for name in SECRET_NAMES:
             if preserved.get(name):
                 continue
@@ -157,6 +206,8 @@ class Bootstrap:
                 env[name] = base64.urlsafe_b64encode(
                     secrets.token_bytes(32)
                 ).decode()
+            elif name == "PENGOLO_DOCUMENT_VAULT_KEY":
+                env[name] = base64.b64encode(secrets.token_bytes(32)).decode()
             elif name in {"POLIS_ENCRYPTION_KEY", "KRATOS_CIPHER_SECRET"}:
                 env[name] = secrets.token_hex(16)
             else:
@@ -183,7 +234,11 @@ class Bootstrap:
             raise BootstrapError("Invalid Compose project name")
         env.update(
             {
-                "AUTH_PUBLIC_ORIGIN": "https://localhost:8080",
+                "AUTH_PUBLIC_ORIGIN": public_origin(
+                    env.get(
+                        "GALADRIL_DEV_PUBLIC_ORIGIN", "https://localhost:8080"
+                    )
+                ),
                 "AUTH_LOCAL_LOGIN_ENABLED": "true",
                 "COMPOSE_PROFILES": "local-auth,document-compiler",
                 "GALADRIL_IDENTITY_DIR": str(self.state / "identity"),
@@ -194,6 +249,11 @@ class Bootstrap:
                 ),
                 "DOCUMENT_COMPILER_S3_BUCKET": "galadril-document-compiler",
             }
+        )
+        env["AUTH_ISSUER"] = (
+            env["AUTH_PUBLIC_ORIGIN"] + "/"
+            if env.get("GALADRIL_DEV_PUBLIC_ORIGIN")
+            else "https://aeluin.gravitalia.com"
         )
         env.setdefault(
             "DOCUMENT_COMPILER_S3_ACCESS_KEY",
@@ -224,8 +284,8 @@ class Bootstrap:
             read(signer / "jwks.json")
         self._utils(env, preserved)
         self._connectors(env)
-        self._envoy()
-        self._compose()
+        self._envoy(env)
+        self._compose(env)
         self._storage_policy(env)
         private_directory(self.state / "document-compiler/bundle")
         write(env_path, environment_text(env))
@@ -263,6 +323,15 @@ class Bootstrap:
         return destination
 
     def compose_arguments(self) -> tuple[str, ...]:
+        # Optional credentials enable the service without breaking fresh clones.
+        mcp = (
+            ("-f", str(self.root / "infrastructure/docker/law-mcp.yaml"))
+            if all(
+                (self.root / ".local" / name).is_file()
+                for name in ("piste-key", "piste-oauth-key")
+            )
+            else ()
+        )
         return (
             "docker",
             "compose",
@@ -274,6 +343,12 @@ class Bootstrap:
             str(self.root / "infrastructure/docker/docker-compose.yaml"),
             "-f",
             str(self.root / "infrastructure/docker/document-compiler.yaml"),
+            *mcp,
+            *(
+                ("--profile", "tunnel")
+                if (self.root / ".local/cloudflared-token").is_file()
+                else ()
+            ),
             "-f",
             str(self.state / "compose.yaml"),
             "--profile",
@@ -411,7 +486,7 @@ class Bootstrap:
             yaml.safe_dump(config, sort_keys=False).encode(),
         )
 
-    def _envoy(self) -> None:
+    def _envoy(self, env: dict[str, str]) -> None:
         config = mapping(
             yaml.safe_load(read(self.root / "infrastructure/envoy/local.yaml"))
         )
@@ -430,6 +505,9 @@ class Bootstrap:
                         del provider["remote_jwks"]
                         provider["local_jwks"] = {"inline_string": jwks}
                         providers["local_development"] = provider
+                        mapping(providers["identity"])["issuer"] = env[
+                            "AUTH_ISSUER"
+                        ]
                         for rule in records(auth["rules"]):
                             rule["requires"] = {
                                 "requires_any": {
@@ -439,12 +517,15 @@ class Bootstrap:
                                     ]
                                 }
                             }
+        origin = env.get("GALADRIL_DEV_PUBLIC_ORIGIN")
+        if origin:
+            tunnel_listener(resources, public_origin(origin))
         write(
             self.state / "envoy.yaml",
             yaml.safe_dump(config, sort_keys=False).encode(),
         )
 
-    def _compose(self) -> None:
+    def _compose(self, env: dict[str, str]) -> None:
         def bind(source: Path, target: str) -> dict[str, object]:
             return {
                 "type": "bind",
@@ -528,6 +609,9 @@ class Bootstrap:
             mapping(service)["labels"] = {
                 "galadril.dev/tls-revision": "${GALADRIL_TLS_REVISION}"
             }
+        issuer = env["AUTH_ISSUER"]
+        mapping(services["studio"])["environment"] = {"AUTH_ISSUER": issuer}
+        mapping(services["hydra"])["environment"] = {"URLS_SELF_ISSUER": issuer}
         write(
             self.state / "compose.yaml",
             yaml.safe_dump(overlay, sort_keys=False).encode(),

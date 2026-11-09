@@ -2,11 +2,18 @@
 
 import json
 import os
+import ssl
+import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from galadril_mcp_core.auth import MCPAuth
 from galadril_mcp_core.client import (
     MCPUnavailable,
@@ -38,6 +45,52 @@ class _Verifier:
 
 
 class LawMCPTest(unittest.IsolatedAsyncioTestCase):
+    def test_internal_jwks_ca_preserves_certificate_and_hostname_verification(
+        self,
+    ) -> None:
+        from galadril_mcp_service.server import client_tls_context
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name(
+            [
+                x509.NameAttribute(
+                    x509.NameOID.COMMON_NAME, "Fixture MCP internal authority"
+                )
+            ]
+        )
+        now = datetime.now(UTC)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=1))
+            .add_extension(
+                x509.BasicConstraints(ca=True, path_length=0), critical=True
+            )
+            .sign(key, hashes.SHA256())
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ca.pem"
+            path.write_bytes(
+                certificate.public_bytes(serialization.Encoding.PEM)
+            )
+            with patch.dict(os.environ, {"MCP_TLS_CA_FILE": str(path)}):
+                context = client_tls_context()
+            self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            self.assertIn(
+                "Fixture MCP internal authority", str(context.get_ca_certs())
+            )
+            path.write_text("invalid authority")
+            with (
+                patch.dict(os.environ, {"MCP_TLS_CA_FILE": str(path)}),
+                self.assertRaises(ssl.SSLError),
+            ):
+                client_tls_context()
+
     def test_tool_errors_and_oversized_or_malformed_results_are_not_evidence(
         self,
     ) -> None:

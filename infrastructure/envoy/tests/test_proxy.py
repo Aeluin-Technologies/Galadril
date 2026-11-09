@@ -432,7 +432,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                 keys.start()
             if transient_studio:
                 assert keys is not None
-                script = "const calls=new Map();require('http').createServer((req,res)=>{const key=req.method+req.url;const n=(calls.get(key)||0)+1;calls.set(key,n);res.setHeader('x-fixture-attempt',String(n));res.statusCode=n===1||req.url.endsWith('failed.js')?503:200;res.end('fixture');}).listen(3000,'127.0.0.1')"
+                script = "const calls=new Map();require('http').createServer((req,res)=>{if(req.url==='/.well-known/oauth-authorization-server'){res.setHeader('x-fixture-studio','1');res.end('oauth fixture');return;}const key=req.method+req.url;const n=(calls.get(key)||0)+1;calls.set(key,n);res.setHeader('x-fixture-attempt',String(n));res.statusCode=n===1||req.url.endsWith('failed.js')?503:200;res.end('fixture');}).listen(3000,'127.0.0.1')"
                 result = keys.exec_run(["node", "-e", script], detach=True)
                 if result.exit_code not in (None, 0):
                     raise RuntimeError("Studio fixture startup failed")
@@ -491,6 +491,17 @@ class ProxyIntegrationTest(unittest.TestCase):
             if keys is not None:
                 keys.remove(force=True)
             backend.remove(force=True)
+
+    def test_oauth_discovery_reaches_the_dashboard_without_authentication(
+        self,
+    ) -> None:
+        with self.proxy("local", transient_studio=True) as ports:
+            with httpx.Client(verify=self.context(), timeout=10) as client:
+                response = client.get(
+                    f"https://{ports[8080]}/.well-known/oauth-authorization-server"
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("x-fixture-studio"), "1")
 
     def test_static_asset_recovery_never_replays_authentication(self) -> None:
         with (

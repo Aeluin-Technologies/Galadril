@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import shutil
 import stat
@@ -87,6 +88,21 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             connectors["spicedb"]["token"], env["SPICEDB_GRPC_PRESHARED_KEY"]
         )
         self.assertFalse((state / "templates").exists())
+
+    async def test_document_secrets_use_compiler_formats_and_survive_reinitialization(
+        self,
+    ) -> None:
+        await self.bootstrap.initialize()
+        environment = self.bootstrap.environment()
+        vault = environment["PENGOLO_DOCUMENT_VAULT_KEY"]
+        binding = environment["DOCUMENT_COMPILER_BINDING_KEY"]
+        self.assertEqual(len(base64.b64decode(vault, validate=True)), 32)
+        self.assertEqual(len(bytes.fromhex(binding)), 32)
+        self.assertNotEqual(vault, binding)
+        await self.bootstrap.initialize()
+        repeated = self.bootstrap.environment()
+        self.assertEqual(repeated["PENGOLO_DOCUMENT_VAULT_KEY"], vault)
+        self.assertEqual(repeated["DOCUMENT_COMPILER_BINDING_KEY"], binding)
 
     async def test_reinitialization_preserves_keys_credentials_and_provider_key(
         self,
@@ -323,6 +339,100 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BootstrapError):
             await self.bootstrap.initialize()
         self.assertEqual(target.read_text(), "preserve")
+
+    async def test_public_tunnel_origin_keeps_local_issuer_separate(
+        self,
+    ) -> None:
+        await self.bootstrap.initialize()
+        self.bootstrap.update_environment(
+            {"GALADRIL_DEV_PUBLIC_ORIGIN": "https://galadril.example"}
+        )
+        await self.bootstrap.initialize()
+        self.assertEqual(
+            self.bootstrap.environment()["AUTH_PUBLIC_ORIGIN"],
+            "https://galadril.example",
+        )
+        self.assertEqual(
+            self.bootstrap.environment()["AUTH_ISSUER"],
+            "https://galadril.example/",
+        )
+        config = yaml.safe_load(
+            (self.bootstrap.state / "envoy.yaml").read_text()
+        )
+        listener = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "cloudflare_app"
+        )
+        self.assertEqual(
+            listener["address"]["socket_address"],
+            {"address": "127.0.0.1", "port_value": 8099},
+        )
+        chain = listener["filter_chains"][0]
+        self.assertNotIn("transport_socket", chain)
+        manager = chain["filters"][0]["typed_config"]
+        self.assertEqual(
+            manager["route_config"]["virtual_hosts"][0]["domains"],
+            ["galadril.example"],
+        )
+        auth = next(
+            item["typed_config"]
+            for item in manager["http_filters"]
+            if item["name"] == "envoy.filters.http.jwt_authn"
+        )
+        self.assertEqual(
+            auth["providers"]["identity"]["issuer"], "https://galadril.example/"
+        )
+        self.assertEqual(
+            auth["providers"]["local_development"]["issuer"],
+            "https://aeluin.gravitalia.com",
+        )
+        overlay = yaml.safe_load(
+            (self.bootstrap.state / "compose.yaml").read_text()
+        )
+        self.assertEqual(
+            overlay["services"]["hydra"]["environment"]["URLS_SELF_ISSUER"],
+            "https://galadril.example/",
+        )
+        self.assertEqual(
+            overlay["services"]["studio"]["environment"]["AUTH_ISSUER"],
+            "https://galadril.example/",
+        )
+
+    async def test_configured_tunnel_reuses_connector_without_email_tracking(
+        self,
+    ) -> None:
+        token = self.root / ".local/cloudflared-token"
+        token.parent.mkdir(parents=True, exist_ok=True)
+        token.write_text("synthetic-tunnel-token")
+        token.chmod(0o600)
+        await self.bootstrap.initialize()
+        args = self.bootstrap.compose_arguments()
+        self.assertIn("tunnel", args)
+        self.assertNotIn("email-tracking", args)
+        self.assertEqual(
+            self.bootstrap.environment()["GALADRIL_UTILS_TUNNEL_TOKEN_FILE"],
+            str(token),
+        )
+        self.assertNotIn("synthetic-tunnel-token", " ".join(args))
+
+    async def test_configured_mcp_is_included_without_exposing_credentials(
+        self,
+    ) -> None:
+        await self.bootstrap.initialize()
+        self.assertNotIn(
+            str(self.root / "infrastructure/docker/law-mcp.yaml"),
+            self.bootstrap.compose_arguments(),
+        )
+        for name in ("piste-key", "piste-oauth-key"):
+            secret = self.root / ".local" / name
+            secret.write_text("synthetic-secret")
+            secret.chmod(0o600)
+        args = self.bootstrap.compose_arguments()
+        self.assertIn(
+            str(self.root / "infrastructure/docker/law-mcp.yaml"), args
+        )
+        self.assertNotIn("synthetic-secret", " ".join(args))
 
     async def test_cli_compose_arguments_use_managed_state_and_compiler_profile(
         self,

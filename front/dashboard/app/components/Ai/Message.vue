@@ -162,6 +162,7 @@ const artifacts = computed(
   () => props.message.parts?.filter((part) => part.kind === "artifact") ?? [],
 );
 const copied = ref(false);
+const documentPreview = shallowRef<{ id: string; name: string } | null>(null);
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 let copyVersion = 0;
 function resetCopy() {
@@ -176,6 +177,7 @@ const feedbackTimers = new Map<
 const actionNotice = ref("");
 let actionVersion = 0;
 function resetFeedback() {
+  documentPreview.value = null;
   resetCopy();
   actionVersion++;
   for (const [button, timer] of feedbackTimers) {
@@ -205,6 +207,18 @@ async function copy() {
 async function action(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const fileLink = target.closest<HTMLAnchorElement>("a[href]");
+  const fileId = fileLink?.pathname.match(
+    /^\/pengolo\/files\/([a-f0-9]{32})$/,
+  )?.[1];
+  if (fileLink?.origin === window.location.origin && fileId) {
+    event.preventDefault();
+    documentPreview.value = {
+      id: fileId,
+      name: fileLink.textContent?.trim() || t("pengolo.documentSource"),
+    };
+    return;
+  }
   const reportLink = target.closest<HTMLAnchorElement>(
     "a[data-specialist-report]",
   );
@@ -329,6 +343,9 @@ async function checkTask(event: Event) {
     :aria-label="message.role === 'user' ? 'Your message' : 'Pengolo response'"
   >
     <div class="p-message-body">
+      <p v-if="message.sourceUnavailable" class="text-muted" role="status">
+        {{ $t("pengolo.sourceUnavailable") }}
+      </p>
       <AiRunActivity
         v-if="activityRun && !streaming"
         :operations="[
@@ -499,6 +516,12 @@ async function checkTask(event: Event) {
       :generation-id="message.generationId"
       :temporary="ui.temporary"
       @close="specialistReport = ''"
+    />
+    <LazyAiDocumentPreview
+      v-if="documentPreview"
+      :file="documentPreview"
+      :temporary-session="ui.temporary ? chats.active?.id : undefined"
+      @close="documentPreview = null"
     />
   </article>
 </template>

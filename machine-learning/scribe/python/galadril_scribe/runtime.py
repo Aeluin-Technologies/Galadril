@@ -122,7 +122,10 @@ from galadril_scribe.extensions import (
     ToolExtension,
     ToolRegistry,
 )
-from galadril_scribe.instructions import generation_instructions
+from galadril_scribe.instructions import (
+    DOCUMENT_GENERATION_INSTRUCTIONS,
+    generation_instructions,
+)
 from galadril_scribe.interactions import InteractionBroker
 from galadril_scribe.media import StorageMedia
 from galadril_scribe.media import content as content
@@ -1516,6 +1519,13 @@ class Runtime:
                         "outcomes array of up to four conditional consequences with the same label, detail and source fields. "
                         "Cite sources in surrounding Markdown."
                     )
+                    if (
+                        request.library_enabled
+                        or request.execution_context is not None
+                    ):
+                        writing_mission += (
+                            "\n" + DOCUMENT_GENERATION_INSTRUCTIONS
+                        )
                     selected_context = request.execution_context
                     if selected_context is not None:
                         writing_mission += (

@@ -29,6 +29,7 @@ def main() -> None:
                 ("project_administration_representative", True),
                 ("project_court_name", True),
                 ("project_court_registry_address", True),
+                ("project_document_date", True),
                 ("project_case_number", False),
                 ("project_signature_city", False),
                 ("profile_first_name", True),

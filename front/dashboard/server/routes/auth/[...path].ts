@@ -38,7 +38,7 @@ import {
   requireRefreshToken,
 } from "../../auth/renewal.ts";
 import { ensureClient } from "../../auth/client.ts";
-import { mcpConsent } from "../../auth/mcp.ts";
+import { mcpConsent, pendingMcpChallenge } from "../../auth/mcp.ts";
 import { identityCookie, localIdentity } from "../../auth/local.ts";
 import { record, records, text } from "#shared/records.ts";
 
@@ -62,6 +62,7 @@ const operations = new Set([
   "polis/callback",
   "consent",
   "callback",
+  "mcp/continue",
   "refresh",
   "step-up",
 ]);
@@ -187,6 +188,30 @@ export default defineEventHandler(async (event) => {
         ),
       });
       return { expiresAt: result.expiresAt };
+    }
+    if (path === "mcp/continue" && event.method === "GET") {
+      const claims = await verifyAccessToken(
+        getCookie(event, tokenCookie),
+        config.issuer,
+        config.keys,
+      );
+      await activeUser(config.directory, claims.tenant_id, claims.sub);
+      await config.passkeys.check(claims);
+      const pending = await useSession(event, {
+        name: "__Host-galadril-mcp-login",
+        password: config.sessionSecret,
+        maxAge: 600,
+        cookie,
+      });
+      const loginChallenge = pendingMcpChallenge(pending.data);
+      if (!loginChallenge) throw new Error("Missing MCP continuation");
+      await pending.clear();
+      return sendRedirect(
+        event,
+        "/auth/login?" +
+          new URLSearchParams({ login_challenge: loginChallenge }).toString(),
+        303,
+      );
     }
     const session = await useSession(event, {
       name: "__Host-galadril-flow",
@@ -721,20 +746,9 @@ export default defineEventHandler(async (event) => {
         maxAge: 600,
         cookie,
       });
-      const pendingChallenge = pending.data.challenge;
-      const pendingAge = Date.now() - Number(pending.data.createdAt);
+      if (pendingMcpChallenge(pending.data))
+        return sendRedirect(event, "/login?mcp=1", 303);
       await pending.clear();
-      if (
-        typeof pendingChallenge === "string" &&
-        pendingChallenge.length <= 2048 &&
-        pendingAge >= 0 &&
-        pendingAge < 600000
-      )
-        return sendRedirect(
-          event,
-          `/auth/login?${new URLSearchParams({ login_challenge: pendingChallenge })}`,
-          303,
-        );
       return sendRedirect(event, "/", 303);
     }
     throw new Error("Invalid authentication route");

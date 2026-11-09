@@ -14,7 +14,7 @@
     },
     {
       "path": "information.tex",
-      "data": "\\DefinirRequerant{<<galadril:profile_first_name>> <<galadril:profile_last_name>>}\n  {<<galadril:profile_title>>}{<<galadril:profile_address>>}\n  {<<galadril:profile_email>>}{<<galadril:profile_capacity>>}\n\\DefinirDefendeur{<<galadril:project_administration_name>>}{}\n  {<<galadril:project_administration_address>>}{<<galadril:project_administration_representative>>}\n\\DefinirJuridiction{<<galadril:project_court_name>>}{<<galadril:project_court_name>>}\n  {<<galadril:project_court_registry_address>>}\n\\DeclarerDossier{courant}{<<galadril:project_case_number>>}{fond}\n\\ChoisirDossier{courant}\n\\VilleSignature{<<galadril:project_signature_city>>}\n"
+      "data": "\\DefinirRequerant{<<galadril:profile_first_name>> <<galadril:profile_last_name>>}\n  {<<galadril:profile_title>>}{<<galadril:profile_address>>}\n  {<<galadril:profile_email>>}{<<galadril:profile_capacity>>}\n\\DefinirDefendeur{<<galadril:project_administration_name>>}{}\n  {<<galadril:project_administration_address>>}{<<galadril:project_administration_representative>>}\n\\DefinirJuridiction{<<galadril:project_court_name>>}{<<galadril:project_court_name>>}\n  {<<galadril:project_court_registry_address>>}\n\\DeclarerDossier{courant}{<<galadril:project_case_number>>}{fond}\n\\ChoisirDossier{courant}\n\\VilleSignature{<<galadril:project_signature_city>>}\n\\DateDepot{<<galadril:project_document_date>>}\n"
     },
     {
       "path": "main.tex",
@@ -51,6 +51,10 @@
       "required": true
     },
     "project_court_registry_address": {
+      "kind": "text",
+      "required": true
+    },
+    "project_document_date": {
       "kind": "text",
       "required": true
     },

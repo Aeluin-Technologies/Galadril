@@ -64,6 +64,23 @@ _TOOL_RECOVERY_SECONDS = 15.0
 logger = structlog.get_logger(__name__)
 
 
+def failure_types(error: BaseException) -> tuple[str, ...]:
+    """Expose bounded leaf categories without logging private exception messages."""
+    pending = [error]
+    result: list[str] = []
+    visits = 0
+    while pending and visits < 32 and len(result) < 8:
+        current = pending.pop()
+        visits += 1
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(reversed(current.exceptions[: 32 - visits]))
+        else:
+            name = type(current).__name__
+            if name not in result:
+                result.append(name)
+    return tuple(result)
+
+
 def _prefix(identifier: str) -> str:
     return identifier.replace(".", "_").replace("-", "_")
 
@@ -217,6 +234,7 @@ class AvailableToolset(WrapperToolset[Dependencies]):
                     "scribe.extension.failed",
                     capability_id=self.capability_id,
                     error_type=type(error).__name__,
+                    error_types=failure_types(error),
                 )
                 if ctx.deps.warning is not None:
                     await ctx.deps.warning("tool")

@@ -93,6 +93,34 @@ class PackagedTemplatesTest(unittest.TestCase):
             any(plugin == "law" for plugin, _ in registry.services())
         )
 
+    def test_law_date_is_an_explicit_required_case_binding(self) -> None:
+        templates = PluginRegistry.discover().document_templates()
+        entry = next(item for item in templates if item["plugin_id"] == "law")
+        template = entry["template"]
+        assert isinstance(template, dict)
+        variables = template["variables"]
+        assert isinstance(variables, dict)
+        self.assertEqual(
+            variables.get("project_document_date"),
+            {"kind": "text", "required": True, "choices": []},
+        )
+        assets = template["assets"]
+        assert isinstance(assets, list)
+        information = next(
+            item
+            for item in assets
+            if isinstance(item, dict) and item["path"] == "information.tex"
+        )
+        data = information["data"]
+        assert isinstance(data, list)
+        self.assertTrue(
+            all(isinstance(value, int) and 0 <= value <= 255 for value in data)
+        )
+        self.assertIn(
+            rb"\DateDepot{<<galadril:project_document_date>>}",
+            bytes(value for value in data if isinstance(value, int)),
+        )
+
     def test_packaged_classes_are_discovered_with_trusted_provenance(
         self,
     ) -> None:

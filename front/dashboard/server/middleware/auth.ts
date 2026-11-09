@@ -8,7 +8,26 @@ import { errors as jwtErrors } from "jose";
 import { assertActiveSession, sessionLifetime } from "../auth/renewal.ts";
 
 export default defineEventHandler(async (event) => {
-  const path = getRequestURL(event).pathname;
+  const request = getRequestURL(event);
+  const path = request.pathname;
+  if (
+    event.method === "GET" &&
+    path === "/login" &&
+    process.env.AUTH_PUBLIC_ORIGIN
+  ) {
+    const canonical = new URL(process.env.AUTH_PUBLIC_ORIGIN);
+    if (
+      canonical.protocol !== "https:" ||
+      canonical.username ||
+      canonical.password
+    )
+      throw new Error("Invalid public authentication origin");
+    // Compare hosts because the trusted tunnel terminates HTTPS before this hop.
+    if (request.host !== canonical.host) {
+      setResponseHeader(event, "Cache-Control", "private, no-store, max-age=0");
+      return sendRedirect(event, new URL("/login", canonical.origin).href, 303);
+    }
+  }
   if (isPublicRoute(path)) return;
   setResponseHeader(event, "Cache-Control", "private, no-store, max-age=0");
   setResponseHeader(event, "Vary", "Cookie, Authorization");

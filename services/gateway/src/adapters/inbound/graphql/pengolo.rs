@@ -184,6 +184,8 @@ pub struct ToolCheckpoint {
 #[graphql(name = "PengoloMessage")]
 pub struct Message {
     #[serde(default)]
+    pub source_unavailable: bool,
+    #[serde(default)]
     pub tool_checkpoints: Vec<ToolCheckpoint>,
     #[serde(default)]
     pub email_drafts: Vec<String>,

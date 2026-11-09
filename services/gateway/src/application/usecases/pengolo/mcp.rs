@@ -51,6 +51,32 @@ impl PengoloService {
     }
 }
 
+/// Private contexts accept only MCP bindings that can be attenuated at
+/// execution.
+pub(super) fn mediated_tools(
+    catalog: &CapabilityCatalog,
+    selected: &[String],
+    context: Option<&str>,
+) -> bool {
+    selected.iter().all(|id| {
+        let Some(capability) =
+            catalog.capabilities.iter().find(|item| &item.id == id)
+        else {
+            return false;
+        };
+        if capability.kind != CapabilityKind::Mcp {
+            return true;
+        }
+        capability
+            .parameters_schema
+            .pointer("/x-galadril-mcp/resource")
+            .and_then(Value::as_str)
+            .is_some_and(|resource| {
+                mcp_binding(catalog, selected, context, id, resource).is_ok()
+            })
+    })
+}
+
 /// Derives authority from installed metadata after live generation checks.
 fn mcp_binding(
     catalog: &CapabilityCatalog,
@@ -131,6 +157,34 @@ mod tests {
             }),
         )?)?;
         let selected = vec!["fixture.mcp.research".to_owned()];
+        assert!(mediated_tools(&catalog, &selected, Some("fixture.context")));
+        assert!(!mediated_tools(&catalog, &selected, Some("fixture.other")));
+        assert!(mediated_tools(&catalog, &[], Some("fixture.context")));
+        assert!(!mediated_tools(
+            &catalog,
+            &["unknown".to_owned()],
+            Some("fixture.context")
+        ));
+        let mut direct = catalog.clone();
+        direct
+            .capabilities
+            .first_mut()
+            .context("Missing fixture capability")?
+            .parameters_schema = json!({"type":"object"});
+        assert!(!mediated_tools(&direct, &selected, Some("fixture.context")));
+        let mut declared = catalog.clone();
+        declared
+            .capabilities
+            .first_mut()
+            .context("Missing fixture capability")?
+            .execution =
+            crate::domain::capabilities::CapabilityExecution::Declared;
+        assert!(!mediated_tools(
+            &declared,
+            &selected,
+            Some("fixture.context")
+        ));
+
         assert_eq!(
             mcp_binding(
                 &catalog,
