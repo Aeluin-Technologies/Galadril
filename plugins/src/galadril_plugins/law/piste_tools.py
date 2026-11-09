@@ -52,13 +52,13 @@ def research_tools() -> FunctionToolset[Dependencies]:
     @result.tool
     async def search_official_law(
         ctx: RunContext[Dependencies],
-        provider: Provider,
         query: str,
+        provider: Provider = "legifrance",
         fund: Fund = "CETAT",
         at_date: date | None = None,
         page: int = 1,
     ) -> dict[str, JsonValue]:
-        """Search Légifrance or Judilibre through the central MCP. Normative dated funds require at_date. Results are leads; consult exact returned IDs before citing. Keep using authorized web research for ArianeWeb, Open Data, exhibits and doctrine."""
+        """Search Légifrance and LibreJustice together by default. Use a short public legal question or keywords in French. Normative dated funds require at_date. Keep private case details out of the query. Verify each citation against Légifrance."""
         return await call(
             ctx,
             "search",
@@ -90,7 +90,7 @@ def research_tools() -> FunctionToolset[Dependencies]:
         decision_date: date,
         passage: str,
     ) -> dict[str, JsonValue]:
-        """Check source identity and an exact passage through MCP. This never establishes legal applicability."""
+        """Check source identity and an exact passage in Légifrance. Use provider=legifrance and its official identifier; discovery results never verify a citation."""
         return await call(
             ctx,
             "verify_citation",

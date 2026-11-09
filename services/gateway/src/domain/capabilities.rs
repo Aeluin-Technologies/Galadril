@@ -122,6 +122,21 @@ pub struct Capability {
     pub model_class: Option<String>,
 }
 
+impl Capability {
+    /// Only installed, context-free MCPs may opt into the chat baseline.
+    pub fn default_mcp(&self) -> bool {
+        self.kind == CapabilityKind::Mcp &&
+            self.execution == CapabilityExecution::Registered &&
+            self.plugin_id.is_some() &&
+            self.execution_profile.requires_context.is_none() &&
+            self.targets.contains(&CapabilityTarget::Scribe) &&
+            self.parameters_schema
+                .pointer("/x-galadril-mcp/available_by_default")
+                .and_then(Value::as_bool) ==
+                Some(true)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityCatalog {
@@ -156,8 +171,9 @@ impl CapabilityCatalog {
     pub fn execution_allowed(&self, id: &str, context: Option<&str>) -> bool {
         self.capabilities.iter().any(|item| {
             item.id == id &&
-                item.execution_profile.requires_context.as_deref() ==
-                    context
+                (item.default_mcp() ||
+                    item.execution_profile.requires_context.as_deref() ==
+                        context)
         })
     }
 

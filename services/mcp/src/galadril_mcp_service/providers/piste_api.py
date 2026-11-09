@@ -25,6 +25,62 @@ class PisteUnavailable(RuntimeError):
     """Expose an availability category without echoing credentials or queries."""
 
 
+def read_private_credential(location: str) -> str:
+    """Read a bounded secret from a regular, private file without following links."""
+    path = Path(location)
+    directory = Path(os.environ.get("MCP_CREDENTIALS_DIR", "/run/secrets"))
+    if (
+        not directory.is_absolute()
+        or ".." in directory.parts
+        or path.parent != directory
+        or path.name in {"", ".."}
+    ):
+        raise PisteUnavailable(
+            "Credential must be inside the configured secrets directory"
+        )
+    try:
+        root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            descriptor = os.open(
+                path.name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=root,
+            )
+        finally:
+            os.close(root)
+        with os.fdopen(descriptor, "rb") as source:
+            info = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_mode & 0o077
+                or info.st_size > 8192
+            ):
+                raise PisteUnavailable(
+                    "Credential file requires mode 0600 and bounded content"
+                )
+            data = source.read(8193)
+            if len(data) > 8192:
+                raise PisteUnavailable("Credential file exceeds its size limit")
+            return data.decode().strip()
+    except (OSError, UnicodeError, ValueError):
+        raise PisteUnavailable(
+            "Credential file is unavailable or invalid"
+        ) from None
+
+
+def _optional_credential_file(variable: str) -> str:
+    """Keep a missing provider file from disabling the other provider."""
+    if not (location := os.environ.get(variable)):
+        return ""
+    try:
+        return read_private_credential(location)
+    except PisteUnavailable:
+        trace.get_current_span().add_event(
+            "mcp.credential.unavailable", {"credential.setting": variable}
+        )
+        return ""
+
+
 class PisteCredentials(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, hide_input_in_errors=True
@@ -37,16 +93,15 @@ class PisteCredentials(BaseModel):
     @classmethod
     def load(cls) -> PisteCredentials:
         """Read operator secrets without exposing them to model arguments."""
-        location = os.environ.get("LAW_PISTE_CREDENTIALS_FILE", "")
-        value = cls._read(location) if location else ""
+        value = _optional_credential_file("LAW_PISTE_CREDENTIALS_FILE")
         if value.startswith("{"):
             return cls.model_validate_json(value)
         values = cls._fields(value)
-        oauth_path = os.environ.get("LAW_PISTE_OAUTH_FILE", "")
-        oauth = cls._fields(cls._read(oauth_path)) if oauth_path else {}
+        oauth = cls._fields(_optional_credential_file("LAW_PISTE_OAUTH_FILE"))
         credentials = {
-            "judilibre_key": values.get("API_KEY", value)
-            or os.environ.get("LAW_PISTE_API_KEY"),
+            "judilibre_key": (values.get("API_KEY", "") if values else value)
+            or os.environ.get("LAW_PISTE_API_KEY", "").strip()
+            or None,
             "client_id": oauth.get("CLIENT_ID", oauth.get("CLIENT_KEY"))
             or os.environ.get("LAW_PISTE_CLIENT_ID"),
             "client_secret": oauth.get("SECRET_KEY")
@@ -70,31 +125,6 @@ class PisteCredentials(BaseModel):
             if match is not None:
                 fields[match[1]] = match[2].strip("\"'")
         return fields
-
-    @staticmethod
-    def _read(location: str) -> str:
-        """Reject symlinks, group-readable secrets and oversized credential files."""
-        path = Path(location)
-        if not path.is_absolute():
-            raise PisteUnavailable("PISTE requires an absolute credential path")
-        try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(descriptor, "rb") as source:
-                info = os.fstat(source.fileno())
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or info.st_mode & 0o077
-                    or info.st_size > 8192
-                ):
-                    raise PisteUnavailable(
-                        "PISTE credential file requires mode 0600 and bounded content"
-                    )
-                value = source.read(8193).decode().strip()
-            return value
-        except (OSError, UnicodeError, ValueError):
-            raise PisteUnavailable(
-                "PISTE credential file is unavailable or invalid"
-            ) from None
 
 
 class _Token(BaseModel):
@@ -180,11 +210,11 @@ class PisteClient:
 
     async def _headers(self, provider: Provider) -> dict[str, str]:
         """Serialize token renewal and keep credentials in transport headers only."""
-        if (
-            provider == "judilibre"
-            and self.credentials.judilibre_key is not None
-        ):
-            return {"KeyId": self.credentials.judilibre_key.get_secret_value()}
+        if provider == "judilibre":
+            key = self.credentials.judilibre_key
+            if key is None or not (value := key.get_secret_value().strip()):
+                raise PisteUnavailable("Judilibre requires its own API key")
+            return {"KeyId": value}
         async with self.lock:
             if self.token is None or time.monotonic() >= self.expires:
                 if (

@@ -16,7 +16,9 @@ services:
       MCP_HOST: 127.0.0.1
       MCP_PORT: "8097"
       MCP_PUBLIC_ORIGIN: https://mcp.gravitalia.com
-      MCP_NAMESPACES: '[{"provider":"workspace","capability_id":"core.mcp.workspace","path":"/workspace/mcp","scopes":["workspace:use"],"clients":["galadril-mcp-chatgpt-workspace"],"request_body_limit":1048576},{"provider":"piste","capability_id":"law.mcp.research","path":"/law/mcp","scopes":["legal:read"],"clients":["galadril-mcp-chatgpt-law"]}]'
+      MCP_NAMESPACES: '[{"provider":"unified","capability_id":"core.mcp.workspace","path":"/","scopes":["workspace:use"],"clients":["galadril-mcp-chatgpt"],"request_body_limit":1048576},{"provider":"workspace","capability_id":"core.mcp.workspace","path":"/workspace/mcp","scopes":["workspace:use"],"clients":["galadril-mcp-chatgpt-workspace"],"request_body_limit":1048576},{"provider":"piste","capability_id":"law.mcp.research","path":"/law/mcp","scopes":["legal:read"],"clients":["galadril-mcp-chatgpt-law"]}]'
+      LIBREJUSTICE_API_KEY: ${LIBREJUSTICE_API_KEY:-}
+      LAW_PISTE_API_KEY: ${LAW_PISTE_API_KEY:-}
       MCP_WORKSPACE_GATEWAY_URL: http://127.0.0.1:8082/internal/mcp/tools
       MCP_WORKSPACE_DELEGATED_URL: http://127.0.0.1:8082/internal/mcp/delegated
       MCP_DOWNLOAD_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}

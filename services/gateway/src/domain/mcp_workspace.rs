@@ -25,10 +25,8 @@ pub fn generation_operation_allowed(
         "redact_document" | "read_file" | "document_search" => {
             library || specialized
         },
-        "web" => true,
-        "email" | "search" | "evidence" | "graph" | "causal" | "context" => {
-            !specialized
-        },
+        "web" | "email" => true,
+        "search" | "evidence" | "graph" | "causal" | "context" => !specialized,
         _ => false,
     }
 }
@@ -72,6 +70,19 @@ pub fn required_scope(request: &Value) -> Result<&'static str> {
         Some("compile_document" | "document_job") => Ok("documents:write"),
         _ => bail!("MCP operation denied"),
     }
+}
+
+/// New clients share one write scope, while old draft grants cannot request
+/// delivery.
+pub fn grants_scope(scopes: &[String], required: &str) -> bool {
+    let unified = match required {
+        "mail:read" => Some("email:read"),
+        "mail:draft" | "mail:send" => Some("email:write"),
+        _ => None,
+    };
+    scopes
+        .iter()
+        .any(|scope| scope == required || unified == Some(scope.as_str()))
 }
 
 /// Stable, length-delimited identities let jobs survive MCP reconnects without

@@ -597,14 +597,12 @@
         "type": "object",
         "additionalProperties": false,
         "x-galadril-mcp": {
+          "available_by_default": true,
           "resource": "https://mcp.gravitalia.com/law/mcp",
           "scopes": [
             "legal:read"
           ]
         }
-      },
-      "execution_profile": {
-        "requires_context": "law.administratif"
       }
     }
   ],

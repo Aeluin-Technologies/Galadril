@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 from .files import BootstrapError, locked, private_directory, read, write
 from .identity import WORKLOADS, certificates
 from .jwt import initialize, issue_token
+from .mcp_credentials import CREDENTIALS, private_file
 
 SECRET_NAMES = (
     "MINIO_ROOT_PASSWORD",
@@ -329,15 +330,7 @@ class Bootstrap:
         return destination
 
     def compose_arguments(self) -> tuple[str, ...]:
-        """Optional legal credentials never become a shared MCP startup prerequisite."""
-        mcp = (
-            ("-f", str(self.root / "infrastructure/docker/law-mcp.yaml"))
-            if all(
-                (self.root / ".local" / name).is_file()
-                for name in ("piste-key", "piste-oauth-key")
-            )
-            else ()
-        )
+        """Use the generated overlay for optional provider mounts."""
         return (
             "docker",
             "compose",
@@ -349,7 +342,6 @@ class Bootstrap:
             str(self.root / "infrastructure/docker/docker-compose.yaml"),
             "-f",
             str(self.root / "infrastructure/docker/document-compiler.yaml"),
-            *mcp,
             *(
                 ("--profile", "tunnel")
                 if (self.root / ".local/cloudflared-token").is_file()
@@ -605,28 +597,6 @@ class Bootstrap:
             }
         }
         services = mapping(overlay["services"])
-        for filename, variable, target in (
-            (
-                "piste-key",
-                "LAW_PISTE_CREDENTIALS_FILE",
-                "/run/secrets/piste-key",
-            ),
-            (
-                "piste-oauth-key",
-                "LAW_PISTE_OAUTH_FILE",
-                "/run/secrets/piste-oauth",
-            ),
-        ):
-            source = self.root / ".local" / filename
-            if source.is_file() and not source.is_symlink():
-                service = mapping(services.setdefault("mcp", {}))
-                mapping(service.setdefault("environment", {}))[variable] = (
-                    target
-                )
-                volumes = service.setdefault("volumes", [])
-                if not isinstance(volumes, list):
-                    raise BootstrapError("Invalid MCP secret mounts")
-                volumes.append(bind(source, target))
         for name in (
             "api-proxy",
             "gateway",
@@ -644,6 +614,23 @@ class Bootstrap:
             mapping(service)["labels"] = {
                 "galadril.dev/tls-revision": "${GALADRIL_TLS_REVISION}"
             }
+        mcp = mapping(services["mcp"])
+        credentials: dict[str, str] = {}
+        mounts: list[dict[str, object]] = []
+        revisions: list[str] = []
+        for credential in CREDENTIALS.values():
+            source = self.root / ".local" / credential.filename
+            if (info := private_file(source)) is None:
+                continue
+            credentials[credential.variable] = credential.target
+            mounts.append(bind(source, credential.target))
+            revisions.append(f"{info.st_ino:x}-{info.st_mtime_ns:x}")
+        if mounts:
+            mcp.update(environment=credentials, volumes=mounts)
+            # Docker must reopen the bind mounts after an atomic file replacement.
+            mapping(mcp["labels"])["galadril.dev/mcp-credentials-revision"] = (
+                ".".join(revisions)
+            )
         issuer = env["AUTH_ISSUER"]
         mapping(services["studio"])["environment"] = {"AUTH_ISSUER": issuer}
         mapping(services["hydra"])["environment"] = {"URLS_SELF_ISSUER": issuer}

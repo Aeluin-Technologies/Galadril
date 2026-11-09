@@ -69,8 +69,14 @@ def _result(value: dict[str, JsonValue]) -> CallToolResult:
     return CallToolResult(content=content, structuredContent=value)
 
 
-def register(server: FastMCP, http: httpx.AsyncClient) -> None:
+def register(
+    server: FastMCP, http: httpx.AsyncClient, *, unified: bool = False
+) -> None:
     """Keep transport identity separate from arguments accepted from any MCP client."""
+
+    email_read = "email:read" if unified else "mail:read"
+    draft_write = "email:write" if unified else "mail:draft"
+    send_write = "email:write" if unified else "mail:send"
 
     async def invoke(
         scope: str,
@@ -141,29 +147,29 @@ def register(server: FastMCP, http: httpx.AsyncClient) -> None:
             ]
         }
 
-    @server.tool(annotations=annotations(True), meta=auth("mail:read"))
+    @server.tool(annotations=annotations(True), meta=auth(email_read))
     async def read_email(request: MailRead) -> CallToolResult:
         """Read accessible accounts, contacts, messages, threads or attachments. Specify operation and the account/message identifiers returned by earlier calls."""
         return await invoke(
-            "mail:read",
+            email_read,
             "email",
             {"request": request.model_dump(mode="json", exclude_unset=True)},
         )
 
-    @server.tool(annotations=annotations(False), meta=auth("mail:draft"))
+    @server.tool(annotations=annotations(False), meta=auth(draft_write))
     async def save_email_draft(
         request: SaveDraft, file_ids: FileIds = ()
     ) -> CallToolResult:
         """Save a reviewable draft; never approve or send it. Attach generated files by file_ids with documents:read scope: bytes stay inside Galadril. Existing drafts require their current revision. Returned attachments are metadata only; retain their file_ids when revising."""
         payload = request.model_dump(mode="json", exclude_none=True)
         return await invoke(
-            "mail:draft",
+            draft_write,
             "email_save_draft",
             {"request": payload, "file_ids": list(file_ids)},
         )
 
     @server.tool(
-        annotations=annotations(False, True, True), meta=auth("mail:send")
+        annotations=annotations(False, True, True), meta=auth(send_write)
     )
     async def send_email(
         account: Identifier,
@@ -172,7 +178,7 @@ def register(server: FastMCP, http: httpx.AsyncClient) -> None:
     ) -> CallToolResult:
         """Request sending an exact saved draft revision. Galadril requires human approval of its recipients, content and attachments; this call cannot approve its own draft."""
         return await invoke(
-            "mail:send",
+            send_write,
             "email_send",
             {"account": account, "draft": draft, "revision": revision},
         )

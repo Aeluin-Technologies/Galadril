@@ -45,6 +45,199 @@ class _Verifier:
 
 
 class LawMCPTest(unittest.IsolatedAsyncioTestCase):
+    async def test_federated_search_runs_both_providers_and_deduplicates(
+        self,
+    ) -> None:
+        import asyncio
+
+        official_started = asyncio.Event()
+        libre_started = asyncio.Event()
+        overlap = "CETATEXT000025041089"
+
+        async def piste(*args: object, **kwargs: object) -> dict[str, object]:
+            official_started.set()
+            await asyncio.wait_for(libre_started.wait(), 2)
+            return {
+                "provider": "legifrance",
+                "data": {
+                    "results": [
+                        {"id": overlap},
+                        *({"id": f"CETATEXT{i:012d}"} for i in range(1, 9)),
+                    ]
+                },
+            }
+
+        async def libre(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.host, "librejustice.fr")
+            self.assertEqual(request.url.path, "/api/search")
+            self.assertEqual(request.url.params.get("ai_rerank"), "true")
+            self.assertEqual(
+                request.headers["Authorization"], "Bearer ljk_fixture"
+            )
+            libre_started.set()
+            await asyncio.wait_for(official_started.wait(), 2)
+            return httpx.Response(
+                200,
+                json={
+                    "hits": [
+                        {
+                            "title": "Duplicate",
+                            "url": "/decision/ce/a",
+                            "official_url": f"https://www.legifrance.gouv.fr/ceta/id/{overlap}",
+                        },
+                        *(
+                            {"title": str(i), "url": f"/decision/ce/{i}"}
+                            for i in range(1, 9)
+                        ),
+                    ]
+                },
+            )
+
+        with (
+            tempfile.TemporaryDirectory() as secrets,
+            patch.dict(
+                os.environ,
+                {
+                    "LIBREJUSTICE_API_KEY_FILE": str(
+                        Path(secrets) / "librejustice-key"
+                    ),
+                    "LIBREJUSTICE_API_KEY": "",
+                    "MCP_CREDENTIALS_DIR": secrets,
+                },
+            ),
+            patch("galadril_mcp_service.providers.piste.PisteCredentials.load"),
+            patch(
+                "galadril_mcp_service.providers.piste.PisteClient.search",
+                side_effect=piste,
+            ),
+        ):
+            credential = Path(secrets) / "librejustice-key"
+            credential.write_text("ljk_fixture\n")
+            credential.chmod(0o600)
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(libre)
+            ) as outgoing:
+                server = create_server(
+                    MCPAuth(
+                        issuer="https://auth.example/",
+                        resource="https://mcp.example/law/mcp",
+                        jwks_url="https://auth.example/jwks",
+                        scopes=("legal:read",),
+                    ),
+                    outgoing,
+                    provider="piste",
+                    verifier=_Verifier(),
+                )
+                app = server.streamable_http_app()
+                async with (
+                    app.router.lifespan_context(app),
+                    httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app),
+                        base_url="https://mcp.example",
+                        headers={
+                            "authorization": "Bearer fixture-token",
+                            "accept": "application/json, text/event-stream",
+                        },
+                    ) as client,
+                ):
+                    response = await client.post(
+                        "/law/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "tools/call",
+                            "params": {
+                                "name": "search",
+                                "arguments": {"query": "vice de procédure"},
+                            },
+                        },
+                    )
+        result = response.json()["result"]["structuredContent"]
+        self.assertEqual(len(result["data"]["results"]), 5)
+        self.assertEqual(len(result["librejustice"]["hits"]), 5)
+        self.assertEqual(result["librejustice"]["hits"][0]["title"], "1")
+        self.assertEqual(result["librejustice"]["duplicates"], [overlap])
+        self.assertFalse(result["citation_verified"])
+
+    async def test_citation_verification_consults_only_legifrance(self) -> None:
+        identifier = "CETATEXT000025041089"
+        citation = {
+            "provider": "judilibre",
+            "identifier": identifier,
+            "number": "335033",
+            "court": "Conseil d'État",
+            "date": "2011-12-23",
+            "passage": "garantie",
+        }
+        record = {
+            "operation": "consult",
+            "provider": "legifrance",
+            "id": identifier,
+            "data": {
+                "text": {
+                    "id": identifier,
+                    "num": "335033",
+                    "juridiction": "Conseil d'État",
+                    "dateTexte": "2011-12-23",
+                    "texte": "Texte de la garantie.",
+                }
+            },
+        }
+        with (
+            patch("galadril_mcp_service.providers.piste.PisteCredentials.load"),
+            patch(
+                "galadril_mcp_service.providers.piste.PisteClient.decision",
+                return_value=record,
+            ) as decision,
+        ):
+            async with httpx.AsyncClient() as outgoing:
+                server = create_server(
+                    MCPAuth(
+                        issuer="https://auth.example/",
+                        resource="https://mcp.example/law/mcp",
+                        jwks_url="https://auth.example/jwks",
+                        scopes=("legal:read",),
+                    ),
+                    outgoing,
+                    provider="piste",
+                    verifier=_Verifier(),
+                )
+                app = server.streamable_http_app()
+                async with (
+                    app.router.lifespan_context(app),
+                    httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app),
+                        base_url="https://mcp.example",
+                        headers={
+                            "authorization": "Bearer fixture-token",
+                            "accept": "application/json, text/event-stream",
+                        },
+                    ) as client,
+                ):
+                    for provider in ("judilibre", "legifrance"):
+                        citation["provider"] = provider
+                        response = await client.post(
+                            "/law/mcp",
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": provider,
+                                "method": "tools/call",
+                                "params": {
+                                    "name": "verify_citation",
+                                    "arguments": {"citation": citation},
+                                },
+                            },
+                        )
+                        result = response.json()["result"]["structuredContent"]
+                        if provider == "judilibre":
+                            self.assertEqual(result["status"], "unverified")
+                            decision.assert_not_awaited()
+                        else:
+                            self.assertTrue(result["passage_verified"])
+                            decision.assert_awaited_once_with(
+                                provider, identifier
+                            )
+
     async def test_disabled_legal_provider_is_a_normal_result_and_can_be_enabled_later(
         self,
     ) -> None:
@@ -157,10 +350,38 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                             response.json()["result"].get("isError", False)
                         )
                         self.assertEqual(
-                            response.json()["result"]["structuredContent"],
+                            {
+                                "items": response.json()["result"][
+                                    "structuredContent"
+                                ]["items"]
+                            },
                             {"items": []},
                         )
                         search.assert_awaited_once()
+                    for tool, arguments in (
+                        ("search", {"query": "vice de procédure"}),
+                        ("fetch", {"identifier": "fixture-decision"}),
+                    ):
+                        response = await http.post(
+                            "/law/mcp",
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": tool,
+                                "method": "tools/call",
+                                "params": {
+                                    "name": tool,
+                                    "arguments": {
+                                        "provider": "judilibre",
+                                        **arguments,
+                                    },
+                                },
+                            },
+                        )
+                        result = response.json()["result"]
+                        self.assertFalse(result.get("isError", False))
+                        self.assertEqual(
+                            result["structuredContent"]["status"], "unavailable"
+                        )
 
     def test_internal_jwks_ca_preserves_certificate_and_hostname_verification(
         self,
@@ -251,6 +472,25 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                         transport=httpx.ASGITransport(self.app),
                         base_url="https://mcp.example",
                     ) as http:
+                        metadata = await http.get(
+                            "/.well-known/oauth-protected-resource"
+                        )
+                        assertions.assertEqual(metadata.status_code, 200)
+                        assertions.assertEqual(
+                            metadata.json()["resource"], "https://mcp.example/"
+                        )
+                        assertions.assertLessEqual(
+                            {"legal:read", "email:read", "email:write"},
+                            set(metadata.json()["scopes_supported"]),
+                        )
+                        root = await http.post(
+                            "/", json={"method": "tools/list"}
+                        )
+                        assertions.assertEqual(root.status_code, 401)
+                        assertions.assertIn(
+                            'resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"',
+                            root.headers["www-authenticate"],
+                        )
                         for prefix in ("law", "other"):
                             response = await http.get(
                                 "/.well-known/oauth-protected-resource/"
@@ -275,6 +515,14 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
             }
             for name in ("law", "other")
         ]
+        namespaces.append(
+            {
+                "provider": "unified",
+                "capability_id": "fixture.workspace",
+                "path": "/",
+                "scopes": ["workspace:use"],
+            }
+        )
         with (
             patch.dict(
                 os.environ,

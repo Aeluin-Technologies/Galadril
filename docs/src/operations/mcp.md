@@ -1,9 +1,8 @@
 # Authenticated MCP hub
 
-The MCP server belongs to `services/mcp`; shared authorization and the native
-client belong to `platform/mcp`. Plugins declare client capabilities and never
-host public servers. The first provider supplies Légifrance and Judilibre through
-PISTE. Installed providers register tools in separately authorized namespaces.
+The public MCP at `https://mcp.gravitalia.com/` combines workspace and legal
+tools. Légifrance and LibreJustice are searched in parallel. Citation checks
+fetch directly from Légifrance.
 
 ## Authority
 
@@ -13,16 +12,17 @@ S256. Configure `AUTH_MCP_CLIENTS` on the dashboard with a JSON array:
 ```json
 [
   {
-    "id": "galadril-mcp-chatgpt-law",
-    "name": "Galadril legal research",
+    "id": "galadril-mcp-chatgpt",
+    "name": "Galadril",
     "redirectUris": ["https://REPLACE-WITH-THE-EXACT-CHATGPT-CALLBACK"],
-    "resource": "https://mcp.gravitalia.com/law/mcp",
-    "scopes": ["legal:read"]
+    "resource": "https://mcp.gravitalia.com/",
+    "scopes": ["workspace:use", "legal:read", "email:read", "email:write"]
   }
 ]
 ```
 
-Copy the exact callback displayed when creating the ChatGPT connection. This is
+Copy the exact callback displayed when creating the ChatGPT connection and
+enter the predefined client ID manually. This is
 a public OAuth client, with token endpoint authentication method `none`; it has
 no shared client secret. Registration is deployment controlled, not anonymous.
 The dashboard reconciles this policy with Hydra and refuses conflicting existing
@@ -50,8 +50,9 @@ For a local image, build and load `//services/mcp:load_local`.
 
 Build `//services/mcp:images`. The normal Compose configuration includes the
 read-only unprivileged MCP service through `infrastructure/docker/mcp.yaml`.
-It exposes the workspace resource at `/workspace/mcp` and the optional legal
-provider at `/law/mcp`. The existing API Envoy process owns the
+The root URL exposes the combined catalog. The former `/workspace/mcp` and
+`/law/mcp` URLs keep their own OAuth audiences for existing integrations.
+The existing API Envoy process owns the
 loopback MCP listener on port 8098, with an exact host match for
 `mcp.gravitalia.com`. No additional proxy or tunnel container is needed.
 
@@ -64,10 +65,12 @@ connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.
 
-The managed development bootstrap mounts each available PISTE credential file
-independently. Neither file is required for MCP startup. Without usable legal
-credentials, legal tools return `status: unavailable`, without verifying any
-source, and callers can continue with authorized Web research. When
+Run `uv run infrastructure/dev/galadril.py mcp-keys` to select LibreJustice,
+PISTE OAuth or the PISTE API key. Prompts hide input and preserve existing files
+unless replacement is confirmed. The next `uv run infrastructure/dev/galadril.py up`
+mounts the available private files into MCP and refreshes the mounts after rotation.
+Each file is optional. Without usable legal credentials, legal tools report their
+availability and callers can continue with authorized Web research. When
 `.local/cloudflared-token` exists, it enables the existing connector and mounts
 that file without copying its contents into configuration or arguments.
 
@@ -79,16 +82,17 @@ at Cloudflare; this HTTP hop remains inside the shared loopback namespace. The
 public issuer is consistent across Hydra, the dashboard and Envoy, while the
 local diagnostic JWT issuer remains separate. Register the exact callback shown
 by ChatGPT using `AUTH_MCP_CLIENTS`. Use a predefined public OAuth client with
-PKCE S256, token endpoint authentication `none`, no client secret, and scope
-`legal:read`. OAuth discovery is routed to the dashboard, not the GraphQL API.
+PKCE S256, token endpoint authentication `none`, no client secret, and the
+scopes listed above. OAuth discovery is routed to the dashboard.
 
 `MCP_NAMESPACES` declares installed providers, capability identities, paths, OAuth
 scopes and allowed clients. These are operator settings, never tool arguments.
 The service validates each namespace independently and returns 404 for unknown
 paths. Future providers use this registration contract and the shared verifier.
 
-The workspace resource uses its own OAuth client and `workspace:use` scope,
-plus granular mail, document and data scopes. Native Pengolo operations use the
+The root resource requires `workspace:use` and a scope for each tool family.
+Add `documents:read`, `documents:write` or `data:read` for those tools.
+Native Pengolo operations use the
 same MCP transport with generation-scoped grants. External email sends require
 review of the exact draft revision in a primary Galadril session; MCP annotations
 are descriptive hints, not approval authority. See
@@ -98,13 +102,25 @@ private attachment handling and compilation workflow.
 PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
 Envoy or a model prompt. Default file mounts are `.local/piste-key` and
 `.local/piste-oauth-key`; they must be regular files with mode 0600, readable by
-the configured service UID. The API key authenticates Judilibre. Légifrance uses
+the configured service UID. The API key authenticates Judilibre. When it is
+missing, Judilibre calls return `status: unavailable` without a network request.
+Légifrance uses
 the OAuth client ID and secret. `SECRET_KEY` in the API-key file is not the OAuth
 secret; use the separate OAuth file. JSON credential files are also supported.
 Server deployments may instead provide `LAW_PISTE_API_KEY`,
 `LAW_PISTE_CLIENT_ID`, `LAW_PISTE_CLIENT_SECRET` and
 `LAW_PISTE_ENVIRONMENT=production|sandbox`. Never put these values in a plugin
 manifest or repository.
+
+The development CLI stores the LibreJustice token in `.local/librejustice-key`.
+Other deployments can mount a mode-0600 token file and set
+`LIBREJUSTICE_API_KEY_FILE` to its absolute path in the container, or inject
+`LIBREJUSTICE_API_KEY` via the service environment. A missing key, timeout or
+rate limit leaves Légifrance search available. If Légifrance is unavailable,
+LibreJustice can still return leads for later verification.
+
+Mount credential files directly in `/run/secrets`. For a custom mount
+directory, set `MCP_CREDENTIALS_DIR` in the MCP service environment.
 
 The API adapters use fixed PISTE origins, bounded responses and timeouts, cached
 OAuth tokens and no redirects. Search results are leads, not verified citations.

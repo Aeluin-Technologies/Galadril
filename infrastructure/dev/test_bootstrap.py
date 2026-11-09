@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import shutil
 import stat
@@ -19,8 +20,10 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import SecretStr
+from rich.console import Console
 
 from infrastructure.dev.galadril_dev.bootstrap import Bootstrap, BootstrapError
+from infrastructure.dev.galadril_dev.cli import Arguments, execute, parser
 from infrastructure.dev.galadril_dev.identity import certificates
 
 SOURCE = Path(__file__).resolve().parents[2]
@@ -454,8 +457,9 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             secret = self.root / ".local" / name
             secret.write_text("synthetic-secret")
             secret.chmod(0o600)
+        await self.bootstrap.initialize()
         args = self.bootstrap.compose_arguments()
-        self.assertIn(
+        self.assertNotIn(
             str(self.root / "infrastructure/docker/law-mcp.yaml"), args
         )
         self.assertNotIn("synthetic-secret", " ".join(args))
@@ -474,6 +478,11 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 "LAW_PISTE_OAUTH_FILE",
                 "/run/secrets/piste-oauth",
             ),
+            (
+                "librejustice-key",
+                "LIBREJUSTICE_API_KEY_FILE",
+                "/run/secrets/librejustice-key",
+            ),
         ):
             await self.bootstrap.initialize()
             source = self.root / ".local" / filename
@@ -489,7 +498,62 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
                 [volume["target"] for volume in service["volumes"]], [target]
             )
             self.assertNotIn("synthetic-private-credential", str(overlay))
+            revision = service["labels"][
+                "galadril.dev/mcp-credentials-revision"
+            ]
+            source.chmod(0o644)
+            await self.bootstrap.initialize()
+            overlay = yaml.safe_load(
+                (self.bootstrap.state / "compose.yaml").read_text()
+            )
+            self.assertNotIn("volumes", overlay["services"]["mcp"])
+            source.chmod(0o600)
+            source.write_text("rotated-private-credential")
+            await self.bootstrap.initialize()
+            overlay = yaml.safe_load(
+                (self.bootstrap.state / "compose.yaml").read_text()
+            )
+            self.assertNotEqual(
+                revision,
+                overlay["services"]["mcp"]["labels"][
+                    "galadril.dev/mcp-credentials-revision"
+                ],
+            )
             source.unlink()
+
+    async def test_mcp_keys_menu_saves_selected_credentials_privately(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch(
+                "rich.prompt.Prompt.ask",
+                side_effect=["piste-oauth", "librejustice", "done"],
+            ),
+            patch(
+                "getpass.getpass",
+                side_effect=["fixture-id", "fixture-secret", "ljk_fixture"],
+            ),
+        ):
+            await execute(
+                parser().parse_args(
+                    ["mcp-keys", "--root", str(self.root)],
+                    namespace=Arguments(),
+                ),
+                Console(file=output),
+            )
+        for name, expected in (
+            (
+                "piste-oauth-key",
+                "CLIENT_ID=fixture-id\nSECRET_KEY=fixture-secret\n",
+            ),
+            ("librejustice-key", "ljk_fixture\n"),
+        ):
+            path = self.root / ".local" / name
+            self.assertEqual(path.read_text(), expected)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertNotIn(expected.strip(), output.getvalue())
 
     async def test_cli_compose_arguments_use_managed_state_and_compiler_profile(
         self,

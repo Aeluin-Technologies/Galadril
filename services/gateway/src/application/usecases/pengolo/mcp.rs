@@ -126,15 +126,16 @@ fn mcp_binding(
     capability_id: &str,
     resource: &str,
 ) -> Result<Vec<String>> {
-    ensure!(
-        selected.iter().any(|id| id == capability_id),
-        "MCP was not selected for this generation"
-    );
     let capability = catalog
         .capabilities
         .iter()
         .find(|item| item.id == capability_id)
         .context("MCP unavailable")?;
+    ensure!(
+        capability.default_mcp() ||
+            selected.iter().any(|id| id == capability_id),
+        "MCP was not selected for this generation"
+    );
     ensure!(
         capability.kind == CapabilityKind::Mcp,
         "MCP scope unavailable"
@@ -266,6 +267,26 @@ mod tests {
             )
             .is_err()
         );
+        let mut shared = catalog.clone();
+        let capability = shared
+            .capabilities
+            .first_mut()
+            .context("Missing fixture capability")?;
+        capability.execution_profile.requires_context = None;
+        capability.parameters_schema["x-galadril-mcp"]["available_by_default"] =
+            json!(true);
+        for context in [None, Some("fixture.context")] {
+            assert_eq!(
+                mcp_binding(
+                    &shared,
+                    &[],
+                    context,
+                    "fixture.mcp.research",
+                    "https://mcp.example/research/mcp",
+                )?,
+                vec!["research:read"]
+            );
+        }
         Ok(())
     }
 }

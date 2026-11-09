@@ -40,7 +40,10 @@ class TrustBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(
             auth["providers"]["workspace"]["audiences"],
-            ["https://mcp.gravitalia.com/workspace/mcp"],
+            [
+                "https://mcp.gravitalia.com/",
+                "https://mcp.gravitalia.com/workspace/mcp",
+            ],
         )
         self.assertEqual(
             auth["rules"],
