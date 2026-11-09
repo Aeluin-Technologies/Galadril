@@ -17,6 +17,7 @@ from pydantic_ai_harness.ask_user import (
 )
 
 from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.mcp_transport import dependency_request
 
 
 async def contact_page(
@@ -30,10 +31,9 @@ async def contact_page(
             "Use a full contact name of 2 to 128 printable characters."
         )
     try:
-        response = await ctx.deps.client.post(
-            ctx.deps.tools_url,
-            headers={"authorization": f"Bearer {ctx.deps.capability}"},
-            json={
+        response = await dependency_request(
+            ctx.deps,
+            {
                 "operation": "email",
                 "request": {"operation": "contacts", "query": query.strip()},
             },

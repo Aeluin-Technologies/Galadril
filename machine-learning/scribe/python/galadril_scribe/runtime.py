@@ -233,10 +233,10 @@ async def invoke(
     if ctx.deps.progress is not None:
         await ctx.deps.progress(operation)
     try:
-        response = await ctx.deps.client.post(
-            ctx.deps.tools_url,
-            headers={"authorization": f"Bearer {ctx.deps.capability}"},
-            json={"operation": operation, **arguments},
+        from galadril_scribe.mcp_transport import dependency_request
+
+        response = await dependency_request(
+            ctx.deps, {"operation": operation, **arguments}
         )
     except httpx.TransportError as error:
         logger.warning(
@@ -1279,6 +1279,8 @@ class Runtime:
                 alias, query, limit
             ),
             web_remaining=self.settings.max_tool_calls,
+            workspace_mcp_url=self.settings.workspace_mcp_url,
+            workspace_mcp_resource=self.settings.workspace_mcp_resource,
             web_external=self.settings.web_search_provider == "openai",
             web_enabled=request.web_search or request.web_query is not None,
             progress=progress,
