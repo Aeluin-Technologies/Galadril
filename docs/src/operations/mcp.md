@@ -48,9 +48,10 @@ invoke the other chat tools and expire after Gateway restarts.
 The root CI publication target includes `//services/mcp:push`.
 For a local image, build and load `//services/mcp:load_local`.
 
-Build `//services/mcp:images`. Add `infrastructure/docker/law-mcp.yaml` to the
-normal Compose files only on deployments configured for MCP. The overlay adds only
-the read-only unprivileged MCP service. The existing API Envoy process owns the
+Build `//services/mcp:images`. The normal Compose configuration includes the
+read-only unprivileged MCP service through `infrastructure/docker/mcp.yaml`.
+It exposes the workspace resource at `/workspace/mcp` and the optional legal
+provider at `/law/mcp`. The existing API Envoy process owns the
 loopback MCP listener on port 8098, with an exact host match for
 `mcp.gravitalia.com`. No additional proxy or tunnel container is needed.
 
@@ -63,8 +64,10 @@ connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
 listener returns 404 for hosts or paths outside its public contract.
 
-The managed development bootstrap includes the MCP overlay when both
-`.local/piste-key` and `.local/piste-oauth-key` exist. When
+The managed development bootstrap mounts each available PISTE credential file
+independently. Neither file is required for MCP startup. Without usable legal
+credentials, legal tools return `status: unavailable`, without verifying any
+source, and callers can continue with authorized Web research. When
 `.local/cloudflared-token` exists, it enables the existing connector and mounts
 that file without copying its contents into configuration or arguments.
 
@@ -83,6 +86,14 @@ PKCE S256, token endpoint authentication `none`, no client secret, and scope
 scopes and allowed clients. These are operator settings, never tool arguments.
 The service validates each namespace independently and returns 404 for unknown
 paths. Future providers use this registration contract and the shared verifier.
+
+The workspace resource uses its own OAuth client and `workspace:use` scope,
+plus granular mail, document and data scopes. Native Pengolo operations use the
+same MCP transport with generation-scoped grants. External email sends require
+review of the exact draft revision in a primary Galadril session; MCP annotations
+are descriptive hints, not approval authority. See
+[the service guide](../../../services/mcp/README.md) for tools, scopes,
+private attachment handling and compilation workflow.
 
 PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
 Envoy or a model prompt. Default file mounts are `.local/piste-key` and

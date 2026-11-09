@@ -111,6 +111,14 @@ pub fn create_router(
             post(crate::adapters::inbound::document_compiler::authorize),
         )
         .route(
+            "/internal/mcp/tools",
+            post(crate::adapters::inbound::mcp_tools::invoke),
+        )
+        .route(
+            "/internal/mcp/delegated",
+            post(crate::adapters::inbound::mcp_tools::delegated),
+        )
+        .route(
             "/internal/chat/events",
             post(crate::adapters::inbound::pengolo::events),
         )
@@ -162,7 +170,9 @@ fn request_body_limit(
         crate::domain::redaction::NATIVE_REDACTION_PATH => {
             crate::domain::redaction::MAX_WIRE_BYTES
         },
-        "/internal/chat/tools" => {
+        "/internal/chat/tools" |
+        "/internal/mcp/tools" |
+        "/internal/mcp/delegated" => {
             crate::domain::pengolo::MAX_INTERNAL_CHAT_TOOL_BYTES
         },
         "/internal/chat/events" => {

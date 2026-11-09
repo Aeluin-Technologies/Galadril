@@ -16,15 +16,32 @@ import httpx
 import uvicorn
 from galadril_mcp_core.auth import GatewayVerifier, MCPAuth, OAuthVerifier
 from galadril_plugins.telemetry import telemetry
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import Tool as MCPTool
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
 from starlette.applications import Starlette
 from starlette.responses import Response
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+
+class NamespaceServer(FastMCP):
+    async def list_tools(self) -> list[MCPTool]:
+        """Internal adapters are not part of the public workspace tool catalogue."""
+        tools = await super().list_tools()
+        if not any(tool.name == "invoke_tool" for tool in tools):
+            return tools
+        identity = get_access_token()
+        native = (
+            identity is not None and identity.client_id == "galadril-pengolo"
+        )
+        return [
+            tool for tool in tools if (tool.name == "invoke_tool") == native
+        ]
 
 
 def create_server(
@@ -33,6 +50,7 @@ def create_server(
     *,
     provider: str,
     verifier: TokenVerifier | None = None,
+    request_body_limit: int = 65536,
 ) -> FastMCP:
     """Create an authenticated namespace from operator-owned provider configuration.
 
@@ -48,12 +66,14 @@ def create_server(
     if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", provider) is None:
         raise ValueError("Invalid installed MCP provider")
     host = urlsplit(settings.resource).netloc
-    server = FastMCP(
+    if not 65536 <= request_body_limit <= 1024 * 1024:
+        raise ValueError("Invalid MCP request body limit")
+    server = NamespaceServer(
         provider,
         stateless_http=True,
         json_response=True,
         streamable_http_path=urlsplit(settings.resource).path,
-        max_request_body_size=65536,
+        max_request_body_size=request_body_limit,
         token_verifier=verifier or OAuthVerifier(settings, http),
         auth=AuthSettings(
             issuer_url=AnyHttpUrl(settings.issuer),
@@ -85,6 +105,7 @@ class Namespace(BaseModel):
     path: str = Field(pattern=r"^/[a-z][a-z0-9_/-]{0,127}/mcp$")
     scopes: tuple[str, ...] = Field(min_length=1, max_length=32)
     clients: tuple[str, ...] = Field(default=(), max_length=128)
+    request_body_limit: int = Field(default=65536, ge=65536, le=1024 * 1024)
 
 
 class Hub:
@@ -146,7 +167,11 @@ async def serve() -> None:
                 namespace.capability_id,
             )
             server = create_server(
-                settings, http, provider=namespace.provider, verifier=verifier
+                settings,
+                http,
+                provider=namespace.provider,
+                verifier=verifier,
+                request_body_limit=namespace.request_body_limit,
             )
             app = server.streamable_http_app()
             apps.append(app)

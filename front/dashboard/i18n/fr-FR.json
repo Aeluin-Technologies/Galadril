@@ -670,5 +670,13 @@
       "hideDetails": "Masquer les détails",
       "sent": "Courriel envoyé"
     }
+  },
+  "mcp": {
+    "emailReview": {
+      "title": "Vérifier le courriel préparé via MCP",
+      "reviewed": "J’ai vérifié l’expéditeur, les destinataires, le message et les pièces jointes.",
+      "send": "Approuver et envoyer",
+      "unavailable": "Ce brouillon est indisponible ou a été modifié. Demandez un nouveau lien de validation."
+    }
   }
 }

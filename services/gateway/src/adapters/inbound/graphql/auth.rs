@@ -28,7 +28,10 @@ pub struct Claims {
 impl Claims {
     /// Rejects ambiguous identity values before they reach tenant
     /// authorization.
-    fn from_headers(headers: &HeaderMap, now: u64) -> Result<Self, AuthError> {
+    pub(crate) fn from_headers(
+        headers: &HeaderMap,
+        now: u64,
+    ) -> Result<Self, AuthError> {
         let sub = required(headers, "x-galadril-sub")?;
         let tenant = required(headers, "x-galadril-tenant")?;
         let issuer = required(headers, "x-galadril-issuer")?;

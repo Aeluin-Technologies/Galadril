@@ -37,3 +37,5 @@ class Dependencies:
     web_external: bool = False
     web_closed: bool = False
     tasks: TaskGraph | None = None
+    workspace_mcp_url: str | None = None
+    workspace_mcp_resource: str = "https://mcp.gravitalia.com/workspace/mcp"

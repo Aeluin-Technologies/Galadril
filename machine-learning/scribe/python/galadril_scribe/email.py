@@ -30,6 +30,7 @@ from pydantic_ai.usage import UsageLimits
 
 from galadril_scribe.activity import EmailDraftActivity
 from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.mcp_transport import dependency_request
 
 _MAIL_JSON = TypeAdapter(JsonValue)
 
@@ -48,10 +49,9 @@ async def _mail_operation(
     ctx: RunContext[Dependencies], request: dict[str, JsonValue]
 ) -> JsonValue:
     try:
-        response = await ctx.deps.client.post(
-            ctx.deps.tools_url,
-            headers={"authorization": f"Bearer {ctx.deps.capability}"},
-            json={"operation": "email", "request": request},
+        response = await dependency_request(
+            ctx.deps,
+            {"operation": "email", "request": request},
             timeout=25,
         )
         if response.status_code != 200 or len(response.content) > 1024 * 1024:
@@ -208,10 +208,9 @@ async def _reply_recipient(
     ctx: RunContext[Dependencies], source: ReplySource
 ) -> str:
     """Resolves evidence through the generation lease before using a source address."""
-    response = await ctx.deps.client.post(
-        ctx.deps.tools_url,
-        headers={"authorization": f"Bearer {ctx.deps.capability}"},
-        json={
+    response = await dependency_request(
+        ctx.deps,
+        {
             "operation": "email",
             "request": {"operation": "message", **source.model_dump()},
         },

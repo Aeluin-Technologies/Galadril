@@ -41,6 +41,8 @@ class EmailDrafting(unittest.TestCase):
                         client=client,
                         capability="delegated",
                         tools_url="http://gateway/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                     )
                 )
                 result = json.loads(
@@ -138,6 +140,8 @@ class EmailDrafting(unittest.TestCase):
                         client=client,
                         capability="delegated",
                         tools_url="http://gateway/internal/chat/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                     )
                 )
                 result = json.loads(await search_emails(ctx, "Alex"))
@@ -173,6 +177,8 @@ class EmailDrafting(unittest.TestCase):
                         client=client,
                         capability="delegated",
                         tools_url="http://gateway/internal/chat/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                     )
                 )
                 result = json.loads(await read_email(ctx, "a" * 32, "b" * 32))
@@ -320,6 +326,8 @@ class EmailDrafting(unittest.TestCase):
                         activity=activity,
                         client=client,
                         tools_url="http://gateway/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                         capability="private",
                     )
                 )
@@ -464,6 +472,8 @@ class EmailDrafting(unittest.TestCase):
                         activity=emit,
                         client=client,
                         tools_url="http://gateway/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                         capability="private",
                         answerer=None,
                     )
@@ -543,6 +553,8 @@ class EmailDrafting(unittest.TestCase):
                         activity=emit,
                         client=client,
                         tools_url="http://gateway/tools",
+                        workspace_mcp_url=None,
+                        workspace_mcp_resource="https://mcp.example/workspace/mcp",
                         capability="private",
                         answerer=answer,
                     )
@@ -582,6 +594,8 @@ class EmailDrafting(unittest.TestCase):
                     activity=emit,
                     client=client,
                     tools_url="http://gateway/internal/chat/tools",
+                    workspace_mcp_url=None,
+                    workspace_mcp_resource="https://mcp.example/workspace/mcp",
                     capability="private",
                 )
             )

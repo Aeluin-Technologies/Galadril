@@ -38,39 +38,26 @@ class PisteCredentials(BaseModel):
     def load(cls) -> PisteCredentials:
         """Read operator secrets without exposing them to model arguments."""
         location = os.environ.get("LAW_PISTE_CREDENTIALS_FILE", "")
-        if not location:
-            environment = {
-                "judilibre_key": os.environ.get("LAW_PISTE_API_KEY"),
-                "client_id": os.environ.get("LAW_PISTE_CLIENT_ID"),
-                "client_secret": os.environ.get("LAW_PISTE_CLIENT_SECRET"),
-                "environment": os.environ.get(
-                    "LAW_PISTE_ENVIRONMENT", "production"
-                ),
-            }
-            if not any(
-                environment[key] for key in ("judilibre_key", "client_id")
-            ):
-                raise PisteUnavailable("PISTE credentials are not configured")
-            return cls.model_validate(environment)
-        value = cls._read(location)
+        value = cls._read(location) if location else ""
         if value.startswith("{"):
             return cls.model_validate_json(value)
         values = cls._fields(value)
         oauth_path = os.environ.get("LAW_PISTE_OAUTH_FILE", "")
         oauth = cls._fields(cls._read(oauth_path)) if oauth_path else {}
-        return cls(
-            judilibre_key=SecretStr(values.get("API_KEY", value))
-            if value
-            else None,
-            client_id=SecretStr(
-                oauth.get("CLIENT_ID", oauth.get("CLIENT_KEY", ""))
-            )
-            if oauth
-            else None,
-            client_secret=SecretStr(oauth.get("SECRET_KEY", ""))
-            if oauth
-            else None,
-        )
+        credentials = {
+            "judilibre_key": values.get("API_KEY", value)
+            or os.environ.get("LAW_PISTE_API_KEY"),
+            "client_id": oauth.get("CLIENT_ID", oauth.get("CLIENT_KEY"))
+            or os.environ.get("LAW_PISTE_CLIENT_ID"),
+            "client_secret": oauth.get("SECRET_KEY")
+            or os.environ.get("LAW_PISTE_CLIENT_SECRET"),
+            "environment": os.environ.get(
+                "LAW_PISTE_ENVIRONMENT", "production"
+            ),
+        }
+        if not credentials["judilibre_key"] and not credentials["client_id"]:
+            raise PisteUnavailable("PISTE credentials are not configured")
+        return cls.model_validate(credentials)
 
     @staticmethod
     def _fields(value: str) -> dict[str, str]:

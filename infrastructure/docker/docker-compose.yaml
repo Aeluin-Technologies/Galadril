@@ -8,6 +8,7 @@ include:
   - path: observability.yaml
   - path: proxy.yaml
   - path: dashboard.yaml
+  - path: mcp.yaml
   - path: auth.yaml
   - path: local-auth.yaml
   - path: utils-email.yaml

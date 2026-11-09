@@ -8,7 +8,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from cryptography import x509
@@ -45,6 +45,123 @@ class _Verifier:
 
 
 class LawMCPTest(unittest.IsolatedAsyncioTestCase):
+    async def test_disabled_legal_provider_is_a_normal_result_and_can_be_enabled_later(
+        self,
+    ) -> None:
+        from galadril_mcp_service.providers.piste_api import (
+            PisteCredentials,
+            PisteUnavailable,
+        )
+
+        async def reject_network(request: httpx.Request) -> httpx.Response:
+            self.fail(
+                "An unconfigured legal provider must not call external services"
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(reject_network)
+        ) as outgoing:
+            server = create_server(
+                MCPAuth(
+                    issuer="https://auth.example/",
+                    resource="https://mcp.example/law/mcp",
+                    jwks_url="https://auth.example/jwks",
+                    scopes=("legal:read",),
+                ),
+                outgoing,
+                provider="piste",
+                verifier=_Verifier(),
+            )
+            app = server.streamable_http_app()
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app),
+                    base_url="https://mcp.example",
+                    headers={
+                        "authorization": "Bearer fixture-token",
+                        "accept": "application/json, text/event-stream",
+                    },
+                ) as http:
+                    with patch(
+                        "galadril_mcp_service.providers.piste.PisteCredentials.load",
+                        side_effect=PisteUnavailable(
+                            "PRIVATE_CONFIGURATION_DETAIL"
+                        ),
+                    ):
+                        for name, arguments in (
+                            ("search", {"query": "vice de procédure"}),
+                            ("fetch", {"identifier": "CETATEXT000025041089"}),
+                            (
+                                "verify_citation",
+                                {
+                                    "citation": {
+                                        "provider": "legifrance",
+                                        "identifier": "CETATEXT000025041089",
+                                        "number": "335033",
+                                        "court": "Conseil d'État",
+                                        "date": "2011-12-23",
+                                        "passage": "garantie",
+                                    }
+                                },
+                            ),
+                        ):
+                            response = await http.post(
+                                "/law/mcp",
+                                json={
+                                    "jsonrpc": "2.0",
+                                    "id": name,
+                                    "method": "tools/call",
+                                    "params": {
+                                        "name": name,
+                                        "arguments": arguments,
+                                    },
+                                },
+                            )
+                            self.assertEqual(response.status_code, 200)
+                            result = response.json()["result"]
+                            self.assertFalse(result.get("isError", False))
+                            self.assertEqual(
+                                result["structuredContent"]["status"],
+                                "unavailable",
+                            )
+                            self.assertNotIn(
+                                "PRIVATE_CONFIGURATION_DETAIL", response.text
+                            )
+                    with (
+                        patch(
+                            "galadril_mcp_service.providers.piste.PisteCredentials.load",
+                            return_value=PisteCredentials(
+                                client_id="fixture",
+                                client_secret="fixture-secret",
+                            ),
+                        ),
+                        patch(
+                            "galadril_mcp_service.providers.piste.PisteClient.search",
+                            new_callable=AsyncMock,
+                            return_value={"items": []},
+                        ) as search,
+                    ):
+                        response = await http.post(
+                            "/law/mcp",
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": "enabled",
+                                "method": "tools/call",
+                                "params": {
+                                    "name": "search",
+                                    "arguments": {"query": "vice de procédure"},
+                                },
+                            },
+                        )
+                        self.assertFalse(
+                            response.json()["result"].get("isError", False)
+                        )
+                        self.assertEqual(
+                            response.json()["result"]["structuredContent"],
+                            {"items": []},
+                        )
+                        search.assert_awaited_once()
+
     def test_internal_jwks_ca_preserves_certificate_and_hostname_verification(
         self,
     ) -> None:

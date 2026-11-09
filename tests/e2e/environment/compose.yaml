@@ -323,6 +323,17 @@ services:
     pull_policy: never
     mem_limit: 256m
 
+  mcp:
+    extends:
+      file: ../../../infrastructure/docker/mcp.yaml
+      service: mcp
+    image: local/galadril-mcp:e2e
+    pull_policy: never
+    volumes: !reset []
+    environment:
+      MCP_TLS_CA_FILE: !reset null
+    restart: on-failure
+
   scribe:
     extends:
       file: ../../../infrastructure/docker/dashboard.yaml
@@ -346,6 +357,8 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
       chat-model:
+        condition: service_started
+      mcp:
         condition: service_started
       otel-collector:
         condition: service_started

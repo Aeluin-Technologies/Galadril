@@ -20,6 +20,25 @@ from galadril_mcp_service.providers.piste_references import (
 
 
 class PisteTest(unittest.IsolatedAsyncioTestCase):
+    def test_oauth_credentials_work_without_a_judilibre_api_key_file(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            oauth = Path(temporary) / "oauth"
+            oauth.write_text(
+                "CLIENT_KEY=fixture-client\nSECRET_KEY=fixture-secret\n"
+            )
+            oauth.chmod(0o600)
+            with patch.dict(
+                os.environ, {"LAW_PISTE_OAUTH_FILE": str(oauth)}, clear=True
+            ):
+                credentials = PisteCredentials.load()
+            self.assertIsNone(credentials.judilibre_key)
+            self.assertIsNotNone(credentials.client_id)
+            self.assertEqual(
+                credentials.client_id.get_secret_value(), "fixture-client"
+            )
+
     async def test_empty_or_out_of_bounds_search_is_rejected_without_io(
         self,
     ) -> None:

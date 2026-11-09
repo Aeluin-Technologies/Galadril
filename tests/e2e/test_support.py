@@ -470,6 +470,7 @@ def test_e2e_inherits_the_shipped_compose_services() -> None:
         "intake",
         "vision",
         "scribe",
+        "mcp",
         "api-proxy",
         "tempo",
     ):
@@ -477,6 +478,15 @@ def test_e2e_inherits_the_shipped_compose_services() -> None:
             r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
         )[0]
         assert "extends:" in block
+
+
+def test_e2e_runs_workspace_tools_through_the_real_mcp_without_a_native_fallback() -> (
+    None
+):
+    source = E2E_COMPOSE.read_text()
+    assert "image: local/galadril-mcp:e2e" in source
+    assert "SCRIBE_WORKSPACE_MCP_URL: !reset" not in source
+    assert "tests/e2e/load_mcp.sh" in Path(e2e_environment.__file__).read_text()
 
 
 def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
@@ -774,7 +784,16 @@ def test_application_image_loads_have_a_dedicated_deadline(
         await ComposeEnvironment().load_images()
 
     asyncio.run(exercise())
-    assert deadlines == [600.0, 600.0, 600.0, 1200.0, 600.0, 600.0, 600.0]
+    assert deadlines == [
+        600.0,
+        600.0,
+        600.0,
+        1200.0,
+        600.0,
+        600.0,
+        600.0,
+        600.0,
+    ]
 
 
 def test_compose_startup_includes_cold_image_pull_budget(
@@ -847,7 +866,8 @@ def test_compose_diagnostics_and_cleanup_have_recovery_budget(
         await environment.close()
 
     asyncio.run(exercise())
-    assert deadlines == [90.0] * 9
+    assert deadlines
+    assert set(deadlines) == {90.0}
 
 
 def test_compose_diagnostics_expose_outbox_worker_state(

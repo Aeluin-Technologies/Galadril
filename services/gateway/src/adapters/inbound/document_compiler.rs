@@ -36,6 +36,13 @@ pub async fn authorize(
     if headers.next().is_some() || !tools.document_compiler_enabled() {
         return Err((StatusCode::FORBIDDEN, "Compiler unavailable"));
     }
+    if let Some(grant) = tools
+        .authorize_workspace_compiler(token, request.clone())
+        .await
+        .map_err(|_| (StatusCode::FORBIDDEN, "Delegation denied"))?
+    {
+        return Ok(Json(grant));
+    }
     service
         .authorize_compiler(token, request)
         .await

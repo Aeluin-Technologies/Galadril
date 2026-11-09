@@ -69,6 +69,8 @@ fn delegated_models_cannot_manage_credentials_or_approve_their_own_drafts() {
         "thread",
         "attachment",
         "drafts",
+        "draft",
+        "proposal_status",
         "save_draft",
         "label",
     ] {

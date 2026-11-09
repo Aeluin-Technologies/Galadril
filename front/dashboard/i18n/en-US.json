@@ -2193,5 +2193,13 @@
         "law_judicial_decision_document": "Original judgment"
       }
     }
+  },
+  "mcp": {
+    "emailReview": {
+      "title": "Review email prepared through MCP",
+      "reviewed": "I have reviewed the sender, recipients, message and attachments.",
+      "send": "Approve and send",
+      "unavailable": "This draft is unavailable or has changed. Request a new review link."
+    }
   }
 }

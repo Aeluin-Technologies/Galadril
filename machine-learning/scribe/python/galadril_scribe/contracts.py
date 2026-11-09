@@ -287,6 +287,8 @@ class Settings(BaseSettings):
         default="gpt-5.6-terra", min_length=1, max_length=128
     )
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
+    workspace_mcp_url: str | None = None
+    workspace_mcp_resource: str = "https://mcp.gravitalia.com/workspace/mcp"
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_concurrent_tasks: int = Field(default=4, ge=1, le=32)
     max_workflow_nodes: int = Field(default=4096, ge=1, le=65536)

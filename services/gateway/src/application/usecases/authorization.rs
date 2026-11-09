@@ -59,7 +59,9 @@ where
 }
 
 /// Dynamic request context.
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 pub struct QueryContext {
     pub entity_id: Option<String>,
     pub modality: Option<String>,

@@ -16,6 +16,27 @@ pub struct CompiledArtifact<'a> {
     pub bytes: Vec<u8>,
 }
 
+/// Compiler authority is shared by chat generations and authenticated MCP
+/// sessions.
+pub struct CompilerExecution {
+    pub grant: Grant,
+    context: QueryContext,
+    project_id: Option<String>,
+    execution_context: Option<String>,
+    generation: Option<Record>,
+    temporary: bool,
+}
+
+impl CompilerExecution {
+    fn actor(&self) -> Principal<'_> {
+        Principal {
+            tenant: &self.grant.tenant,
+            user: &self.grant.actor,
+            context: &self.context,
+        }
+    }
+}
+
 impl PengoloService {
     /// Resolves the persisted delegation before accepting any compiler claims.
     pub async fn authorize_compiler(
@@ -58,7 +79,7 @@ impl PengoloService {
                     Some("personal")
             })
             .map(|project| project.id);
-        let mut grant = Grant {
+        let grant = Grant {
             tenant: tenant.clone(),
             actor: generation.owner_id.clone(),
             generation: generation.id.clone(),
@@ -66,6 +87,76 @@ impl PengoloService {
             temporary_session: temporary.then(|| chat.id.clone()),
             bindings: Default::default(),
         };
+        self.authorize_compiler_execution(
+            &CompilerExecution {
+                grant,
+                context,
+                project_id: generation.project_id.clone(),
+                execution_context: execution,
+                generation: Some(generation),
+                temporary,
+            },
+            request,
+        )
+        .await
+    }
+
+    /// External clients reuse project IAM and vault binding without
+    /// manufacturing a chat.
+    pub async fn compiler_workspace(
+        &self,
+        actor: &Principal<'_>,
+        project_id: Option<&str>,
+        execution_id: &str,
+    ) -> Result<CompilerExecution> {
+        self.verify(actor).await?;
+        let project = match project_id {
+            Some(id) => Some(self.project(actor, id).await?),
+            None => None,
+        };
+        let execution = project
+            .as_ref()
+            .map(execution_context)
+            .transpose()?
+            .flatten();
+        let library = project
+            .filter(|item| {
+                item.data.get("contextMode").and_then(Value::as_str) !=
+                    Some("personal")
+            })
+            .map(|item| item.id);
+        Ok(CompilerExecution {
+            grant: Grant {
+                tenant: actor.tenant.into(),
+                actor: actor.user.into(),
+                generation: execution_id.into(),
+                project: library,
+                temporary_session: None,
+                bindings: Default::default(),
+            },
+            context: actor.context.clone(),
+            project_id: project_id.map(str::to_owned),
+            execution_context: execution,
+            generation: None,
+            temporary: false,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn authorize_compiler_execution(
+        &self,
+        scope: &CompilerExecution,
+        request: AuthorizationRequest,
+    ) -> Result<Grant> {
+        let actor = scope.actor();
+        self.verify(&actor).await?;
+        let tenant = actor.tenant.to_owned();
+        let execution = &scope.execution_context;
+        let temporary = scope.temporary;
+        let mut grant = scope.grant.clone();
+        if let Some(project) = grant.project.as_deref() {
+            self.project(&actor, project).await?;
+        }
         let Some(policy) = request.template else {
             ensure!(
                 matches!(request.action, Action::Resolve | Action::PublishPdf),
@@ -275,7 +366,77 @@ impl PengoloService {
         generation: &Record,
         artifact: CompiledArtifact<'_>,
     ) -> Result<Value> {
+        let CompiledArtifact {
+            id: job,
+            name,
+            mime,
+            bytes: pdf,
+        } = artifact;
+        validate_id(job, 64)?;
+        ensure!(pdf.len() <= MAX_PDF_BYTES, "Artifact exceeds limit");
+        crate::domain::pengolo::validate_file_prefix(mime, &pdf)?;
+        validate_upload(name, mime, i64::try_from(pdf.len())?)?;
+        let temporary = generation
+            .data
+            .get("input")
+            .and_then(|input| input.get("temporary"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let chat = self
+            .authorize_generation(actor, generation, temporary)
+            .await?;
+        let mut project_id = generation.project_id.clone();
+        let mut execution = None;
+        if let Some(id) = &project_id {
+            let project = self.project(actor, id).await?;
+            execution = execution_context(&project)?;
+            let private = execution.is_some();
+            if private ||
+                project.data.get("contextMode").and_then(Value::as_str) ==
+                    Some("personal")
+            {
+                project_id = None;
+            }
+        }
+        let session = temporary.then_some(chat.id);
+        let scope = CompilerExecution {
+            grant: Grant {
+                tenant: actor.tenant.into(),
+                actor: actor.user.into(),
+                generation: generation.id.clone(),
+                project: project_id,
+                temporary_session: session,
+                bindings: Default::default(),
+            },
+            context: actor.context.clone(),
+            project_id: generation.project_id.clone(),
+            execution_context: execution,
+            generation: Some(generation.clone()),
+            temporary,
+        };
+        self.publish_compiler_artifact(
+            &scope,
+            CompiledArtifact {
+                id: job,
+                name,
+                mime,
+                bytes: pdf,
+            },
+        )
+        .await
+    }
+
+    /// Publication shares checksums, retention and live IAM across MCP and
+    /// chat callers.
+    pub async fn publish_compiler_artifact(
+        &self,
+        scope: &CompilerExecution,
+        artifact: CompiledArtifact<'_>,
+    ) -> Result<Value> {
         use sha2::{Digest, Sha256};
+        let actor = scope.actor();
+        self.verify(&actor).await?;
+        let actor = &actor;
         let CompiledArtifact {
             id: job,
             name,
@@ -287,28 +448,14 @@ impl PengoloService {
         crate::domain::pengolo::validate_file_prefix(mime, &pdf)?;
         let extension =
             validate_upload(name, mime, i64::try_from(pdf.len())?)?;
-        let temporary = generation
-            .data
-            .get("input")
-            .and_then(|input| input.get("temporary"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let chat = self
-            .authorize_generation(actor, generation, temporary)
-            .await?;
-        let mut project_id = generation.project_id.clone();
-        let mut private = false;
-        if let Some(id) = &project_id {
-            let project = self.project(actor, id).await?;
-            private = execution_context(&project)?.is_some();
-            if private ||
-                project.data.get("contextMode").and_then(Value::as_str) ==
-                    Some("personal")
-            {
-                project_id = None;
-            }
-        }
-        let session = temporary.then_some(chat.id);
+        let temporary = scope.temporary;
+        let session = scope.grant.temporary_session.clone();
+        let private = scope.execution_context.is_some();
+        let project_id = if private {
+            None
+        } else {
+            scope.grant.project.clone()
+        };
         let digest = format!(
             "{:x}",
             Sha256::digest(
@@ -365,14 +512,16 @@ impl PengoloService {
         );
         if file.data.get("status").and_then(Value::as_str) == Some("ready") {
             self.authorize_record(actor, &file).await?;
-            self.store
-                .record_generated_file(
-                    actor.tenant,
-                    &generation.id,
-                    temporary,
-                    &file.id,
-                )
-                .await?;
+            if scope.generation.is_some() {
+                self.store
+                    .record_generated_file(
+                        actor.tenant,
+                        &scope.grant.generation,
+                        temporary,
+                        &file.id,
+                    )
+                    .await?;
+            }
             return Ok(
                 json!({"file":file_projection(file.clone()),"download":download_projection(&file,session.as_deref())}),
             );
@@ -383,8 +532,14 @@ impl PengoloService {
                 axum::body::Bytes::from(pdf),
             )
             .await?;
-        self.authorize_generation(actor, generation, temporary)
-            .await?;
+        self.verify(actor).await?;
+        if let Some(generation) = &scope.generation {
+            self.authorize_generation(actor, generation, temporary)
+                .await?;
+        }
+        if let Some(project) = &scope.grant.project {
+            self.project(actor, project).await?;
+        }
         let file = self
             .store
             .promote_file(
@@ -396,14 +551,16 @@ impl PengoloService {
             )
             .await?;
         self.authorize_record(actor, &file).await?;
-        self.store
-            .record_generated_file(
-                actor.tenant,
-                &generation.id,
-                temporary,
-                &file.id,
-            )
-            .await?;
+        if scope.generation.is_some() {
+            self.store
+                .record_generated_file(
+                    actor.tenant,
+                    &scope.grant.generation,
+                    temporary,
+                    &file.id,
+                )
+                .await?;
+        }
         tracing::info!(event.name = "document_compiler.pdf.published");
         Ok(
             json!({"file":file_projection(file.clone()),"download":download_projection(&file,session.as_deref())}),
@@ -453,7 +610,15 @@ impl PengoloService {
         compiler: &dyn crate::application::ports::document_compiler::DocumentCompiler,
         operation: galadril_document_compiler::tools::TemplateOperation,
     ) -> Result<Value> {
-        use galadril_document_compiler::tools::TemplateOperation;
+        let scope = self.compiler_context(token).await?;
+        self.compiler_templates_execution(&scope, token, compiler, operation)
+            .await
+    }
+
+    async fn compiler_context(
+        &self,
+        token: &str,
+    ) -> Result<CompilerExecution> {
         let (tenant, generation, temporary, context) =
             self.compiler_actor(token).await?;
         let actor = Principal {
@@ -463,12 +628,42 @@ impl PengoloService {
         };
         self.authorize_generation(&actor, &generation, temporary)
             .await?;
-        let execution = if let Some(project_id) = &generation.project_id {
-            let project = self.project(&actor, project_id).await?;
-            execution_context(&project)?
-        } else {
-            None
+        let execution = match &generation.project_id {
+            Some(id) => execution_context(&self.project(&actor, id).await?)?,
+            None => None,
         };
+        let grant = self
+            .authorize_compiler(
+                token,
+                AuthorizationRequest {
+                    action: Action::Resolve,
+                    template: None,
+                },
+            )
+            .await?;
+        Ok(CompilerExecution {
+            grant,
+            context,
+            project_id: generation.project_id.clone(),
+            execution_context: execution,
+            generation: Some(generation),
+            temporary,
+        })
+    }
+
+    pub async fn compiler_templates_execution(
+        &self,
+        scope: &CompilerExecution,
+        token: &str,
+        compiler: &dyn crate::application::ports::document_compiler::DocumentCompiler,
+        operation: galadril_document_compiler::tools::TemplateOperation,
+    ) -> Result<Value> {
+        use galadril_document_compiler::tools::TemplateOperation;
+        let actor = scope.actor();
+        self.verify(&actor).await?;
+        let tenant = actor.tenant.to_owned();
+        let context = actor.context;
+        let execution = scope.execution_context.clone();
         let execution = match execution {
             Some(execution) => registered_context(
                 &self.agent.capabilities().await?,
@@ -493,7 +688,7 @@ impl PengoloService {
                 template_id,
                 fields,
             } => {
-                let project = generation
+                let project = scope
                     .project_id
                     .as_deref()
                     .context("Document case requires a project")?;
@@ -511,7 +706,7 @@ impl PengoloService {
                             Permission::Use,
                             "document_plugin",
                             &item.plugin_id,
-                            Some(&context),
+                            Some(context),
                         )
                         .await?;
                     items.push(json!({"plugin_id":item.plugin_id,"plugin_version":item.plugin_version,"key":item.key,"name":item.template.name,"enabled":enabled}));
@@ -527,7 +722,7 @@ impl PengoloService {
                             Permission::Manage,
                             "tenant",
                             &tenant,
-                            Some(&context)
+                            Some(context)
                         )
                         .await?,
                     "Plugin administration denied"
@@ -568,7 +763,7 @@ impl PengoloService {
                             Permission::Use,
                             "document_plugin",
                             &item.plugin_id,
-                            Some(&context),
+                            Some(context),
                         )
                         .await?
                     {
@@ -659,10 +854,8 @@ impl PengoloService {
                         paths
                     ))?)
                 );
-                self.save_compiled_artifact(
-                    &actor,
-                    &generation,
-                    token,
+                self.publish_compiler_artifact(
+                    scope,
                     CompiledArtifact {
                         id: &identity,
                         name: &name,
@@ -683,6 +876,19 @@ impl PengoloService {
         jobs: &[String],
         name: &str,
     ) -> Result<Value> {
+        let scope = self.compiler_context(token).await?;
+        self.save_compiled_batch_execution(&scope, token, compiler, jobs, name)
+            .await
+    }
+
+    pub async fn save_compiled_batch_execution(
+        &self,
+        scope: &CompilerExecution,
+        token: &str,
+        compiler: &dyn crate::application::ports::document_compiler::DocumentCompiler,
+        jobs: &[String],
+        name: &str,
+    ) -> Result<Value> {
         use sha2::Digest;
         let _permit = ARCHIVE_LIMIT
             .get_or_init(|| tokio::sync::Semaphore::new(2))
@@ -695,15 +901,6 @@ impl PengoloService {
         let unique: std::collections::BTreeSet<&str> =
             jobs.iter().map(String::as_str).collect();
         ensure!(unique.len() == jobs.len(), "Duplicate compilation job");
-        let (tenant, generation, temporary, context) =
-            self.compiler_actor(token).await?;
-        let actor = Principal {
-            tenant: &tenant,
-            user: &generation.owner_id,
-            context: &context,
-        };
-        self.authorize_generation(&actor, &generation, temporary)
-            .await?;
         let mut archive = galadril_document_compiler::archive::Archive::new();
         for (index, job) in jobs.iter().enumerate() {
             let pdf = compiler.pdf(token, job).await?;
@@ -711,10 +908,8 @@ impl PengoloService {
         }
         let identity =
             format!("{:x}", sha2::Sha256::digest(serde_json::to_vec(jobs)?));
-        self.save_compiled_artifact(
-            &actor,
-            &generation,
-            token,
+        self.publish_compiler_artifact(
+            scope,
             CompiledArtifact {
                 id: &identity,
                 name,

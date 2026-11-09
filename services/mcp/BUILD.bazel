@@ -30,8 +30,8 @@ py_binary(
 )
 py_image_layer(name = "server_layers", binary = ":server")
 oci_image(name = "service_linux", base = "@bristroless_python", entrypoint = ["/app"], tars = [":server_layers"])
-platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"], target_platform = "//:linux_amd64")
-platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
+platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"], target_platform = "//:linux_amd64", visibility = ["//tests/e2e:__pkg__"])
+platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64", visibility = ["//tests/e2e:__pkg__"])
 oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
 oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-mcp", visibility = ["//visibility:public"])
 

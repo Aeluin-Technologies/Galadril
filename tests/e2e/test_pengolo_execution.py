@@ -16,6 +16,7 @@ from clients import (
     SpiceDBProbe,
     gateway_tls_context,
     seed_users,
+    vision_database_ready,
 )
 from environment import pipeline_environment
 
@@ -124,6 +125,54 @@ async def test_pengolo_checkpoint_smoke() -> None:
             assert isinstance(text, str)
             answer = require_mapping(json.loads(text), "published calculation")
             assert answer.get("run_python") == 2
+            await environment.start_vision()
+            await eventually(
+                vision_database_ready,
+                timeout_seconds=180,
+                description="Vision retrieval schema readiness",
+            )
+            data = await gateway.execute(
+                token,
+                "mutation($input: PengoloSendInput!) { sendPengolo(input: $input) { generation { id } } }",
+                {
+                    "input": {
+                        "idempotencyKey": str(uuid.uuid4()),
+                        "modelAlias": "fixture",
+                        "prompt": json.dumps(
+                            {
+                                "entity_id": "mcp_probe_no_entity",
+                                "causal_entity_id": "mcp_probe_no_entity",
+                                "question": "Verify workspace MCP transport",
+                                "pengolo": True,
+                            }
+                        ),
+                    }
+                },
+            )
+            identifier = require_mapping(
+                require_mapping(data.get("sendPengolo"), "MCP send result").get(
+                    "generation"
+                ),
+                "MCP generation",
+            ).get("id")
+            assert isinstance(identifier, str)
+            result = await eventually(
+                completed,
+                timeout_seconds=60,
+                description="workspace MCP generation",
+                abort_on=(AssertionError,),
+            )
+            text = require_mapping(result.get("message"), "MCP response").get(
+                "text"
+            )
+            assert isinstance(text, str)
+            answer = require_mapping(json.loads(text), "MCP tool results")
+            search = require_mapping(
+                answer.get("search"), "real MCP search result"
+            )
+            assert search.get("evidence") == [], (
+                "An unavailable tool is not a successful empty search"
+            )
     finally:
         await gateway.close()
 

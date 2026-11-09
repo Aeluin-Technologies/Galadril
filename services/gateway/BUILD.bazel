@@ -7,6 +7,14 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_test(
+    name = "mcp_workspace_test",
+    srcs = ["tests/mcp_workspace.rs", "src/domain/mcp_workspace.rs"],
+    crate_root = "tests/mcp_workspace.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = crate_deps(["anyhow", "serde", "serde_json", "sha2"]),
+)
+
+rust_test(
     name = "mcp_delegation_test",
     srcs = ["src/application/usecases/mcp_delegation.rs"],
     crate_root = "src/application/usecases/mcp_delegation.rs",

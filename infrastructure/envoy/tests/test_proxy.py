@@ -485,6 +485,77 @@ class ProxyIntegrationTest(unittest.TestCase):
                         remove=True,
                     ).decode()
                     self.assertTrue(response.rstrip().endswith("200"), response)
+                for bearer, status in (
+                    (None, "401"),
+                    (token(), "403"),
+                    (
+                        token(
+                            aud="https://mcp.gravitalia.com/workspace/mcp",
+                            client_id="fixture-workspace",
+                            scope="workspace:use mail:read",
+                        ),
+                        "200",
+                    ),
+                ):
+                    headers = [
+                        "--header",
+                        "x-galadril-mcp-client: forged",
+                        "--header",
+                        "x-galadril-mcp-scopes: forged",
+                    ]
+                    if bearer is not None:
+                        headers.extend(
+                            ["--header", "authorization: Bearer " + bearer]
+                        )
+                    response = self.client.containers.run(
+                        CURL_IMAGE,
+                        command=[
+                            "--silent",
+                            "--show-error",
+                            "--max-time",
+                            "5",
+                            "--request",
+                            "POST",
+                            "--write-out",
+                            "\n%{http_code}",
+                            *headers,
+                            "http://127.0.0.1:8082/internal/mcp/tools",
+                        ],
+                        network_mode=f"container:{backend.id}",
+                        remove=True,
+                    ).decode()
+                    self.assertTrue(
+                        response.rstrip().endswith(status), response
+                    )
+                    self.assertNotIn("forged", response)
+                    if status == "200":
+                        self.assertIn(
+                            "X-Galadril-Mcp-Client: fixture-workspace", response
+                        )
+                        self.assertIn(
+                            "X-Galadril-Mcp-Scopes: workspace:use mail:read",
+                            response,
+                        )
+                response = self.client.containers.run(
+                    CURL_IMAGE,
+                    command=[
+                        "--silent",
+                        "--show-error",
+                        "--max-time",
+                        "5",
+                        "--request",
+                        "POST",
+                        "--header",
+                        "authorization: Bearer " + "a" * 64,
+                        "--write-out",
+                        "\n%{http_code}",
+                        "http://127.0.0.1:8082/internal/mcp/delegated",
+                    ],
+                    network_mode=f"container:{backend.id}",
+                    remove=True,
+                ).decode()
+                self.assertTrue(response.rstrip().endswith("200"), response)
+                self.assertIn("Authorization: Bearer " + "a" * 64, response)
             yield ports
         finally:
             proxy.remove(force=True)

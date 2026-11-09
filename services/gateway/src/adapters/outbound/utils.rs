@@ -25,6 +25,8 @@ pub fn validate_tool_operation(request: &Value) -> Result<()> {
                     "thread" |
                     "attachment" |
                     "drafts" |
+                    "draft" |
+                    "proposal_status" |
                     "save_draft" |
                     "label"
             )
