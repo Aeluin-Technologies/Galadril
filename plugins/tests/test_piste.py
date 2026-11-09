@@ -12,6 +12,7 @@ from galadril_mcp_service.providers.piste_api import (
     PisteClient,
     PisteCredentials,
     PisteUnavailable,
+    read_private_credential,
 )
 from galadril_mcp_service.providers.piste_references import (
     Citation,
@@ -83,17 +84,21 @@ class PisteTest(unittest.IsolatedAsyncioTestCase):
                 )
             source.chmod(0o644)
             with self.assertRaises(PisteUnavailable):
-                PisteCredentials._read(str(source))
+                read_private_credential(str(source))
             source.chmod(0o600)
             link = source.with_name("linked")
             link.symlink_to(source)
             with self.assertRaises(PisteUnavailable):
-                PisteCredentials._read(str(link))
+                read_private_credential(str(link))
+            fifo = source.with_name("fifo")
+            os.mkfifo(fifo, 0o600)
+            with self.assertRaises(PisteUnavailable):
+                read_private_credential(str(fifo))
             source.write_bytes(b"x" * 8193)
             with self.assertRaises(PisteUnavailable):
-                PisteCredentials._read(str(source))
+                read_private_credential(str(source))
         with self.assertRaises(PisteUnavailable):
-            PisteCredentials._read("relative/credentials")
+            read_private_credential("relative/credentials")
 
     async def test_official_consultation_uses_each_funds_identifier_field(
         self,

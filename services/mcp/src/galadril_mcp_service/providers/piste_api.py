@@ -25,6 +25,33 @@ class PisteUnavailable(RuntimeError):
     """Expose an availability category without echoing credentials or queries."""
 
 
+def read_private_credential(location: str) -> str:
+    """Read a bounded secret from a regular, private file without following links."""
+    path = Path(location)
+    if not path.is_absolute():
+        raise PisteUnavailable("An absolute credential path is required")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as source:
+            info = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_mode & 0o077
+                or info.st_size > 8192
+            ):
+                raise PisteUnavailable(
+                    "Credential file requires mode 0600 and bounded content"
+                )
+            data = source.read(8193)
+            if len(data) > 8192:
+                raise PisteUnavailable("Credential file exceeds its size limit")
+            return data.decode().strip()
+    except (OSError, UnicodeError, ValueError):
+        raise PisteUnavailable(
+            "Credential file is unavailable or invalid"
+        ) from None
+
+
 class PisteCredentials(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, hide_input_in_errors=True
@@ -38,12 +65,16 @@ class PisteCredentials(BaseModel):
     def load(cls) -> PisteCredentials:
         """Read operator secrets without exposing them to model arguments."""
         location = os.environ.get("LAW_PISTE_CREDENTIALS_FILE", "")
-        value = cls._read(location) if location else ""
+        value = read_private_credential(location) if location else ""
         if value.startswith("{"):
             return cls.model_validate_json(value)
         values = cls._fields(value)
         oauth_path = os.environ.get("LAW_PISTE_OAUTH_FILE", "")
-        oauth = cls._fields(cls._read(oauth_path)) if oauth_path else {}
+        oauth = (
+            cls._fields(read_private_credential(oauth_path))
+            if oauth_path
+            else {}
+        )
         credentials = {
             "judilibre_key": values.get("API_KEY", value)
             or os.environ.get("LAW_PISTE_API_KEY"),
@@ -70,31 +101,6 @@ class PisteCredentials(BaseModel):
             if match is not None:
                 fields[match[1]] = match[2].strip("\"'")
         return fields
-
-    @staticmethod
-    def _read(location: str) -> str:
-        """Reject symlinks, group-readable secrets and oversized credential files."""
-        path = Path(location)
-        if not path.is_absolute():
-            raise PisteUnavailable("PISTE requires an absolute credential path")
-        try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(descriptor, "rb") as source:
-                info = os.fstat(source.fileno())
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or info.st_mode & 0o077
-                    or info.st_size > 8192
-                ):
-                    raise PisteUnavailable(
-                        "PISTE credential file requires mode 0600 and bounded content"
-                    )
-                value = source.read(8193).decode().strip()
-            return value
-        except (OSError, UnicodeError, ValueError):
-            raise PisteUnavailable(
-                "PISTE credential file is unavailable or invalid"
-            ) from None
 
 
 class _Token(BaseModel):
