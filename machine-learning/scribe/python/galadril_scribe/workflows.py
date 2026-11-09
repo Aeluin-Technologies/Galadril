@@ -134,6 +134,7 @@ class TaskGraph:
         "usage",
         "limits",
         "semaphore",
+        "concurrency",
         "reserve",
         "max_nodes",
         "results",
@@ -169,6 +170,7 @@ class TaskGraph:
             limits,
         )
         self.semaphore = asyncio.Semaphore(concurrency)
+        self.concurrency = concurrency
         self.reserve, self.max_nodes = coordinator_reserve, max_nodes
         self.results: dict[str, TaskResult] = {}
         self.specs: dict[str, TaskSpec] = {}
@@ -296,7 +298,12 @@ class TaskGraph:
                 "Model request budget exhausted; checkpoint retained"
             )
         requests = min(spec.request_budget, available)
-        fraction = Decimal(requests) / Decimal(max(1, available + self.reserve))
+        # Long source contexts need capacity independent of a high request ceiling.
+        # Remaining-capacity reservations still prevent concurrent overspending.
+        fraction = max(
+            Decimal(requests) / Decimal(max(1, available + self.reserve)),
+            Decimal(1) / Decimal(self.concurrency + 1),
+        )
         tokens = self._token_allocation(fraction)
         cost = self._cost_allocation(fraction)
         allocation = UsageLimits(

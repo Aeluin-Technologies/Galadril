@@ -11,6 +11,57 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 
 
 class WorkflowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_source_reviews_are_not_starved_by_a_large_request_ceiling(
+        self,
+    ) -> None:
+        usage = RunUsage()
+        ready = asyncio.Event()
+        admitted = 0
+        reservations: list[int] = []
+
+        async def storage(key: str, value: JsonValue | None) -> JsonValue:
+            return None
+
+        async def execute(
+            spec: TaskSpec,
+            inputs: tuple[TaskResult, ...],
+            limits: UsageLimits,
+            child: RunUsage,
+        ) -> str:
+            nonlocal admitted
+            self.assertIsNotNone(limits.total_tokens_limit)
+            reservations.append(limits.total_tokens_limit or 0)
+            admitted += 1
+            if admitted == 4:
+                ready.set()
+            await ready.wait()
+            child.requests += 4
+            child.input_tokens += 100000
+            limits.check_tokens(child)
+            return "Exact primary source reviewed"
+
+        graph = TaskGraph(
+            execute,
+            storage,
+            usage,
+            UsageLimits(request_limit=4096, total_tokens_limit=8000000),
+            concurrency=4,
+        )
+        results = await graph.run_many(
+            tuple(
+                TaskSpec(
+                    id=f"review-{i}",
+                    skill_ids=("fixture.skill.norms",),
+                    request_budget=32,
+                )
+                for i in range(4)
+            )
+        )
+        self.assertEqual(len(results), 4)
+        self.assertEqual(usage.input_tokens, 400000)
+        self.assertLessEqual(sum(reservations), 8000000)
+        self.assertEqual(graph.held_tokens, 0)
+
     async def test_zero_remaining_cost_and_tokens_stop_before_model_access(
         self,
     ) -> None:
