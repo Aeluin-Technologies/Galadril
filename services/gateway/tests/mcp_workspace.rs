@@ -8,6 +8,19 @@ use anyhow::Result;
 use serde_json::json;
 
 #[test]
+fn unified_email_scopes_preserve_the_read_write_boundary() {
+    let read = ["email:read".to_owned()];
+    let write = ["email:write".to_owned()];
+    assert!(policy::grants_scope(&read, "mail:read"));
+    assert!(!policy::grants_scope(&read, "mail:draft"));
+    assert!(!policy::grants_scope(&read, "mail:send"));
+    assert!(!policy::grants_scope(&write, "mail:read"));
+    assert!(policy::grants_scope(&write, "mail:draft"));
+    assert!(policy::grants_scope(&write, "mail:send"));
+    assert!(!policy::grants_scope(&["mail:draft".into()], "mail:send"));
+}
+
+#[test]
 fn oauth_mail_scopes_cannot_approve_manage_credentials_or_forge_identity()
 -> Result<()> {
     assert_eq!(

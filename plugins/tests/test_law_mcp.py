@@ -447,6 +447,25 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                         transport=httpx.ASGITransport(self.app),
                         base_url="https://mcp.example",
                     ) as http:
+                        metadata = await http.get(
+                            "/.well-known/oauth-protected-resource"
+                        )
+                        assertions.assertEqual(metadata.status_code, 200)
+                        assertions.assertEqual(
+                            metadata.json()["resource"], "https://mcp.example/"
+                        )
+                        assertions.assertTrue(
+                            {"legal:read", "email:read", "email:write"}
+                            <= set(metadata.json()["scopes_supported"])
+                        )
+                        root = await http.post(
+                            "/", json={"method": "tools/list"}
+                        )
+                        assertions.assertEqual(root.status_code, 401)
+                        assertions.assertIn(
+                            'resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"',
+                            root.headers["www-authenticate"],
+                        )
                         for prefix in ("law", "other"):
                             response = await http.get(
                                 "/.well-known/oauth-protected-resource/"
@@ -471,6 +490,14 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
             }
             for name in ("law", "other")
         ]
+        namespaces.append(
+            {
+                "provider": "unified",
+                "capability_id": "fixture.workspace",
+                "path": "/",
+                "scopes": ["workspace:use"],
+            }
+        )
         with (
             patch.dict(
                 os.environ,

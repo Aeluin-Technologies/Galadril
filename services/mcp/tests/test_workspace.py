@@ -13,6 +13,16 @@ from mcp.server.auth.provider import AccessToken
 
 
 class Verifier:
+    resource = "https://mcp.example/workspace/mcp"
+    scopes = [
+        "workspace:use",
+        "mail:read",
+        "mail:draft",
+        "mail:send",
+        "documents:read",
+        "documents:write",
+    ]
+
     async def verify_token(self, token: str) -> AccessToken | None:
         if token != "fixture-token":
             return None
@@ -20,19 +30,60 @@ class Verifier:
             token=token,
             client_id="fixture-workspace",
             subject="fixture-user",
-            scopes=[
-                "workspace:use",
-                "mail:read",
-                "mail:draft",
-                "mail:send",
-                "documents:read",
-                "documents:write",
-            ],
-            resource="https://mcp.example/workspace/mcp",
+            scopes=self.scopes,
+            resource=self.resource,
         )
 
 
 class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_root_discovers_both_providers_and_checks_each_scope(
+        self,
+    ) -> None:
+        verifier = Verifier()
+        verifier.resource = "https://mcp.example/"
+        verifier.scopes = ["workspace:use", "email:read"]
+        result = await self.request("tools/list", {}, verifier=verifier)
+        tools = {tool["name"]: tool for tool in result["result"]["tools"]}
+        self.assertIn("read_email", tools)
+        self.assertIn("verify_citation", tools)
+        self.assertNotIn("invoke_tool", tools)
+        self.assertIn(
+            "email:read",
+            tools["read_email"]["_meta"]["securitySchemes"][0]["scopes"],
+        )
+        read = await self.request(
+            "tools/call",
+            {
+                "name": "read_email",
+                "arguments": {"request": {"operation": "accounts"}},
+            },
+            verifier=verifier,
+        )
+        self.assertFalse(read["result"].get("isError", False))
+        legal = await self.request(
+            "tools/call",
+            {
+                "name": "search",
+                "arguments": {"query": "vice de procédure"},
+            },
+            verifier=verifier,
+        )
+        self.assertTrue(legal["result"]["isError"])
+        send = await self.request(
+            "tools/call",
+            {
+                "name": "send_email",
+                "arguments": {
+                    "account": "a" * 32,
+                    "draft": "b" * 32,
+                    "revision": 1,
+                },
+            },
+            verifier=verifier,
+        )
+        self.assertTrue(send["result"]["isError"])
+        self.assertEqual(len(self.calls), 1)
+
     async def test_native_workspace_call_keeps_parent_authority_inside_gateway(
         self,
     ) -> None:
@@ -123,7 +174,16 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                     )
             self.assertEqual(result, {"value": {"evidence": []}})
 
-    async def request(self, method: str, params: dict[str, object]) -> dict:
+    async def request(
+        self,
+        method: str,
+        params: dict[str, object],
+        *,
+        verifier: Verifier | None = None,
+    ) -> dict:
+        verifier = verifier or Verifier()
+        root = verifier.resource.endswith("/")
+
         async def gateway(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url, "http://gateway/internal/mcp/tools")
             self.assertEqual(
@@ -141,13 +201,13 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             server = create_server(
                 MCPAuth(
                     issuer="https://issuer.example/",
-                    resource="https://mcp.example/workspace/mcp",
+                    resource=verifier.resource,
                     jwks_url="https://issuer.example/jwks",
                     scopes=("workspace:use",),
                 ),
                 http,
-                provider="workspace",
-                verifier=Verifier(),
+                provider="unified" if root else "workspace",
+                verifier=verifier,
             )
             app = server.streamable_http_app()
             async with app.router.lifespan_context(app):
@@ -160,7 +220,7 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                     },
                 ) as client:
                     result = await client.post(
-                        "/workspace/mcp",
+                        "/" if root else "/workspace/mcp",
                         json={
                             "jsonrpc": "2.0",
                             "id": 1,

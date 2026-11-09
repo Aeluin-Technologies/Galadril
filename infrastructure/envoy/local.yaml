@@ -961,7 +961,7 @@ static_resources:
               providers:
                 workspace:
                   issuer: https://aeluin.gravitalia.com
-                  audiences: [https://mcp.gravitalia.com/workspace/mcp]
+                  audiences: [https://mcp.gravitalia.com/, https://mcp.gravitalia.com/workspace/mcp]
                   require_expiration: true
                   clock_skew_seconds: 1
                   remote_jwks:
@@ -1195,6 +1195,14 @@ static_resources:
                       - header: {key: x-content-type-options, value: nosniff}
                     routes:
                       - match:
+                          path: /.well-known/oauth-protected-resource
+                          headers: [{name: ':method', string_match: {exact: GET}}]
+                        route: {cluster: legal_service, timeout: 5s}
+                      - match:
+                          path: /
+                          headers: [{name: ':method', string_match: {exact: POST}}]
+                        route: {cluster: legal_service, timeout: 120s}
+                      - match:
                           prefix: /.well-known/oauth-protected-resource/
                           headers: [{name: ':method', string_match: {exact: GET}}]
                         route: {cluster: legal_service, timeout: 5s}
@@ -1215,7 +1223,7 @@ static_resources:
                 - name: envoy.filters.http.buffer
                   typed_config:
                     '@type': type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
-                    max_request_bytes: 65536
+                    max_request_bytes: 1048576
                 - name: envoy.filters.http.router
                   typed_config:
                     '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

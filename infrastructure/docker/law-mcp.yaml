@@ -2,7 +2,6 @@
 services:
   mcp:
     environment:
-      MCP_NAMESPACES: '[{"provider":"workspace","capability_id":"core.mcp.workspace","path":"/workspace/mcp","scopes":["workspace:use"],"clients":["galadril-mcp-chatgpt-workspace"],"request_body_limit":1048576},{"provider":"piste","capability_id":"law.mcp.research","path":"/law/mcp","scopes":["legal:read"],"clients":["galadril-mcp-chatgpt-law"]}]'
       LAW_PISTE_CREDENTIALS_FILE: /run/secrets/piste-key
       LAW_PISTE_OAUTH_FILE: /run/secrets/piste-oauth
     volumes:

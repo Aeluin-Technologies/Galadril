@@ -24,9 +24,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import Tool as MCPTool
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
 from starlette.applications import Starlette
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from galadril_mcp_service.providers.unified import SCOPES as UNIFIED_SCOPES
 
 
 class NamespaceServer(FastMCP):
@@ -102,7 +104,7 @@ class Namespace(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     provider: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     capability_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,127}$")
-    path: str = Field(pattern=r"^/[a-z][a-z0-9_/-]{0,127}/mcp$")
+    path: str = Field(pattern=r"^(?:/|/[a-z][a-z0-9_/-]{0,127}/mcp)$")
     scopes: tuple[str, ...] = Field(min_length=1, max_length=32)
     clients: tuple[str, ...] = Field(default=(), max_length=128)
     request_body_limit: int = Field(default=65536, ge=65536, le=1024 * 1024)
@@ -176,9 +178,19 @@ async def serve() -> None:
             app = server.streamable_http_app()
             apps.append(app)
             routes[namespace.path] = app
-            routes["/.well-known/oauth-protected-resource" + namespace.path] = (
-                app
-            )
+            metadata = "/.well-known/oauth-protected-resource"
+            if namespace.path == "/":
+                routes[metadata] = JSONResponse(
+                    {
+                        "resource": settings.resource,
+                        "authorization_servers": [settings.issuer],
+                        "scopes_supported": UNIFIED_SCOPES,
+                        "bearer_methods_supported": ["header"],
+                    },
+                    headers={"Cache-Control": "no-store"},
+                )
+            else:
+                routes[metadata + namespace.path] = app
 
         @asynccontextmanager
         async def lifespan(app: Starlette) -> AsyncIterator[None]:

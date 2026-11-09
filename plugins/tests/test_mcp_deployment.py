@@ -1,5 +1,6 @@
 """Keep the public tunnel on a bounded Envoy ingress, away from PISTE secrets."""
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -25,6 +26,11 @@ class MCPDeploymentTest(unittest.TestCase):
         self.assertIn(
             "core.mcp.workspace", service["environment"]["MCP_NAMESPACES"]
         )
+        namespaces = json.loads(service["environment"]["MCP_NAMESPACES"])
+        root_namespace = next(
+            item for item in namespaces if item["path"] == "/"
+        )
+        self.assertEqual(root_namespace["provider"], "unified")
         compose = yaml.safe_load(
             (root / "infrastructure/docker/docker-compose.yaml").read_text()
         )
@@ -69,11 +75,17 @@ class MCPDeploymentTest(unittest.TestCase):
         routes = listener["filter_chains"][0]["filters"][0]["typed_config"][
             "route_config"
         ]["virtual_hosts"][0]["routes"]
-        pattern = routes[1]["match"]["safe_regex"]["regex"]
+        paths = {route["match"].get("path") for route in routes}
+        self.assertIn("/", paths)
+        self.assertIn("/.well-known/oauth-protected-resource", paths)
+        legacy = next(
+            route for route in routes if "safe_regex" in route["match"]
+        )
+        pattern = legacy["match"]["safe_regex"]["regex"]
         self.assertIsNotNone(re.fullmatch(pattern, "/law/mcp"))
         self.assertIsNotNone(re.fullmatch(pattern, "/another/mcp"))
         self.assertIsNone(re.fullmatch(pattern, "/admin"))
-        self.assertNotIn("prefix_rewrite", routes[1]["route"])
+        self.assertNotIn("prefix_rewrite", legacy["route"])
         self.assertEqual(routes[-1]["direct_response"]["status"], 404)
 
 

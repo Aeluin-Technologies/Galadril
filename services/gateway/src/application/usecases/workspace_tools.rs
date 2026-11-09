@@ -154,7 +154,10 @@ impl ChatTools {
         let required = required_scope(&input.request)?;
         ensure!(
             identity.scopes.iter().any(|scope| scope == "workspace:use") &&
-                identity.scopes.iter().any(|scope| scope == required),
+                crate::domain::mcp_workspace::grants_scope(
+                    &identity.scopes,
+                    required
+                ),
             "MCP scope denied"
         );
         self.identity

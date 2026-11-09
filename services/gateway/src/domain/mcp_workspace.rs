@@ -72,6 +72,19 @@ pub fn required_scope(request: &Value) -> Result<&'static str> {
     }
 }
 
+/// New clients share one write scope, while old draft grants cannot request
+/// delivery.
+pub fn grants_scope(scopes: &[String], required: &str) -> bool {
+    let unified = match required {
+        "mail:read" => Some("email:read"),
+        "mail:draft" | "mail:send" => Some("email:write"),
+        _ => None,
+    };
+    scopes
+        .iter()
+        .any(|scope| scope == required || unified == Some(scope.as_str()))
+}
+
 /// Stable, length-delimited identities let jobs survive MCP reconnects without
 /// crossing principals.
 pub fn execution_id(
