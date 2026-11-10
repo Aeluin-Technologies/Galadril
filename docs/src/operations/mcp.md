@@ -59,7 +59,7 @@ loopback MCP listener on port 8098, with an exact host match for
 Add a public hostname to the existing Cloudflare Tunnel configuration:
 `mcp.gravitalia.com` → `http://127.0.0.1:8098`, preserving the original Host
 header (or explicitly setting it to `mcp.gravitalia.com`). The existing Compose
-connector `utils-email-tunnel` shares the API proxy network namespace. Its
+connector `tunnel` shares the API proxy network namespace. Its
 `tunnel` profile enables the connector independently of email tracking. An independently managed
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the

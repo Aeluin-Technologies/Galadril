@@ -82,28 +82,3 @@ services:
     depends_on:
       utils-email:
         condition: service_started
-
-  utils-email-tunnel:
-    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
-    profiles: [email-tracking, tunnel]
-    network_mode: service:api-proxy
-    user: "${GALADRIL_UTILS_UID:-1000}:${GALADRIL_UTILS_GID:-1000}"
-    command: [tunnel, --no-autoupdate, run, --token-file, /run/tunnel/token]
-    init: true
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 128m
-    cpus: 0.5
-    pids_limit: 64
-    volumes:
-      - type: bind
-        source: ${GALADRIL_UTILS_TUNNEL_TOKEN_FILE:-../../.local/utils-email/cloudflare/token}
-        target: /run/tunnel/token
-        read_only: true
-        bind:
-          create_host_path: false
-    depends_on:
-      api-proxy:
-        condition: service_started
