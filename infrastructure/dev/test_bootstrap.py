@@ -179,6 +179,13 @@ class BootstrapTest(unittest.IsolatedAsyncioTestCase):
             (state / "gateway/cert.pem").read_bytes()
         )
         leaf.verify_directly_issued_by(ca)
+        issuer_key = ca.extensions.get_extension_for_class(
+            x509.SubjectKeyIdentifier
+        ).value.digest
+        leaf_authority = leaf.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value.key_identifier
+        self.assertEqual(leaf_authority, issuer_key)
         san = leaf.extensions.get_extension_for_class(
             x509.SubjectAlternativeName
         ).value

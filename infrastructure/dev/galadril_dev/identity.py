@@ -9,7 +9,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 
 from .files import BootstrapError, private_directory, read, write
 
@@ -63,7 +63,14 @@ def certificates(directory: Path, *, renew: bool = False) -> None:
         raise BootstrapError(
             "Development CA certificate does not match its key"
         )
-    if ca is None or ca.not_valid_after_utc <= now + timedelta(days=7):
+    if (
+        ca is None
+        or ca.not_valid_after_utc <= now + timedelta(days=7)
+        or not any(
+            ext.oid == ExtensionOID.SUBJECT_KEY_IDENTIFIER
+            for ext in ca.extensions
+        )
+    ):
         subject = x509.Name(
             [
                 x509.NameAttribute(
@@ -81,6 +88,10 @@ def certificates(directory: Path, *, renew: bool = False) -> None:
             .not_valid_after(now + timedelta(days=365))
             .add_extension(
                 x509.BasicConstraints(ca=True, path_length=0), critical=True
+            )
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                critical=False,
             )
             .add_extension(
                 x509.KeyUsage(
@@ -121,6 +132,10 @@ def certificates(directory: Path, *, renew: bool = False) -> None:
             renew
             or leaf is None
             or leaf.not_valid_after_utc <= now + timedelta(days=7)
+            or not any(
+                ext.oid == ExtensionOID.AUTHORITY_KEY_IDENTIFIER
+                for ext in leaf.extensions
+            )
         ):
             subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
             leaf = (
@@ -134,6 +149,12 @@ def certificates(directory: Path, *, renew: bool = False) -> None:
                 .add_extension(
                     x509.BasicConstraints(ca=False, path_length=None),
                     critical=True,
+                )
+                .add_extension(
+                    x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                        ca_key.public_key()
+                    ),
+                    critical=False,
                 )
                 .add_extension(
                     x509.SubjectAlternativeName(
