@@ -170,6 +170,44 @@ class DocumentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["file_id"], "a" * 32)
         self.assertNotIn("content_base64", calls[0])
 
+    async def test_unavailable_compilation_or_poll_returns_a_tool_result(
+        self,
+    ) -> None:
+        context = cast(
+            RunContext[Dependencies],
+            SimpleNamespace(
+                deps=SimpleNamespace(capability="fixture"), tool_call_id="call"
+            ),
+        )
+        request = Compilation.model_validate(
+            {"documents": [{"template_id": "a" * 32, "version": "b" * 64}]}
+        )
+        for blocked in ("compile_document", "document_job"):
+            with self.subTest(operation=blocked):
+                calls: list[str] = []
+
+                async def invoke(
+                    ctx: RunContext[Dependencies],
+                    operation: str,
+                    payload: dict[str, JsonValue],
+                    blocked: str = blocked,
+                    calls: list[str] = calls,
+                ) -> str:
+                    calls.append(operation)
+                    if operation == blocked:
+                        raise ToolFailure("Fixture service unavailable")
+                    return json.dumps({"job_id": "c" * 64})
+
+                tool = next(
+                    tool
+                    for tool in document_tools(invoke)
+                    if tool.name == "compile_document"
+                )
+                result = json.loads(await tool.function(context, request))
+                self.assertEqual(result["status"], "unavailable")
+                self.assertEqual(result["operation"], blocked)
+                self.assertEqual(calls[-1], blocked)
+
     async def test_multiple_compilations_publish_one_zip_with_stable_request_ids(
         self,
     ) -> None:

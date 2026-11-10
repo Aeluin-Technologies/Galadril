@@ -262,9 +262,12 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
                     "source": document.source,
                 },
             }
-            result = JSON.validate_json(
-                await safe_invoke(ctx, "compile_document", {"request": payload})
+            response = await safe_invoke(
+                ctx, "compile_document", {"request": payload}
             )
+            if isinstance(response, UnavailableToolResult):
+                return response
+            result = JSON.validate_json(response)
             if not isinstance(result, dict) or not isinstance(
                 result.get("job_id"), str
             ):
@@ -274,13 +277,14 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
         pending = set(jobs)
         while pending and time.monotonic() < deadline:
             for identifier in tuple(pending):
-                status = JSON.validate_json(
-                    await safe_invoke(
-                        ctx,
-                        "document_job",
-                        {"request": {"action": "status", "job_id": identifier}},
-                    )
+                response = await safe_invoke(
+                    ctx,
+                    "document_job",
+                    {"request": {"action": "status", "job_id": identifier}},
                 )
+                if isinstance(response, UnavailableToolResult):
+                    return response
+                status = JSON.validate_json(response)
                 if not isinstance(status, dict):
                     raise ValueError("Invalid compilation status")
                 if status.get("status") == "completed":
