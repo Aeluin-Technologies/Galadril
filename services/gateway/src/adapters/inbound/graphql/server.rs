@@ -767,7 +767,7 @@ fn policy_context(
 }
 
 /// Returns the active valid OTLP trace identifier when present.
-fn current_trace_id() -> Option<String> {
+pub(crate) fn current_trace_id() -> Option<String> {
     let context = tracing::Span::current().context();
     let span = context.span();
     let span_context = span.span_context();
