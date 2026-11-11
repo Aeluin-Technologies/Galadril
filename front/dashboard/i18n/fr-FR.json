@@ -665,6 +665,7 @@
     "layerTypeCount": "{count} types"
   },
   "email": {
+    "signatureHelp": "Markdown et HTML sont pris en charge.",
     "chat": {
       "seeDetails": "Voir les détails",
       "hideDetails": "Masquer les détails",

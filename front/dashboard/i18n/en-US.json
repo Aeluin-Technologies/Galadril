@@ -1759,7 +1759,7 @@
     "searchLanguages": "Search languages",
     "noMatches": "No matching options",
     "signaturePreview": "Signature preview",
-    "signatureHelp": "Markdown and HTML are supported. Line breaks are preserved. Use the small HTML element for smaller text and ![Logo](https://example.org/logo.png) for an image. Scripts and unsafe image URLs are removed.",
+    "signatureHelp": "Markdown and HTML are supported.",
     "reference": "Reference:",
     "insertSignatureField": "Insert an automatic field",
     "chooseSignatureField": "Choose a field",
