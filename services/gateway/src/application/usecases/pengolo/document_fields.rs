@@ -106,21 +106,62 @@ fn open_profile(
     serde_json::from_slice(text).context("Invalid document vault entry")
 }
 
+fn profile_from_record(
+    actor: &Principal<'_>,
+    record: Option<&Record>,
+) -> Result<DocumentFields> {
+    let Some(envelope) = record
+        .and_then(|record| record.data.get("documentProfile"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(BTreeMap::new());
+    };
+    open_profile(&vault_key()?, &vault_aad(actor)?, envelope)
+}
+
 impl PengoloService {
+    #[tracing::instrument(skip_all)]
+    pub async fn read_document_profile(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        let record = self.preference_record(actor).await?;
+        let fields = profile_from_record(actor, record.as_ref())?;
+        tracing::info!(event.name = "pengolo.document_profile.read");
+        Ok(json!({
+            "revision": record.as_ref().map_or(0, |record| record.revision),
+            "first_name": fields.get("first_name").map_or("", String::as_str),
+            "last_name": fields.get("last_name").map_or("", String::as_str),
+            "address": fields.get("address").map_or("", String::as_str),
+            "email": fields.get("email").map_or("", String::as_str),
+        }))
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn save_document_profile(
         &self,
         actor: &Principal<'_>,
         revision: i64,
-        fields: DocumentFields,
+        mut fields: DocumentFields,
     ) -> Result<bool> {
         self.verify(actor).await?;
-        validate_fields(&fields)?;
         let existing = self.preference_record(actor).await?;
         ensure!(
             existing.as_ref().map_or(0, |record| record.revision) == revision,
             "Preferences changed; reload before saving"
         );
+        if !fields.contains_key("title") || !fields.contains_key("capacity") {
+            // Older published templates can still bind fields hidden by the
+            // account UI.
+            let mut prior = profile_from_record(actor, existing.as_ref())?;
+            for name in ["title", "capacity"] {
+                if let Some(value) = prior.remove(name) {
+                    fields.entry(name.into()).or_insert(value);
+                }
+            }
+        }
+        validate_fields(&fields)?;
         let encrypted =
             seal_profile(&vault_key()?, &vault_aad(actor)?, &fields)?;
         let mut record = existing.unwrap_or_else(|| Record {
@@ -155,14 +196,7 @@ impl PengoloService {
         actor: &Principal<'_>,
     ) -> Result<DocumentFields> {
         let record = self.preference_record(actor).await?;
-        let Some(envelope) = record
-            .as_ref()
-            .and_then(|record| record.data.get("documentProfile"))
-            .and_then(Value::as_str)
-        else {
-            return Ok(BTreeMap::new());
-        };
-        open_profile(&vault_key()?, &vault_aad(actor)?, envelope)
+        profile_from_record(actor, record.as_ref())
     }
 
     async fn document_case_template(

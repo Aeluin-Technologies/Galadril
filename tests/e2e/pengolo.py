@@ -40,6 +40,7 @@ _INPUT_TYPES = {
     "deletePengoloFile": "PengoloFileInput",
     "pengoloDownload": "PengoloFileInput",
     "updatePengoloPreferences": "PengoloPreferencesInput",
+    "savePengoloDocumentProfile": "PengoloDocumentProfileInput",
 }
 _SELECTIONS = {
     "sendPengolo": f"{{ chat {_CHAT} generation {{ id data {{ status chatId sequence }} }} userMessage {{ id text fileIds }} }}",
@@ -467,11 +468,41 @@ async def exercise_pengolo(
         },
         "owner",
     )
-    await _object_mutation(
+    final_preferences = await _object_mutation(
         gateway,
         "updatePengoloPreferences",
         {"revision": saved_preferences["revision"], "instructions": ""},
     )
+    profile_query = "query { pengoloDocumentProfile { revision firstName lastName address email } }"
+    profile_fields = {
+        "firstName": "Camille",
+        "lastName": "Fixture",
+        "address": "10 rue Exemple",
+        "email": "camille@example.test",
+    }
+    revision = final_preferences["revision"]
+    assert isinstance(revision, (int, float))
+    assert (
+        await _mutation(
+            gateway,
+            "savePengoloDocumentProfile",
+            {"revision": revision, **profile_fields},
+        )
+        is True
+    )
+    assert (await gateway.execute(token, profile_query))[
+        "pengoloDocumentProfile"
+    ] == {
+        "revision": revision + 1,
+        **profile_fields,
+    }
+    outsider = await gateway.execute(
+        authenticated_token(OUTSIDER_ID), profile_query
+    )
+    assert outsider["pengoloDocumentProfile"] == {
+        "revision": 0,
+        **dict.fromkeys(profile_fields, ""),
+    }
     administrator_token = authenticated_token(administrator)
     result = await gateway.execute(
         token,

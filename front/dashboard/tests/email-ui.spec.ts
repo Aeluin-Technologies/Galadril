@@ -1,6 +1,90 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("account settings show the saved document profile and edit one row", async ({
+  page,
+}, testInfo) => {
+  let profile = {
+    revision: 7,
+    firstName: "Camille",
+    lastName: "Martin",
+    email: "camille@example.test",
+    address: "10 rue Exemple",
+  };
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const body = route.request().postDataJSON();
+    if (body.query.includes("savePengoloDocumentProfile")) {
+      expect(body.variables.input).toEqual({
+        ...profile,
+        firstName: "Dominique",
+      });
+      profile = { ...body.variables.input, revision: 8 };
+      return route.fulfill({
+        json: { data: { savePengoloDocumentProfile: true } },
+      });
+    }
+    return route.fulfill({
+      json: { data: { pengoloDocumentProfile: profile } },
+    });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/settings\/user(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/settings/user#account");
+  await expect(
+    page.getByRole("heading", { name: "General", exact: true }),
+  ).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText("Camille", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit First name" }).click();
+  await page.getByRole("textbox", { name: "First name" }).fill("Dominique");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Details saved." }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Dominique", { exact: true })).toBeVisible();
+  await expect(page.getByText("Capacity", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Title", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("account-wide.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("button", { name: "Edit First name" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("account-narrow.png") });
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("pengolo-access-invalidated")),
+  );
+  await expect(page.getByText("Dominique", { exact: true })).toHaveCount(0);
+});
+
 test("personal instructions load, save and survive navigation without exposing an owner selector", async ({
   page,
 }, testInfo) => {

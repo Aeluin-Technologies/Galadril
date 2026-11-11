@@ -1,4 +1,24 @@
 {
+  "accountSettings": {
+    "title": "Account",
+    "navigation": "Your details for documents",
+    "general": "General",
+    "loading": "Loading your details…",
+    "help": "Galadril stores these details encrypted. The compiler can use them to fill in authorized documents.",
+    "empty": "Not provided",
+    "edit": "Edit {field}",
+    "save": "Save",
+    "saved": "Details saved.",
+    "loadError": "Your details could not be loaded.",
+    "saveError": "Your changes could not be saved. Reload your details and try again.",
+    "reload": "Reload details",
+    "fields": {
+      "firstName": "First name",
+      "lastName": "Last name",
+      "address": "Postal address",
+      "email": "Email"
+    }
+  },
   "actions": {
     "close": "Close",
     "working": "Operation in progress",
@@ -1908,21 +1928,6 @@
     "useIcon": "Use {name} icon"
   },
   "personalization": {
-    "documentProfile": {
-      "title": "Private document profile",
-      "help": "The compiler uses these encrypted details to fill in documents. They stay outside the chat. Saving replaces your previous profile.",
-      "save": "Save private profile",
-      "saved": "Private profile saved.",
-      "error": "The private profile could not be saved. Reload the settings and try again.",
-      "fields": {
-        "firstName": "First name",
-        "lastName": "Last name",
-        "address": "Postal address",
-        "title": "Title",
-        "email": "Email",
-        "capacity": "Capacity"
-      }
-    },
     "title": "Pengolo",
     "navigation": "Your style and preferences",
     "description": "Choose how Pengolo responds across your conversations.",

@@ -1,19 +1,22 @@
 {
-  "personalization": {
-    "documentProfile": {
-      "title": "Profil privé pour les documents",
-      "help": "Le compilateur utilise ces données chiffrées pour remplir les documents. Elles restent hors du chat. L’enregistrement remplace votre profil précédent.",
-      "save": "Enregistrer le profil privé",
-      "saved": "Profil privé enregistré.",
-      "error": "Le profil privé n’a pas pu être enregistré. Rechargez les réglages et réessayez.",
-      "fields": {
-        "firstName": "Prénom",
-        "lastName": "Nom",
-        "address": "Adresse postale",
-        "title": "Civilité",
-        "email": "Courriel",
-        "capacity": "Qualité"
-      }
+  "accountSettings": {
+    "title": "Compte",
+    "navigation": "Vos coordonnées pour les documents",
+    "general": "Général",
+    "loading": "Chargement de vos coordonnées…",
+    "help": "Galadril conserve ces coordonnées sous forme chiffrée. Le compilateur peut les insérer dans les documents autorisés.",
+    "empty": "Non renseigné",
+    "edit": "Modifier le champ « {field} »",
+    "save": "Enregistrer",
+    "saved": "Coordonnées enregistrées.",
+    "loadError": "Vos coordonnées n’ont pas pu être chargées.",
+    "saveError": "Vos modifications n’ont pas pu être enregistrées. Rechargez vos coordonnées puis réessayez.",
+    "reload": "Recharger les coordonnées",
+    "fields": {
+      "firstName": "Prénom",
+      "lastName": "Nom",
+      "address": "Adresse postale",
+      "email": "Courriel"
     }
   },
   "pengolo": {

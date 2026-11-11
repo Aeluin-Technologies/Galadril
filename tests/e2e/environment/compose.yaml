@@ -377,6 +377,7 @@ services:
       UTILS_SERVICE_KEY_FILE: !reset null
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       SCRIBE__ENABLED: "true"
+      PENGOLO_DOCUMENT_VAULT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
       SPICEDB_SCHEMA_PATH: /e2e/spicedb/schema.zed
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

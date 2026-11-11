@@ -18,43 +18,6 @@ const busy = ref(false);
 const error = ref("");
 const notice = ref("");
 let pending: AbortController | undefined;
-const profileFields = ["firstName", "lastName", "address", "title", "email", "capacity"] as const;
-const profile = reactive({
-  firstName: "", lastName: "", address: "", title: "", email: "", capacity: "",
-});
-const profileError = ref("");
-const profileNotice = ref("");
-function clearProfile(): void {
-  for (const field of profileFields) profile[field] = "";
-}
-async function saveProfile(): Promise<void> {
-  if (!saved.value || busy.value) return;
-  stop();
-  const controller = new AbortController();
-  pending = controller;
-  busy.value = true;
-  profileError.value = "";
-  profileNotice.value = "";
-  try {
-    await pengoloMutation<boolean>(
-      "savePengoloDocumentProfile",
-      { revision: saved.value.revision, ...profile },
-      controller.signal,
-    );
-    if (controller.signal.aborted) return;
-    clearProfile();
-    saved.value = { ...saved.value, revision: saved.value.revision + 1 };
-    profileNotice.value = t("personalization.documentProfile.saved");
-  } catch {
-    if (!controller.signal.aborted)
-      profileError.value = t("personalization.documentProfile.error");
-  } finally {
-    if (pending === controller) {
-      pending = undefined;
-      busy.value = false;
-    }
-  }
-}
 const dirty = computed(
   () => saved.value !== null && instructions.value !== saved.value.instructions,
 );
@@ -73,9 +36,6 @@ function clear(): void {
   saved.value = null;
   error.value = "";
   notice.value = "";
-  profileError.value = "";
-  profileNotice.value = "";
-  clearProfile();
 }
 function invalidate(): void {
   clear();
@@ -183,31 +143,5 @@ onActivated(() => {
         >{{ $t("personalization.reload") }}</UiButton
       >
     </div>
-  </form>
-  <form
-    class="mt-5 space-y-4 rounded-panel border border-border bg-surface p-6"
-    autocomplete="off"
-    @submit.prevent="saveProfile"
-  >
-    <h2 class="text-lg font-semibold">{{ $t("personalization.documentProfile.title") }}</h2>
-    <p class="text-sm text-muted">{{ $t("personalization.documentProfile.help") }}</p>
-    <div class="grid gap-4 sm:grid-cols-2">
-      <UiInput
-        v-for="field in profileFields"
-        :key="field"
-        v-model="profile[field]"
-        :label="$t(`personalization.documentProfile.fields.${field}`)"
-        :required="field === 'firstName' || field === 'lastName' || field === 'address'"
-        :disabled="!saved || busy"
-        :type="field === 'email' ? 'email' : 'text'"
-        maxlength="256"
-        autocomplete="off"
-      />
-    </div>
-    <UiAlert v-if="profileError" tone="danger">{{ profileError }}</UiAlert>
-    <p v-if="profileNotice" role="status" class="text-success">{{ profileNotice }}</p>
-    <UiButton type="submit" :disabled="!saved || busy">{{
-      $t("personalization.documentProfile.save")
-    }}</UiButton>
   </form>
 </template>

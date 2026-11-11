@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import SettingsNavigation from "~/components/Settings/Navigation.vue";
+import AccountSettings from "~/components/Settings/Account.vue";
 const { t } = useI18n();
 const route = useRoute();
 const panel = ref<HTMLElement>();
 const sections = computed(() => [
+  {
+    id: "account",
+    label: t("accountSettings.title"),
+    description: t("accountSettings.navigation"),
+  },
   {
     id: "personalization",
     label: t("personalization.title"),
@@ -21,11 +27,13 @@ const sections = computed(() => [
   },
 ]);
 const activeSection = computed(() =>
-  route.hash === "#personalization"
-    ? "personalization"
-    : route.hash === "#oauth"
-      ? "oauth"
-      : "email",
+  route.hash === "#account"
+    ? "account"
+    : route.hash === "#personalization"
+      ? "personalization"
+      : route.hash === "#oauth"
+        ? "oauth"
+        : "email",
 );
 watch(activeSection, () => nextTick(() => panel.value?.scrollTo({ top: 0 })));
 useHead({
@@ -50,6 +58,7 @@ useHead({
         />
         <div :id="activeSection" class="min-w-0 flex-1 space-y-6">
           <EmailWorkspace v-if="activeSection === 'email'" embedded />
+          <AccountSettings v-else-if="activeSection === 'account'" />
           <AiPersonalInstructions
             v-else-if="activeSection === 'personalization'"
           />

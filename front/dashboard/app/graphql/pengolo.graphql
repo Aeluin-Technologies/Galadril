@@ -328,7 +328,16 @@ query Agents {
       pluginId
       kind
       execution
-      executionProfile { requiresContext isolation contexts { id name aliases privacy } }
+      executionProfile {
+        requiresContext
+        isolation
+        contexts {
+          id
+          name
+          aliases
+          privacy
+        }
+      }
       compatibility {
         allowedModels
         requires
@@ -366,6 +375,16 @@ query PengoloOpenaiAccount {
 }
 mutation savePengoloDocumentProfile($input: PengoloDocumentProfileInput!) {
   savePengoloDocumentProfile(input: $input)
+}
+
+query PengoloDocumentProfile {
+  pengoloDocumentProfile {
+    revision
+    firstName
+    lastName
+    address
+    email
+  }
 }
 
 query PengoloPreferences {
