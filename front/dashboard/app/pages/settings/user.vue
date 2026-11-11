@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SettingsNavigation from "~/components/Settings/Navigation.vue";
 import AccountSettings from "~/components/Settings/Account.vue";
+import HandwrittenSignatures from "~/components/Settings/HandwrittenSignatures.vue";
 const { t } = useI18n();
 const route = useRoute();
 const panel = ref<HTMLElement>();
@@ -58,7 +59,10 @@ useHead({
         />
         <div :id="activeSection" class="min-w-0 flex-1 space-y-6">
           <EmailWorkspace v-if="activeSection === 'email'" embedded />
-          <AccountSettings v-else-if="activeSection === 'account'" />
+          <template v-else-if="activeSection === 'account'">
+            <AccountSettings />
+            <HandwrittenSignatures />
+          </template>
           <AiPersonalInstructions
             v-else-if="activeSection === 'personalization'"
           />

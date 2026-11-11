@@ -39,4 +39,5 @@ supportedArchitectures:
     - glibc
 
 patchedDependencies:
+  "@libpdf/core@0.5.3": patches/libpdf-core@0.5.3.patch
   "@nuxtjs/i18n@10.6.0": patches/@nuxtjs__i18n@10.6.0.patch

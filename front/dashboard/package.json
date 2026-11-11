@@ -21,6 +21,7 @@
   "dependencies": {
     "@galadril/ui": "workspace:*",
     "@heroicons/vue": "^2.2.0",
+    "@libpdf/core": "0.5.3",
     "@nuxt/a11y": "1.0.0-alpha.1",
     "@nuxt/eslint": "1.17.0",
     "@nuxt/hints": "1.1.5",
@@ -32,6 +33,7 @@
     "@opentelemetry/exporter-metrics-otlp-http": "0.300.0",
     "@opentelemetry/resources": "3.0.0",
     "@opentelemetry/sdk-metrics": "3.0.0",
+    "@peculiar/x509": "2.2.0",
     "@pinia/nuxt": "^1.0.3",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
@@ -59,6 +61,7 @@
     "nuxt-security": "^2.7.0",
     "pinia": "^4.1.0",
     "prettier": "^3.9.10",
+    "reflect-metadata": "0.2.2",
     "std-env": "^4.3.0",
     "vue": "^3.5.44",
     "vue-echarts": "8.3.2",

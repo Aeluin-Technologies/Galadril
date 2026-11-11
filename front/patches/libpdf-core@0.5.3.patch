@@ -1,0 +1,16 @@
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -42495,7 +42495,12 @@
+ 				break;
+ 			}
+ 		}
+-		if (!fieldDict) fieldDict = form.createSignatureField(fieldName ?? generateUniqueName(existingNames, namePrefix)).getDict();
++		if (fieldDict) {
++			// An existing widget already belongs to the correct page and may carry a signed appearance.
++			fieldDict.set("V", valueRef);
++			return;
++		}
++		fieldDict = form.createSignatureField(fieldName ?? generateUniqueName(existingNames, namePrefix)).getDict();
+ 		fieldDict.set("V", valueRef);
+ 		this.removeWidgetKidsFromPages(fieldDict);
+ 		fieldDict.delete("Kids");

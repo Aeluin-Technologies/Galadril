@@ -8,6 +8,10 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const account = useAccount();
+const source = shallowRef<Blob>();
+const signing = ref(false);
+const loadDocumentSigning = () => import("./DocumentSigning.vue");
+const DocumentSigning = defineAsyncComponent(loadDocumentSigning);
 const loading = ref(false),
   error = ref(""),
   url = ref(""),
@@ -16,6 +20,8 @@ const loading = ref(false),
 let epoch = 0;
 let controller: AbortController | undefined;
 function clear() {
+  signing.value = false;
+  source.value = undefined;
   epoch++;
   controller?.abort();
   controller = undefined;
@@ -115,6 +121,7 @@ async function load() {
     }
     if (own !== epoch) return;
     const blob = new Blob(parts, { type: mime.value });
+    source.value = blob;
     url.value = URL.createObjectURL(blob);
   } catch (failure) {
     if (
@@ -169,6 +176,14 @@ onBeforeUnmount(clear);
         $t("email.retry")
       }}</UiButton></UiAlert
     >
+    <DocumentSigning
+      v-if="signing && source && file"
+      :source="source"
+      :name="title"
+      :file-id="file.id"
+      :temporary-session="temporarySession"
+      @close="signing = false"
+    />
     <img
       v-if="url && mime.startsWith('image/')"
       :src="url"
@@ -183,6 +198,16 @@ onBeforeUnmount(clear);
       class="h-[75vh] w-full border-0"
     />
     <template #footer>
+      <UiButton
+        v-if="
+          source &&
+          source.size <= 16 * 1024 * 1024 &&
+          mime === 'application/pdf' &&
+          !signing
+        "
+        @click="signing = true"
+        >{{ $t("documentSigning.title") }}</UiButton
+      >
       <UiButton
         variant="secondary"
         :disabled="loading || !url"
