@@ -31,15 +31,18 @@ uv run --package galadril-mcp-service python -m galadril_mcp_service.package_plu
 ```
 
 Set `GALADRIL_CHATGPT_APP_ID` to the ID copied above. The archive maps that
-connection in `.app.json` and keeps the OAuth server declaration in `mcp.json`.
+connection in `.app.json` using its `asdk_app_…` ID and keeps the OAuth server declaration in `mcp.json`.
 Use it with an account and workspace that can access the registered
 connection. Existing authorization may be reused. Verify both a skill and
 an actual tool call in a fresh chat after installing the plugin.
 See the [OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins).
 
 For public distribution, build without the workspace-specific ID, upload
-the portable ZIP in the [submission portal](https://developers.openai.com/plugins/deploy/submission),
-then connect and scan the MCP server in the portal. Complete review and
+the portable ZIP using **With MCP** in the [submission portal](https://developers.openai.com/plugins/deploy/submission),
+then select **MCPs → Connect**, authorize the scanner account, and verify that
+the discovered tools appear in the portal. The ZIP supplies the OAuth client
+settings. The portal completes the connection, and users authorize their own
+accounts through ChatGPT. Complete review and
 publication before relying on the listing for web availability.
 
 The server supports MCP `2026-07-28` through `server/discover` and

@@ -99,7 +99,10 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                 app_path = manifest["extensions"]["com.openai"]["apps"]
                 self.assertEqual(app_path, "./.app.json")
                 apps = json.loads(plugin.read(app_path.removeprefix("./")))
-                self.assertEqual(apps["apps"]["galadril"]["id"], app_id)
+                self.assertEqual(
+                    apps["apps"]["galadril"]["id"],
+                    app_id.removeprefix("plugin_"),
+                )
                 self.assertIn("mcp.json", plugin.namelist())
                 self.assertIn(
                     "skills/galadril-legal-research/SKILL.md", plugin.namelist()

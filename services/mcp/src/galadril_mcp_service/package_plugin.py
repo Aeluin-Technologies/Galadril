@@ -17,7 +17,7 @@ from galadril_mcp_service.skills import (
 def package_plugin(output: Path, *, chatgpt_app_id: str | None = None) -> None:
     """Keep archive paths relative to the plugin manifest and reproducible."""
     if chatgpt_app_id is not None and not re.fullmatch(
-        r"plugin_asdk_app_[0-9a-f]{32}", chatgpt_app_id
+        r"(?:plugin_)?asdk_app_[A-Za-z0-9][A-Za-z0-9_-]*", chatgpt_app_id
     ):
         raise ValueError(
             "Expected the technical ID of a registered ChatGPT MCP server."
@@ -37,7 +37,12 @@ def package_plugin(output: Path, *, chatgpt_app_id: str | None = None) -> None:
         write("plugin.json", manifest)
         if chatgpt_app_id is not None:
             apps = {
-                "apps": {"galadril": {"id": chatgpt_app_id, "required": True}}
+                "apps": {
+                    "galadril": {
+                        "id": chatgpt_app_id.removeprefix("plugin_"),
+                        "required": True,
+                    }
+                }
             }
             write(".app.json", json.dumps(apps, indent=2).encode() + b"\n")
         for name in ("mcp.json", "assets/galadril.png"):
