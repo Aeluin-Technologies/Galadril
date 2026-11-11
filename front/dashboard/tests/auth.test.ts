@@ -280,7 +280,7 @@ test("personal settings expose optional ChatGPT connection without an administra
   assert.match(settings, /route\.hash/);
   assert.match(settings, /v-if="activeSection === 'email'"/);
   assert.match(settings, /v-else[\s\S]*?<AiOpenaiAccount/);
-  assert.match(account, /to="\/settings\/user"/);
+  assert.match(account, /to="\/settings\/user#account"/);
   assert.doesNotMatch(account, /to="\/settings\/email"/);
 });
 test("administrative and personal settings share one section navigation and item", async () => {

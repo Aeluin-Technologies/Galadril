@@ -59,7 +59,7 @@ loopback MCP listener on port 8098, with an exact host match for
 Add a public hostname to the existing Cloudflare Tunnel configuration:
 `mcp.gravitalia.com` → `http://127.0.0.1:8098`, preserving the original Host
 header (or explicitly setting it to `mcp.gravitalia.com`). The existing Compose
-connector `utils-email-tunnel` shares the API proxy network namespace. Its
+connector `tunnel` shares the API proxy network namespace. Its
 `tunnel` profile enables the connector independently of email tracking. An independently managed
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
@@ -93,9 +93,9 @@ paths. Future providers use this registration contract and the shared verifier.
 The root resource requires `workspace:use` and a scope for each tool family.
 Add `documents:read`, `documents:write` or `data:read` for those tools.
 Native Pengolo operations use the
-same MCP transport with generation-scoped grants. External email sends require
-review of the exact draft revision in a primary Galadril session; MCP annotations
-are descriptive hints, not approval authority. See
+same MCP transport with generation-scoped grants. Connected OAuth clients
+handle approval of an exact email draft revision by default. Users can require
+a separate review in Galadril from Account settings. See
 [the service guide](../../../services/mcp/README.md) for tools, scopes,
 private attachment handling and compilation workflow.
 

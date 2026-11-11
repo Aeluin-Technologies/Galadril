@@ -54,13 +54,11 @@ pub async fn invoke(
         user: claims.sub,
         client: client.into(),
         scopes: scopes.split_whitespace().map(str::to_owned).collect(),
-        context: QueryContext {
-            role: claims.role,
-            region: claims.region,
-            internal_device: claims.device_trust.as_deref() == Some("managed"),
-            hour_utc: i64::from(chrono::Utc::now().hour()),
-            ..QueryContext::default()
-        },
+        context: workspace_context(
+            claims.role,
+            claims.region,
+            claims.device_trust.as_deref(),
+        ),
         lifetime: Duration::from_secs(lifetime.min(900)),
     };
     tools
@@ -68,6 +66,23 @@ pub async fn invoke(
         .await
         .map(Json)
         .map_err(denied)
+}
+
+/// Every OAuth workspace call must have server-owned audit correlation.
+fn workspace_context(
+    role: Option<String>,
+    region: Option<String>,
+    device_trust: Option<&str>,
+) -> QueryContext {
+    QueryContext {
+        role,
+        region,
+        internal_device: device_trust == Some("managed"),
+        hour_utc: i64::from(chrono::Utc::now().hour()),
+        request_id: uuid::Uuid::new_v4().simple().to_string(),
+        trace_id: super::graphql::server::current_trace_id(),
+        ..QueryContext::default()
+    }
 }
 
 pub async fn delegated(
@@ -91,4 +106,17 @@ fn denied(_error: anyhow::Error) -> Failure {
         "Workspace MCP operation unavailable"
     );
     (StatusCode::FORBIDDEN, "Workspace operation unavailable")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_requests_have_distinct_audit_identifiers() {
+        let first = workspace_context(None, None, None);
+        let second = workspace_context(None, None, None);
+        assert!(uuid::Uuid::parse_str(&first.request_id).is_ok());
+        assert_ne!(first.request_id, second.request_id);
+    }
 }

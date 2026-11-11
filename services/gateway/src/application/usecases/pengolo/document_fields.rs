@@ -106,21 +106,80 @@ fn open_profile(
     serde_json::from_slice(text).context("Invalid document vault entry")
 }
 
+fn profile_from_record(
+    actor: &Principal<'_>,
+    record: Option<&Record>,
+) -> Result<DocumentFields> {
+    let Some(envelope) = record
+        .and_then(|record| record.data.get("documentProfile"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(BTreeMap::new());
+    };
+    open_profile(&vault_key()?, &vault_aad(actor)?, envelope)
+}
+
+fn requires_review(record: Option<&Record>) -> Result<bool> {
+    match record.and_then(|record| record.data.get("requireMcpEmailReview")) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(enabled)) => Ok(*enabled),
+        _ => anyhow::bail!("Invalid MCP email review preference"),
+    }
+}
+
 impl PengoloService {
+    pub async fn requires_mcp_email_review(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<bool> {
+        self.verify(actor).await?;
+        requires_review(self.preference_record(actor).await?.as_ref())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn read_document_profile(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        let record = self.preference_record(actor).await?;
+        let fields = profile_from_record(actor, record.as_ref())?;
+        tracing::info!(event.name = "pengolo.document_profile.read");
+        Ok(json!({
+            "revision": record.as_ref().map_or(0, |record| record.revision),
+            "first_name": fields.get("first_name").map_or("", String::as_str),
+            "last_name": fields.get("last_name").map_or("", String::as_str),
+            "address": fields.get("address").map_or("", String::as_str),
+            "email": fields.get("email").map_or("", String::as_str),
+            "require_mcp_email_review": requires_review(record.as_ref())?,
+        }))
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn save_document_profile(
         &self,
         actor: &Principal<'_>,
         revision: i64,
-        fields: DocumentFields,
+        mut fields: DocumentFields,
+        require_mcp_email_review: Option<bool>,
     ) -> Result<bool> {
         self.verify(actor).await?;
-        validate_fields(&fields)?;
         let existing = self.preference_record(actor).await?;
         ensure!(
             existing.as_ref().map_or(0, |record| record.revision) == revision,
             "Preferences changed; reload before saving"
         );
+        if !fields.contains_key("title") || !fields.contains_key("capacity") {
+            // Older published templates can still bind fields hidden by the
+            // account UI.
+            let mut prior = profile_from_record(actor, existing.as_ref())?;
+            for name in ["title", "capacity"] {
+                if let Some(value) = prior.remove(name) {
+                    fields.entry(name.into()).or_insert(value);
+                }
+            }
+        }
+        validate_fields(&fields)?;
         let encrypted =
             seal_profile(&vault_key()?, &vault_aad(actor)?, &fields)?;
         let mut record = existing.unwrap_or_else(|| Record {
@@ -132,11 +191,12 @@ impl PengoloService {
             updated_at: now(),
             data: json!({"instructions":""}),
         });
-        record
-            .data
-            .as_object_mut()
-            .context("Invalid preferences")?
-            .insert("documentProfile".into(), json!(encrypted));
+        let preferences =
+            record.data.as_object_mut().context("Invalid preferences")?;
+        preferences.insert("documentProfile".into(), json!(encrypted));
+        if let Some(enabled) = require_mcp_email_review {
+            preferences.insert("requireMcpEmailReview".into(), json!(enabled));
+        }
         self.store
             .save(
                 actor.tenant,
@@ -155,14 +215,7 @@ impl PengoloService {
         actor: &Principal<'_>,
     ) -> Result<DocumentFields> {
         let record = self.preference_record(actor).await?;
-        let Some(envelope) = record
-            .as_ref()
-            .and_then(|record| record.data.get("documentProfile"))
-            .and_then(Value::as_str)
-        else {
-            return Ok(BTreeMap::new());
-        };
-        open_profile(&vault_key()?, &vault_aad(actor)?, envelope)
+        profile_from_record(actor, record.as_ref())
     }
 
     async fn document_case_template(

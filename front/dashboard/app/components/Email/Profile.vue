@@ -165,27 +165,6 @@ async function save() {
         class="sm:col-span-2"
         :disabled="!can(account, 'edit')"
       />
-      <UiSearchSelect
-        :model-value="profile.language"
-        @update:model-value="
-          (value) => {
-            if (typeof value === 'string') profile.language = value;
-          }
-        "
-        :label="$t('email.language')"
-        :search-label="$t('email.searchLanguages')"
-        :empty-label="$t('email.noMatches')"
-        :options="[
-          { value: 'French', label: 'Français' },
-          { value: 'English', label: 'English' },
-        ]"
-        :disabled="!can(account, 'edit')"
-      />
-      <UiInput
-        v-model="profile.tone"
-        :label="$t('email.tone')"
-        :disabled="!can(account, 'edit')"
-      />
       <UiTextarea
         v-model="profile.signature"
         :label="$t('email.signature')"
@@ -193,12 +172,6 @@ async function save() {
         maxlength="8192"
         class="sm:col-span-2"
         :disabled="!can(account, 'edit')"
-      />
-      <EmailSignaturePreview :html="profile.signature" class="sm:col-span-2" />
-      <EmailTrackingOption
-        v-model="profile.track_opens"
-        :disabled="!can(account, 'edit') || saving"
-        class="sm:col-span-2"
       />
       <UiSelect
         v-model="signatureField"
@@ -212,6 +185,12 @@ async function save() {
           })),
         ]"
         :disabled="!can(account, 'edit')"
+        class="sm:col-span-2"
+      />
+      <EmailSignaturePreview :html="profile.signature" class="sm:col-span-2" />
+      <EmailTrackingOption
+        v-model="profile.track_opens"
+        :disabled="!can(account, 'edit') || saving"
         class="sm:col-span-2"
       />
       <p

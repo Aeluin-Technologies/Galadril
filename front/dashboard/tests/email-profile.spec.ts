@@ -171,7 +171,7 @@ function previewPdf(): Buffer {
   return Buffer.from(pdf);
 }
 
-test("email profile uses searchable languages and named skills with a safe HTML signature preview", async ({
+test("email profile offers named skills and a safe HTML signature preview", async ({
   page,
 }, testInfo) => {
   const deniedStyles: string[] = [];
@@ -657,14 +657,11 @@ test("email profile uses searchable languages and named skills with a safe HTML 
     page.getByLabel("Fallback model aliases", { exact: true }),
   ).toHaveCount(0);
   await expect(page.getByLabel("Skill IDs", { exact: true })).toHaveCount(0);
-  await page.getByRole("combobox", { name: "Language", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "Search languages", exact: true })
-    .fill("fran");
+  await expect(page.getByLabel("Language", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Tone", { exact: true })).toHaveCount(0);
   await expect(
-    page.getByRole("option", { name: "English", exact: true }),
-  ).toHaveCount(0);
-  await page.getByRole("option", { name: "Français", exact: true }).click();
+    page.getByText("Markdown and HTML are supported.", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("combobox", { name: "Skills", exact: true }).click();
   await page
     .getByRole("combobox", { name: "Search skills", exact: true })
@@ -730,7 +727,7 @@ test("email profile uses searchable languages and named skills with a safe HTML 
   await page
     .getByRole("button", { name: "Save response profile", exact: true })
     .click();
-  await expect.poll(() => saved?.language).toBe("French");
+  await expect.poll(() => saved?.language).toBe("English");
 });
 
 for (const senderCount of [1, 2]) {

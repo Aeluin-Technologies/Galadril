@@ -99,7 +99,10 @@ class TrackerDeployment(unittest.TestCase):
             (root / "infrastructure/docker/utils-email.yaml").read_text()
         )
         tracker = config["services"]["utils-email-tracker"]
-        tunnel = config["services"]["utils-email-tunnel"]
+        proxy = yaml.safe_load(
+            (root / "infrastructure/docker/proxy.yaml").read_text()
+        )
+        tunnel = proxy["services"]["tunnel"]
         self.assertEqual(tracker["profiles"], ["email-tracking"])
         self.assertEqual(tunnel["profiles"], ["email-tracking", "tunnel"])
         self.assertEqual(

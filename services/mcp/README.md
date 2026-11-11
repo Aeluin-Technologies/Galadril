@@ -36,17 +36,16 @@ using `/law/mcp` or `/workspace/mcp` with their original clients and scopes.
    attachments can be supplied by `file_ids`, with `documents:read`: Gateway
    transfers their checked bytes directly to the encrypted draft store. Results
    contain attachment metadata, never the PDF bytes or private compiler bindings.
-3. `send_email` returns `approval_required` and a Galadril review URL. It cannot
-   call `approve` or `send` on the delegated mailbox API.
-4. In the primary Galadril session, the user reviews the sender, recipients,
-   message and attachments, then explicitly approves and sends that revision.
-   Editing the draft invalidates the old review link. Repeating a completed
-   request reports its stored delivery status rather than sending again.
+3. Show the sender, recipients, message and attachments for approval in the
+   connected app. Call `send_email` with the exact approved revision.
+4. If **Require email approval in Galadril** is enabled in Account, the tool
+   returns `approval_required` and a review link. The user confirms that
+   revision in their Galadril session.
 
-Tool annotations inform the client's confirmation UI. They do not enforce
-authorization. The review URL works with stateless JSON MCP clients; approval
-does not depend on an LLM-supplied boolean or on a client keeping an elicitation
-connection open.
+Gateway trusts OAuth MCP clients to obtain approval in their own interface
+when the account setting is off. The mail service checks mailbox permissions
+and the exact draft revision before delivery. Editing a draft invalidates the
+prior revision, and repeating a completed send returns its status.
 
 ### Compiling documents
 

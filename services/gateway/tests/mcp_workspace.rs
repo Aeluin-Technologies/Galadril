@@ -147,3 +147,44 @@ fn native_mcp_allows_mail_without_enabling_unrestricted_retrieval() {
         ));
     }
 }
+
+#[test]
+fn mcp_delivery_checks_revision_and_requires_review_only_when_enabled()
+-> Result<()> {
+    use policy::EmailDelivery;
+
+    let draft = json!({"revision": 3, "status": "draft"});
+    assert_eq!(
+        policy::email_delivery(&draft, 3, false)?,
+        EmailDelivery::Send
+    );
+    assert_eq!(
+        policy::email_delivery(&draft, 3, true)?,
+        EmailDelivery::Review
+    );
+    assert!(policy::email_delivery(&draft, 2, false).is_err());
+    for status in ["sending", "uncertain", "cancelled"] {
+        assert!(
+            policy::email_delivery(
+                &json!({"revision": 3, "status": status}),
+                3,
+                false
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(
+        policy::email_delivery(
+            &json!({"revision": 3, "status": "sent"}),
+            3,
+            true
+        )?,
+        EmailDelivery::Sent
+    );
+    assert!(!policy::generation_operation_allowed(
+        "email_send",
+        true,
+        true
+    ));
+    Ok(())
+}

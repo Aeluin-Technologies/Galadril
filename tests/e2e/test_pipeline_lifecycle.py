@@ -545,6 +545,7 @@ async def _assert_public_api_inventory(
         "pengoloModels",
         "pengoloOpenai",
         "pengoloPreferences",
+        "pengoloDocumentProfile",
         "pengoloProjects",
         "pengoloAgents",
         "pengoloChats",

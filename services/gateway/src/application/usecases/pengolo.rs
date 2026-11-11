@@ -701,7 +701,8 @@ impl PengoloService {
             revision: 1,
             updated_at: now(),
             data: json!({"instructions":input.instructions,
-                "documentProfile":existing.as_ref().and_then(|record|record.data.get("documentProfile"))}),
+                "documentProfile":existing.as_ref().and_then(|record|record.data.get("documentProfile")),
+                "requireMcpEmailReview":existing.as_ref().and_then(|record|record.data.get("requireMcpEmailReview"))}),
         };
         let saved = self
             .store

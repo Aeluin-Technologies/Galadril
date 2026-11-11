@@ -2426,6 +2426,16 @@ impl Query {
         pengolo_result(ctx.pengolo.preferences(&pengolo_actor(ctx)?).await)
     }
 
+    async fn pengolo_document_profile(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<pengolo::DocumentProfile> {
+        pengolo_result(
+            ctx.pengolo
+                .read_document_profile(&pengolo_actor(ctx)?)
+                .await,
+        )
+    }
+
     async fn pengolo_projects(
         #[graphql(context)] ctx: &AppContext,
     ) -> FieldResult<Vec<pengolo::Project>> {
@@ -3872,10 +3882,13 @@ impl Mutation {
             ("last_name", input.last_name),
             ("address", input.address),
             ("email", input.email),
-            ("title", input.title),
-            ("capacity", input.capacity),
         ]
         .into_iter()
+        .chain(
+            [("title", input.title), ("capacity", input.capacity)]
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|value| (key, value))),
+        )
         .map(|(key, value)| (key.into(), value.trim().to_owned()))
         .collect();
         pengolo_result(
@@ -3884,6 +3897,7 @@ impl Mutation {
                     &pengolo_actor(ctx)?,
                     input.revision.0,
                     fields,
+                    input.require_mcp_email_review,
                 )
                 .await,
         )
