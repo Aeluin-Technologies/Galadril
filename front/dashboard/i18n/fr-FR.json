@@ -12,6 +12,10 @@
     "loadError": "Vos coordonnées n’ont pas pu être chargées.",
     "saveError": "Vos modifications n’ont pas pu être enregistrées. Rechargez vos coordonnées puis réessayez.",
     "reload": "Recharger les coordonnées",
+    "emailApproval": "Exiger la validation des e-mails dans Galadril",
+    "emailApprovalHelp": "Lorsque cette option est désactivée, les applications connectées comme ChatGPT demandent la validation dans leur propre interface.",
+    "saveEmailApproval": "Enregistrer le réglage de validation",
+    "emailApprovalSaved": "Réglage de validation des e-mails enregistré.",
     "fields": {
       "firstName": "Prénom",
       "lastName": "Nom",

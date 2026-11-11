@@ -729,6 +729,7 @@ pub struct DocumentProfile {
     pub last_name: String,
     pub address: String,
     pub email: String,
+    pub require_mcp_email_review: bool,
 }
 
 #[derive(GraphQLInputObject)]
@@ -741,6 +742,7 @@ pub struct DocumentProfileInput {
     pub email: String,
     pub title: Option<String>,
     pub capacity: Option<String>,
+    pub require_mcp_email_review: Option<bool>,
 }
 
 #[derive(Serialize, GraphQLInputObject)]

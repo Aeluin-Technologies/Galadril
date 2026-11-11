@@ -119,7 +119,23 @@ fn profile_from_record(
     open_profile(&vault_key()?, &vault_aad(actor)?, envelope)
 }
 
+fn requires_review(record: Option<&Record>) -> Result<bool> {
+    match record.and_then(|record| record.data.get("requireMcpEmailReview")) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(enabled)) => Ok(*enabled),
+        _ => anyhow::bail!("Invalid MCP email review preference"),
+    }
+}
+
 impl PengoloService {
+    pub async fn requires_mcp_email_review(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<bool> {
+        self.verify(actor).await?;
+        requires_review(self.preference_record(actor).await?.as_ref())
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn read_document_profile(
         &self,
@@ -135,6 +151,7 @@ impl PengoloService {
             "last_name": fields.get("last_name").map_or("", String::as_str),
             "address": fields.get("address").map_or("", String::as_str),
             "email": fields.get("email").map_or("", String::as_str),
+            "require_mcp_email_review": requires_review(record.as_ref())?,
         }))
     }
 
@@ -144,6 +161,7 @@ impl PengoloService {
         actor: &Principal<'_>,
         revision: i64,
         mut fields: DocumentFields,
+        require_mcp_email_review: Option<bool>,
     ) -> Result<bool> {
         self.verify(actor).await?;
         let existing = self.preference_record(actor).await?;
@@ -173,11 +191,12 @@ impl PengoloService {
             updated_at: now(),
             data: json!({"instructions":""}),
         });
-        record
-            .data
-            .as_object_mut()
-            .context("Invalid preferences")?
-            .insert("documentProfile".into(), json!(encrypted));
+        let preferences =
+            record.data.as_object_mut().context("Invalid preferences")?;
+        preferences.insert("documentProfile".into(), json!(encrypted));
+        if let Some(enabled) = require_mcp_email_review {
+            preferences.insert("requireMcpEmailReview".into(), json!(enabled));
+        }
         self.store
             .save(
                 actor.tenant,

@@ -3897,6 +3897,7 @@ impl Mutation {
                     &pengolo_actor(ctx)?,
                     input.revision.0,
                     fields,
+                    input.require_mcp_email_review,
                 )
                 .await,
         )

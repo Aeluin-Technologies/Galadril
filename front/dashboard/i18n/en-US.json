@@ -12,6 +12,10 @@
     "loadError": "Your details could not be loaded.",
     "saveError": "Your changes could not be saved. Reload your details and try again.",
     "reload": "Reload details",
+    "emailApproval": "Require email approval in Galadril",
+    "emailApprovalHelp": "When this is off, connected apps like ChatGPT handle email approval in their own interface.",
+    "saveEmailApproval": "Save approval setting",
+    "emailApprovalSaved": "Email approval setting saved.",
     "fields": {
       "firstName": "First name",
       "lastName": "Last name",

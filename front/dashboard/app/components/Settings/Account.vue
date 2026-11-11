@@ -8,10 +8,14 @@ import {
 
 const fields = ["firstName", "lastName", "email", "address"] as const;
 type Field = (typeof fields)[number];
-type Profile = Record<Field, string> & { revision: number };
+type Profile = Record<Field, string> & {
+  revision: number;
+  requireMcpEmailReview: boolean;
+};
 const { t } = useI18n();
 const { session } = useAccount();
 const profile = shallowRef<Profile | null>(null);
+const review = ref(false);
 const editing = ref<Field>();
 const draft = ref("");
 const busy = ref(false);
@@ -24,6 +28,7 @@ function clear(): void {
   pending?.abort();
   pending = undefined;
   profile.value = null;
+  review.value = false;
   editing.value = undefined;
   draft.value = "";
   busy.value = false;
@@ -36,7 +41,7 @@ function invalidate(): void {
   error.value = t("accountSettings.loadError");
 }
 
-async function request(updated?: Profile): Promise<void> {
+async function request(updated?: Profile, savingReview = false): Promise<void> {
   if (busy.value) return;
   const controller = new AbortController();
   pending = controller;
@@ -53,15 +58,22 @@ async function request(updated?: Profile): Promise<void> {
       if (controller.signal.aborted) return;
       if (!saved) throw new Error("Profile update was not confirmed");
       profile.value = { ...updated, revision: updated.revision + 1 };
-      cancel();
-      notice.value = t("accountSettings.saved");
+      if (savingReview) {
+        notice.value = t("accountSettings.emailApprovalSaved");
+      } else {
+        cancel();
+        notice.value = t("accountSettings.saved");
+      }
     } else {
       const result = await pengoloRequest<Profile>(
         pengoloOperation("PengoloDocumentProfile"),
         {},
         controller.signal,
       );
-      if (!controller.signal.aborted) profile.value = result;
+      if (!controller.signal.aborted) {
+        profile.value = result;
+        review.value = result.requireMcpEmailReview;
+      }
     }
   } catch {
     if (!controller.signal.aborted)
@@ -100,6 +112,14 @@ function cancel(): void {
 function save(): Promise<void> | undefined {
   if (profile.value && editing.value)
     return request({ ...profile.value, [editing.value]: draft.value.trim() });
+}
+
+function saveReview(): Promise<void> | undefined {
+  if (profile.value && editing.value === undefined)
+    return request(
+      { ...profile.value, requireMcpEmailReview: review.value },
+      true,
+    );
 }
 
 function activate(): void {
@@ -203,6 +223,30 @@ onBeforeUnmount(() => {
       </dl>
     </div>
     <p class="text-sm text-muted">{{ $t("accountSettings.help") }}</p>
+    <form
+      v-if="profile"
+      class="space-y-3 rounded-panel border border-border bg-surface px-4 py-4 sm:px-6"
+      @submit.prevent="saveReview"
+    >
+      <UiCheckbox
+        v-model="review"
+        :label="$t('accountSettings.emailApproval')"
+        :help="$t('accountSettings.emailApprovalHelp')"
+        :disabled="busy || editing !== undefined"
+      />
+      <div
+        v-if="review !== profile.requireMcpEmailReview"
+        class="flex justify-end"
+      >
+        <UiButton
+          type="submit"
+          :loading="busy"
+          :disabled="editing !== undefined"
+        >
+          {{ $t("accountSettings.saveEmailApproval") }}
+        </UiButton>
+      </div>
+    </form>
     <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
     <UiButton
       v-if="error"

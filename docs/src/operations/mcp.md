@@ -93,9 +93,9 @@ paths. Future providers use this registration contract and the shared verifier.
 The root resource requires `workspace:use` and a scope for each tool family.
 Add `documents:read`, `documents:write` or `data:read` for those tools.
 Native Pengolo operations use the
-same MCP transport with generation-scoped grants. External email sends require
-review of the exact draft revision in a primary Galadril session; MCP annotations
-are descriptive hints, not approval authority. See
+same MCP transport with generation-scoped grants. Connected OAuth clients
+handle approval of an exact email draft revision by default. Users can require
+a separate review in Galadril from Account settings. See
 [the service guide](../../../services/mcp/README.md) for tools, scopes,
 private attachment handling and compilation workflow.
 

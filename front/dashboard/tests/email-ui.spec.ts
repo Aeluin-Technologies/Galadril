@@ -10,6 +10,7 @@ test("account settings show the saved document profile and edit one row", async 
     lastName: "Martin",
     email: "camille@example.test",
     address: "10 rue Exemple",
+    requireMcpEmailReview: false,
   };
   await page.route("**/auth/session", (route) =>
     route.fulfill({
@@ -31,8 +32,9 @@ test("account settings show the saved document profile and edit one row", async 
       expect(body.variables.input).toEqual({
         ...profile,
         firstName: "Dominique",
+        requireMcpEmailReview: profile.revision === 8,
       });
-      profile = { ...body.variables.input, revision: 8 };
+      profile = { ...body.variables.input, revision: profile.revision + 1 };
       return route.fulfill({
         json: { data: { savePengoloDocumentProfile: true } },
       });
@@ -68,6 +70,15 @@ test("account settings show the saved document profile and edit one row", async 
   await expect(page.getByText("Dominique", { exact: true })).toBeVisible();
   await expect(page.getByText("Capacity", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Title", { exact: true })).toHaveCount(0);
+  const review = page.getByRole("checkbox", {
+    name: "Require email approval in Galadril",
+  });
+  await expect(review).not.toBeChecked();
+  await review.check();
+  await page.getByRole("button", { name: "Save approval setting" }).click();
+  await expect(page.getByText("Email approval setting saved.")).toBeVisible();
+  await page.reload();
+  await expect(review).toBeChecked();
   await page.screenshot({ path: testInfo.outputPath("account-wide.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(

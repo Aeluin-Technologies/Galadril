@@ -131,3 +131,31 @@ pub fn draft_projection(mut value: Value) -> Value {
     }
     value
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum EmailDelivery {
+    Send,
+    Review,
+    Sent,
+}
+
+/// Only the reviewed revision is eligible for delivery. In-flight and
+/// uncertain sends must be reconciled by the mail service.
+pub fn email_delivery(
+    draft: &Value,
+    revision: i64,
+    require_review: bool,
+) -> Result<EmailDelivery> {
+    anyhow::ensure!(
+        draft.get("revision").and_then(Value::as_i64) == Some(revision),
+        "Email revision changed"
+    );
+    match draft.get("status").and_then(Value::as_str) {
+        Some("sent") => Ok(EmailDelivery::Sent),
+        Some("draft" | "approved") if require_review => {
+            Ok(EmailDelivery::Review)
+        },
+        Some("draft" | "approved") => Ok(EmailDelivery::Send),
+        _ => bail!("Email delivery unavailable"),
+    }
+}

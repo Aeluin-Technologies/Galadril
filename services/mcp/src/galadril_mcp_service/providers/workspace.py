@@ -176,7 +176,7 @@ def register(
         draft: Identifier,
         revision: Annotated[int, Field(ge=1)],
     ) -> CallToolResult:
-        """Request sending an exact saved draft revision. Galadril requires human approval of its recipients, content and attachments; this call cannot approve its own draft."""
+        """Send an exact saved draft revision. Show the sender, recipients, content and attachments before asking for confirmation. Call only after user approval. If the account requires review in Galadril, return the review link and report the draft as unsent."""
         return await invoke(
             send_write,
             "email_send",

@@ -7,7 +7,8 @@ use galadril_document_compiler::tools::JobOperation;
 use super::*;
 use crate::application::usecases::pengolo::{CompiledArtifact, Principal};
 use crate::domain::mcp_workspace::{
-    WorkspaceRequest, execution_id, required_scope,
+    EmailDelivery, WorkspaceRequest, email_delivery, execution_id,
+    required_scope,
 };
 
 #[path = "workspace_mail.rs"]
@@ -227,7 +228,7 @@ impl ChatTools {
         if input.request.get("operation").and_then(Value::as_str) ==
             Some("email_send")
         {
-            return self.email_review(&actor, input.request).await;
+            return self.workspace_email_delivery(&actor, input.request).await;
         }
         if input.request.get("operation").and_then(Value::as_str) ==
             Some("email_save_draft")
@@ -478,7 +479,7 @@ impl ChatTools {
         ))
     }
 
-    async fn email_review(
+    async fn workspace_email_delivery(
         &self,
         actor: &Principal<'_>,
         request: Value,
@@ -504,22 +505,39 @@ impl ChatTools {
                 "Invalid email identifier"
             );
         }
+        let email = self.email.get().context("Email tools unavailable")?;
         let request = json!({"operation":"draft","account":review.account,"draft":review.draft});
-        let draft = self
-            .email
-            .get()
-            .context("Email tools unavailable")?
+        let draft = email
             .operation(actor.tenant, actor.user, &request, true)
             .await?;
-        ensure!(
-            draft.get("revision").and_then(Value::as_i64) ==
-                Some(review.revision),
-            "Email revision changed"
-        );
-        if draft.get("status").and_then(Value::as_str) == Some("sent") {
-            return Ok(
-                json!({"status":"sent", "draft":review.draft, "revision":review.revision}),
-            );
+        let require_review = self
+            .pengolo_service()?
+            .requires_mcp_email_review(actor)
+            .await?;
+        match email_delivery(&draft, review.revision, require_review)? {
+            EmailDelivery::Review => {},
+            delivery => {
+                if delivery == EmailDelivery::Send {
+                    // OAuth scopes and client confirmation authorize only this
+                    // revision. The mail service still checks ACLs and claims
+                    // SMTP once.
+                    for operation in ["approve", "send"] {
+                        let request = json!({"operation":operation,"account":review.account,"draft":review.draft,"revision":review.revision});
+                        email
+                            .operation(
+                                actor.tenant,
+                                actor.user,
+                                &request,
+                                false,
+                            )
+                            .await?;
+                    }
+                    tracing::info!(event.name = "mcp.email.sent");
+                }
+                return Ok(
+                    json!({"status":"sent","draft":review.draft,"revision":review.revision}),
+                );
+            },
         }
         let origin = std::env::var("MCP_DOWNLOAD_ORIGIN")
             .context("MCP public origin unavailable")?;

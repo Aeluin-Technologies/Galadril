@@ -384,6 +384,7 @@ query PengoloDocumentProfile {
     lastName
     address
     email
+    requireMcpEmailReview
   }
 }
 
