@@ -87,6 +87,26 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                     "licenses/librejustice/LICENSE.md", plugin.namelist()
                 )
 
+    def test_chatgpt_archive_links_registered_mcp(self) -> None:
+        from galadril_mcp_service.package_plugin import package_plugin
+
+        app_id = "plugin_asdk_app_" + "a" * 32
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "galadril.zip"
+            package_plugin(archive, chatgpt_app_id=app_id)
+            with ZipFile(archive) as plugin:
+                manifest = json.loads(plugin.read("plugin.json"))
+                app_path = manifest["extensions"]["com.openai"]["apps"]
+                self.assertEqual(app_path, "./.app.json")
+                apps = json.loads(plugin.read(app_path.removeprefix("./")))
+                self.assertEqual(apps["apps"]["galadril"]["id"], app_id)
+                self.assertIn("mcp.json", plugin.namelist())
+                self.assertIn(
+                    "skills/galadril-legal-research/SKILL.md", plugin.namelist()
+                )
+            with self.assertRaises(ValueError):
+                package_plugin(archive, chatgpt_app_id="not-an-app-id")
+
     async def test_modern_discovery_and_skills_use_the_served_bytes(
         self,
     ) -> None:

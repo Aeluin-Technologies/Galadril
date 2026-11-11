@@ -21,12 +21,26 @@ displayed for that connection under the Galadril OAuth client. The callback
 can differ between connections. See the
 [OpenAI Web quickstart](https://developers.openai.com/plugins/quickstart).
 
-To test the complete package with skills, follow the
-[OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins)
-and bind the test package to the MCP connection registered in ChatGPT.
-For distribution through the public directory, upload the portable ZIP in the
-[submission portal](https://developers.openai.com/plugins/deploy/submission)
-and complete MCP connection and review there.
+To test the skills with the custom MCP connection you already registered,
+copy the `plugin_asdk_app_…` ID from the connection's ChatGPT Plugins URL and
+build a workspace-specific archive:
+
+```sh
+uv run --package galadril-mcp-service python -m galadril_mcp_service.package_plugin \
+  /tmp/galadril-chatgpt-linked.zip --chatgpt-app-id "$GALADRIL_CHATGPT_APP_ID"
+```
+
+Set `GALADRIL_CHATGPT_APP_ID` to the ID copied above. The archive maps that
+connection in `.app.json` and keeps the OAuth server declaration in `mcp.json`.
+Use it with an account and workspace that can access the registered
+connection. Existing authorization may be reused. Verify both a skill and
+an actual tool call in a fresh chat after installing the plugin.
+See the [OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins).
+
+For public distribution, build without the workspace-specific ID, upload
+the portable ZIP in the [submission portal](https://developers.openai.com/plugins/deploy/submission),
+then connect and scan the MCP server in the portal. Complete review and
+publication before relying on the listing for web availability.
 
 The server supports MCP `2026-07-28` through `server/discover` and
 `2025-11-25` through `initialize`. Modern clients discover the Skills extension,
