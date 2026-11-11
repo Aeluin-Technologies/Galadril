@@ -30,12 +30,15 @@ uv run --package galadril-mcp-service python -m galadril_mcp_service.package_plu
   /tmp/galadril-chatgpt-linked.zip --chatgpt-app-id "$GALADRIL_CHATGPT_APP_ID"
 ```
 
-Set `GALADRIL_CHATGPT_APP_ID` to the ID copied above. The archive maps that
-connection in `.app.json` using its `asdk_app_…` ID and keeps the OAuth server declaration in `mcp.json`.
-Use it with an account and workspace that can access the registered
-connection. Existing authorization may be reused. Verify both a skill and
-an actual tool call in a fresh chat after installing the plugin.
-See the [OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins).
+Set `GALADRIL_CHATGPT_APP_ID` to the ID copied above. The native manifest
+`.codex-plugin/plugin.json` declares `./.app.json` at its root. This archive
+uses the already registered connection, with its existing OAuth configuration.
+It omits bundled MCP transport declarations, which can cause ChatGPT to
+classify imported plugins as Desktop only even when the URL is remote.
+Use an account and workspace with access to that app. Verify that the
+imported plugin lists the required app and that a new web chat can execute
+a tool from a bundled skill.
+See [OpenAI's existing-app package format](https://learn.chatgpt.com/docs/enterprise/plugin-management#reference-an-existing-app-with-appjson).
 
 For public distribution, build without the workspace-specific ID, upload
 the portable ZIP using **With MCP** in the [submission portal](https://developers.openai.com/plugins/deploy/submission),

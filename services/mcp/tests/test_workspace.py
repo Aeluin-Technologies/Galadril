@@ -95,15 +95,17 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
             archive = Path(directory) / "galadril.zip"
             package_plugin(archive, chatgpt_app_id=app_id)
             with ZipFile(archive) as plugin:
-                manifest = json.loads(plugin.read("plugin.json"))
-                app_path = manifest["extensions"]["com.openai"]["apps"]
+                manifest = json.loads(plugin.read(".codex-plugin/plugin.json"))
+                app_path = manifest["apps"]
                 self.assertEqual(app_path, "./.app.json")
                 apps = json.loads(plugin.read(app_path.removeprefix("./")))
                 self.assertEqual(
                     apps["apps"]["galadril"]["id"],
                     app_id.removeprefix("plugin_"),
                 )
-                self.assertIn("mcp.json", plugin.namelist())
+                self.assertNotIn("mcp.json", plugin.namelist())
+                self.assertNotIn(".mcp.json", plugin.namelist())
+                self.assertNotIn("plugin.json", plugin.namelist())
                 self.assertIn(
                     "skills/galadril-legal-research/SKILL.md", plugin.namelist()
                 )

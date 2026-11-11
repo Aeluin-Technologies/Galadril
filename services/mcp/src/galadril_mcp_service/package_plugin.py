@@ -24,18 +24,35 @@ def package_plugin(output: Path, *, chatgpt_app_id: str | None = None) -> None:
         )
 
     manifest = (CLIENT_ROOT / "plugin.json").read_bytes()
-    if chatgpt_app_id is not None:
-        linked_manifest = json.loads(manifest)
-        linked_manifest["extensions"]["com.openai"]["apps"] = "./.app.json"
-        manifest = json.dumps(linked_manifest, indent=2).encode() + b"\n"
-
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
 
         def write(name: str, data: bytes) -> None:
             archive.writestr(ZipInfo(name), data, compress_type=ZIP_DEFLATED)
 
-        write("plugin.json", manifest)
-        if chatgpt_app_id is not None:
+        if chatgpt_app_id is None:
+            write("plugin.json", manifest)
+            write("mcp.json", (CLIENT_ROOT / "mcp.json").read_bytes())
+        else:
+            portable = json.loads(manifest)
+            interface = portable["extensions"]["com.openai"]["interface"]
+            interface.update(
+                longDescription=portable["description"],
+                developerName="Aeluin Technologies",
+                capabilities=["Read", "Write"],
+            )
+            native = {
+                "name": portable["name"],
+                "version": portable["version"],
+                "description": portable["description"],
+                "author": {"name": interface["developerName"]},
+                "interface": interface,
+                "skills": "./skills/",
+                "apps": "./.app.json",
+            }
+            write(
+                ".codex-plugin/plugin.json",
+                json.dumps(native, indent=2).encode() + b"\n",
+            )
             apps = {
                 "apps": {
                     "galadril": {
@@ -45,8 +62,8 @@ def package_plugin(output: Path, *, chatgpt_app_id: str | None = None) -> None:
                 }
             }
             write(".app.json", json.dumps(apps, indent=2).encode() + b"\n")
-        for name in ("mcp.json", "assets/galadril.png"):
-            write(name, (CLIENT_ROOT / name).read_bytes())
+        icon = "assets/galadril.png"
+        write(icon, (CLIENT_ROOT / icon).read_bytes())
         for folder in skill_folders("unified"):
             for relative, source in skill_files(folder):
                 write(f"skills/{folder.name}/{relative}", source.read_bytes())

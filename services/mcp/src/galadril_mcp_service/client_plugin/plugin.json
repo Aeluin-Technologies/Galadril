@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "galadril",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Research French law, work with email, and compile LaTeX documents in Galadril.",
   "extensions": {
     "com.openai": {
