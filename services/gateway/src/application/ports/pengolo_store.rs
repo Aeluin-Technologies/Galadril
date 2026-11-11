@@ -98,8 +98,54 @@ pub struct RecordQuery<'a> {
     pub limit: usize,
 }
 
+pub const MAX_SAVED_SIGNATURES: i64 = 8;
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+pub struct SignatureMetadata {
+    pub id: String,
+    pub label: String,
+    pub created_at: i64,
+}
+
 #[async_trait::async_trait]
 pub trait PengoloStore: Send + Sync {
+    async fn signing_vault(
+        &self,
+        tenant: &str,
+        owner: &str,
+    ) -> Result<Option<String>>;
+    async fn create_signing_vault(
+        &self,
+        tenant: &str,
+        owner: &str,
+        envelope: &str,
+    ) -> Result<bool>;
+    async fn signatures(
+        &self,
+        tenant: &str,
+        owner: &str,
+    ) -> Result<Vec<SignatureMetadata>>;
+    async fn signature_trace(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+    ) -> Result<Option<Vec<u8>>>;
+    async fn create_signature(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+        label: &str,
+        sealed_trace: &[u8],
+    ) -> Result<SignatureMetadata>;
+    async fn delete_signature(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+    ) -> Result<bool>;
+
     fn library_changes(
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<LibraryChange>> {

@@ -732,6 +732,21 @@ pub struct DocumentProfile {
     pub require_mcp_email_review: bool,
 }
 
+#[derive(Deserialize, GraphQLObject)]
+#[graphql(name = "PengoloHandwrittenSignature")]
+pub struct HandwrittenSignature {
+    pub id: String,
+    pub label: String,
+    pub created_at: Long,
+}
+
+#[derive(GraphQLInputObject)]
+#[graphql(name = "PengoloHandwrittenSignatureInput")]
+pub struct HandwrittenSignatureInput {
+    pub label: String,
+    pub trace: String,
+}
+
 #[derive(GraphQLInputObject)]
 #[graphql(name = "PengoloDocumentProfileInput")]
 pub struct DocumentProfileInput {

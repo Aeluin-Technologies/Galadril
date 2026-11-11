@@ -2426,6 +2426,32 @@ impl Query {
         pengolo_result(ctx.pengolo.preferences(&pengolo_actor(ctx)?).await)
     }
 
+    async fn pengolo_signing_vault(
+        context: &AppContext,
+    ) -> FieldResult<Option<String>> {
+        pengolo_result(
+            context
+                .pengolo
+                .signing_vault(&pengolo_actor(context)?)
+                .await,
+        )
+    }
+
+    async fn pengolo_handwritten_signatures(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<Vec<pengolo::HandwrittenSignature>> {
+        pengolo_result(ctx.pengolo.signatures(&pengolo_actor(ctx)?).await)
+    }
+
+    async fn pengolo_handwritten_signature_trace(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+    ) -> FieldResult<Option<String>> {
+        pengolo_result(
+            ctx.pengolo.signature_trace(&pengolo_actor(ctx)?, &id).await,
+        )
+    }
+
     async fn pengolo_document_profile(
         #[graphql(context)] ctx: &AppContext,
     ) -> FieldResult<pengolo::DocumentProfile> {
@@ -3869,6 +3895,44 @@ impl Mutation {
                     input.operation.as_str(),
                     input.registration.as_deref(),
                 )
+                .await,
+        )
+    }
+
+    async fn create_pengolo_signing_vault(
+        context: &AppContext,
+        envelope: String,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            context
+                .pengolo
+                .create_signing_vault(&pengolo_actor(context)?, &envelope)
+                .await,
+        )
+    }
+
+    async fn create_pengolo_handwritten_signature(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::HandwrittenSignatureInput,
+    ) -> FieldResult<pengolo::HandwrittenSignature> {
+        pengolo_result(
+            ctx.pengolo
+                .create_signature(
+                    &pengolo_actor(ctx)?,
+                    &input.label,
+                    &input.trace,
+                )
+                .await,
+        )
+    }
+
+    async fn delete_pengolo_handwritten_signature(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo
+                .delete_signature(&pengolo_actor(ctx)?, &id)
                 .await,
         )
     }
