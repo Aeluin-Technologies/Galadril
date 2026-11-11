@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "galadril": {
+      "type": "streamable-http",
+      "url": "https://mcp.gravitalia.com/",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "provided",
+              "clientId": "galadril-mcp-chatgpt",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "baseScopes": ["workspace:use"]
+          }
+        }
+      }
+    }
+  }
+}

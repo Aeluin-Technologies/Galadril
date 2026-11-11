@@ -6,5 +6,5 @@ py_test(
     srcs = ["test_workspace.py"],
     main = "test_workspace.py",
     legacy_create_init = False,
-    deps = ["//services/mcp:lib", "@pip//httpx", "@pip//mcp"],
+    deps = ["//services/mcp:lib", "@pip//httpx", "@pip//httpx2", "@pip//mcp", "@pip//starlette"],
 )

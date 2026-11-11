@@ -6,11 +6,13 @@ import asyncio
 import os
 import re
 from datetime import date
-from urllib.parse import urlsplit
+from time import monotonic
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
-from opentelemetry import trace
-from pydantic import JsonValue
+from galadril_mcp_core.legal import NormRead
+from opentelemetry import metrics, trace
+from pydantic import BaseModel, JsonValue
 
 from galadril_mcp_service.providers.piste_api import (
     Fund,
@@ -23,6 +25,173 @@ _ORIGIN = "https://librejustice.fr"
 _OFFICIAL_ID = re.compile(r"(?:CETATEXT|JURITEXT|LEGIARTI|JORFTEXT)\d{12}")
 _NORMS = frozenset({"CODE_DATE", "LODA_DATE", "JORF"})
 _COURTS = {"CETAT": ("CE", "CAA", "TA"), "JURI": ("CC", "CA", "TJ", "TCOM")}
+_SEGMENT = re.compile(r"[\w.~:-]{1,256}")
+_LEGIFRANCE_NORM_ID = re.compile(
+    r"(?:LEGI|JORF|KALI|CIRC)(?:ARTI|TEXT|SCTA)\d{12}"
+)
+_REJECTIONS = {
+    400: "invalid_filters",
+    404: "not_found",
+    422: "invalid_filters",
+    429: "rate_limited",
+}
+_DURATION = metrics.get_meter("galadril.mcp").create_histogram(
+    "galadril.mcp.librejustice.duration", unit="s"
+)
+
+
+def _segment(value: str) -> str:
+    if value in {".", ".."} or not _SEGMENT.fullmatch(value):
+        raise ValueError("Invalid LibreJustice source address")
+    return quote(value, safe="")
+
+
+def _public_path(url: str, kind: str) -> str:
+    """Parse an identifier from a provider URL without using it as a destination."""
+    parsed = urlsplit(url)
+    if (
+        (parsed.scheme, parsed.netloc)
+        not in {("https", "librejustice.fr"), ("", "")}
+        or not parsed.path.startswith(f"/{kind}/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Expected a LibreJustice source URL")
+    parts = parsed.path.strip("/").split("/")
+    return "/".join(_segment(unquote(part)) for part in parts)
+
+
+def decision_path(url: str) -> str:
+    """Resolve a decision link to the REST read route on the fixed origin."""
+    return "/api/decision/" + _public_path(url, "decision").rsplit("/", 1)[-1]
+
+
+def search_params(request: BaseModel) -> list[tuple[str, str]]:
+    """Keep repeated filters separate so LibreJustice applies its native OR logic."""
+    params: list[tuple[str, str]] = []
+    for key, value in request.model_dump(
+        mode="json", exclude_none=True
+    ).items():
+        if isinstance(value, list):
+            params.extend((key, str(item)) for item in value)
+        elif isinstance(value, bool):
+            params.append((key, "true" if value else "false"))
+        elif value != "":
+            params.append((key, str(value)))
+    return params
+
+
+async def _api_key() -> str:
+    location = os.environ.get("LIBREJUSTICE_API_KEY_FILE")
+    if location:
+        return await asyncio.to_thread(read_private_credential, location)
+    return os.environ.get("LIBREJUSTICE_API_KEY", "").strip()
+
+
+async def read_public(
+    http: httpx.AsyncClient,
+    path: str,
+    params: list[tuple[str, str]],
+    *,
+    operation: str,
+) -> dict[str, JsonValue]:
+    """Read bounded public evidence without passing through any Galadril authority."""
+    started = monotonic()
+    outcome = "unavailable"
+    with trace.get_tracer("galadril.mcp").start_as_current_span(
+        "mcp.librejustice.request",
+        attributes={"mcp.provider.operation": operation},
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        try:
+            async with asyncio.timeout(15):
+                key = await _api_key()
+                if key:
+                    for _ in range(2):
+                        async with http.stream(
+                            "GET",
+                            _ORIGIN + path,
+                            params=params,
+                            headers={"Authorization": "Bearer " + key},
+                            timeout=12,
+                            follow_redirects=False,
+                        ) as response:
+                            status = response.status_code
+                            span.set_attribute(
+                                "http.response.status_code", status
+                            )
+                            if status == 200:
+                                result = await _response_object(response)
+                                outcome = "ok"
+                                return result
+                            if rejection := _REJECTIONS.get(status):
+                                outcome = rejection
+                                return {"status": rejection}
+                            location = response.headers.get("location", "")
+                            if (
+                                status == 308
+                                and path.startswith("/api/article/")
+                                and location.startswith("/api/norm/")
+                            ):
+                                path = "/api/" + _public_path(
+                                    urlsplit(location).path.removeprefix(
+                                        "/api"
+                                    ),
+                                    "norm",
+                                )
+                                continue
+                            break
+        except (httpx.HTTPError, PisteUnavailable, TimeoutError, ValueError):
+            span.add_event("mcp.librejustice.request_failed")
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            span.set_attribute("mcp.provider.outcome", outcome)
+            _DURATION.record(
+                monotonic() - started,
+                {"operation": operation, "outcome": outcome},
+            )
+        return {"status": "unavailable"}
+
+
+async def read_norm(
+    http: httpx.AsyncClient, request: NormRead
+) -> dict[str, JsonValue]:
+    """Resolve a dated norm using its canonical link or public source identifier."""
+    params = [("as_of", request.as_of.isoformat())] if request.as_of else []
+    if request.url is not None:
+        path = "/api/" + _public_path(request.url, "norm")
+    elif request.code is not None:
+        path = "/api/norm/" + _segment(request.code)
+    elif request.text_id is not None:
+        identifier = request.text_id
+        if identifier.startswith("https://"):
+            parsed = urlsplit(identifier)
+            if parsed.netloc not in {
+                "www.legifrance.gouv.fr",
+                "legifrance.gouv.fr",
+            }:
+                raise ValueError("Expected a Légifrance permalink")
+            identifier = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        if identifier.startswith("BOI-"):
+            path = "/api/norm/" + _segment(identifier)
+        elif _LEGIFRANCE_NORM_ID.fullmatch(identifier):
+            path = "/api/article/" + _segment(identifier)
+        else:
+            raise ValueError("Expected a Légifrance or BOFiP identifier")
+        if request.article is not None and path.startswith("/api/article/"):
+            root = await read_public(http, path, params, operation="get_norm")
+            url = root.get("url")
+            if not isinstance(url, str):
+                return root
+            path = "/api/" + _public_path(url, "norm")
+    else:
+        raise ValueError("A public norm address is required")
+    if request.article is not None:
+        path += "/" + _segment(request.article)
+    return await read_public(http, path, params, operation="get_norm")
 
 
 def _candidate(value: JsonValue) -> dict[str, JsonValue] | None:
@@ -118,12 +287,7 @@ async def search_librejustice(
         set_status_on_exception=False,
     ) as span:
         try:
-            location = os.environ.get("LIBREJUSTICE_API_KEY_FILE")
-            key = (
-                await asyncio.to_thread(read_private_credential, location)
-                if location
-                else os.environ.get("LIBREJUSTICE_API_KEY", "").strip()
-            )
+            key = await _api_key()
             if not key:
                 return None
             async with (

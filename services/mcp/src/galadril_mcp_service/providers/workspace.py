@@ -5,21 +5,29 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
 import httpx
+from mcp.server.apps import Apps, ResourceCsp
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent, ToolAnnotations
 from opentelemetry import trace
+from opentelemetry.trace.propagation.tracecontext import (
+    TraceContextTextMapPropagator,
+)
 from pydantic import Field, JsonValue
 
+from galadril_mcp_service.authorization import ToolScopeRequired
 from galadril_mcp_service.providers.workspace_contracts import (
     Compilation,
     Identifier,
     JobRequest,
     MailRead,
+    Revision,
     SaveDraft,
     TemplatePut,
     TemplateQuery,
@@ -27,6 +35,21 @@ from galadril_mcp_service.providers.workspace_contracts import (
 )
 
 FileIds = Annotated[tuple[Identifier, ...], Field(max_length=16)]
+_JOB_VIEW_URI = "ui://galadril/document-job.html"
+
+
+def document_apps() -> Apps:
+    """Serve a network-free view over the already-authorized job response."""
+    apps = Apps()
+    apps.add_html_resource(
+        _JOB_VIEW_URI,
+        Path(__file__)
+        .with_name("document_job.html")
+        .read_text(encoding="utf-8"),
+        name="Document compilation",
+        csp=ResourceCsp(connect_domains=[], resource_domains=[]),
+    )
+    return apps
 
 
 def _result(value: dict[str, JsonValue]) -> CallToolResult:
@@ -47,7 +70,7 @@ def _result(value: dict[str, JsonValue]) -> CallToolResult:
             or parsed.fragment
             or parsed.username
         ):
-            raise ValueError("Invalid MCP download origin")
+            raise ToolError("Document download unavailable")
         if isinstance(identifier, str) and re.fullmatch(
             r"[a-f0-9]{32}", identifier
         ):
@@ -58,7 +81,7 @@ def _result(value: dict[str, JsonValue]) -> CallToolResult:
                         type="resource_link",
                         uri=url,
                         name=str(name or "document.pdf"),
-                        mimeType=str(file.get("mime") or "application/pdf"),
+                        mime_type=str(file.get("mime") or "application/pdf"),
                     ),
                     TextContent(
                         type="text",
@@ -66,11 +89,11 @@ def _result(value: dict[str, JsonValue]) -> CallToolResult:
                     ),
                 ]
             )
-    return CallToolResult(content=content, structuredContent=value)
+    return CallToolResult(content=content, structured_content=value)
 
 
 def register(
-    server: FastMCP, http: httpx.AsyncClient, *, unified: bool = False
+    server: MCPServer[None], http: httpx.AsyncClient, *, unified: bool = False
 ) -> None:
     """Keep transport identity separate from arguments accepted from any MCP client."""
 
@@ -87,13 +110,17 @@ def register(
         envelope: bool = False,
     ) -> CallToolResult:
         identity = get_access_token()
-        if identity is None or scope not in identity.scopes:
-            raise ValueError("Workspace scope unavailable")
+        if identity is None:
+            raise ToolError("Workspace scope unavailable")
+        if scope not in identity.scopes:
+            raise ToolScopeRequired(scope)
         if (
             project_id is not None
             and re.fullmatch(r"[a-f0-9]{32}", project_id) is None
         ):
-            raise ValueError("Invalid project")
+            raise ToolError("Invalid project")
+        # The SDK extracts the parent. Propagate trace context only to Gateway.
+        propagator = TraceContextTextMapPropagator()
         with trace.get_tracer("galadril.mcp").start_as_current_span(
             "mcp.workspace.call",
             attributes={"mcp.operation": operation},
@@ -106,9 +133,11 @@ def register(
                     if identity.client_id == "galadril-pengolo"
                     else "MCP_WORKSPACE_GATEWAY_URL"
                 )
+                headers = {"authorization": "Bearer " + identity.token}
+                propagator.inject(headers)
                 response = await http.post(
                     os.environ[endpoint],
-                    headers={"authorization": "Bearer " + identity.token},
+                    headers=headers,
                     json={
                         "project_id": project_id,
                         "request": {"operation": operation, **arguments},
@@ -120,7 +149,7 @@ def register(
                     response.status_code != 200
                     or len(response.content) > 262144
                 ):
-                    raise ValueError("Workspace operation unavailable")
+                    raise ToolError("Workspace operation unavailable")
                 value: JsonValue = response.json()
                 if envelope:
                     return _result({"value": value})
@@ -128,16 +157,16 @@ def register(
                     value = {"result": value}
                 return _result(value)
             except (httpx.HTTPError, json.JSONDecodeError):
-                raise ValueError("Workspace transport unavailable") from None
+                raise ToolError("Workspace transport unavailable") from None
 
     def annotations(
         read: bool, destructive: bool = False, external: bool = False
     ) -> ToolAnnotations:
         return ToolAnnotations(
-            readOnlyHint=read,
-            destructiveHint=destructive,
-            idempotentHint=read,
-            openWorldHint=external,
+            read_only_hint=read,
+            destructive_hint=destructive,
+            idempotent_hint=read,
+            open_world_hint=external,
         )
 
     def auth(scope: str) -> dict[str, JsonValue]:
@@ -149,7 +178,7 @@ def register(
 
     @server.tool(annotations=annotations(True), meta=auth(email_read))
     async def read_email(request: MailRead) -> CallToolResult:
-        """Read accessible accounts, contacts, messages, threads or attachments. Specify operation and the account/message identifiers returned by earlier calls."""
+        """Read accessible mail. Start with accounts, then use contacts to identify recipients and messages with query to find earlier correspondence. Open the matching thread or message by ID before drafting a reply. This tool cannot send mail."""
         return await invoke(
             email_read,
             "email",
@@ -202,6 +231,23 @@ def register(
             project_id,
         )
 
+    @server.tool(annotations=annotations(True), meta=auth("documents:write"))
+    async def document_case_status(
+        template_id: Identifier, project_id: Identifier
+    ) -> CallToolResult:
+        """Check project and vault readiness. Returns missing field names and profile_ready without reading out private values or editing the project."""
+        return await invoke(
+            "documents:write",
+            "document_templates",
+            {
+                "request": {
+                    "action": "document_case",
+                    "template_id": template_id,
+                }
+            },
+            project_id,
+        )
+
     @server.tool(
         annotations=annotations(False, True), meta=auth("documents:write")
     )
@@ -223,11 +269,26 @@ def register(
     async def compile_document(
         request: Compilation, project_id: Identifier | None = None
     ) -> CallToolResult:
-        """Compile an authorized template version with document values and a stable idempotency_key. Returns a job; use document_job to poll and save the PDF. Never provide vault fields."""
+        """Generate the requested PDF in Galadril without sending or filing it. Pass the requested LaTeX in document.source using the document_source_target returned by document_templates. The compiler binds vault fields automatically. Poll the returned job_id with document_job_status."""
         return await invoke(
             "documents:write",
             "compile_document",
             {"request": request.model_dump(mode="json")},
+            project_id,
+        )
+
+    @server.tool(
+        annotations=annotations(True),
+        meta={**auth("documents:write"), "ui": {"resourceUri": _JOB_VIEW_URI}},
+    )
+    async def document_job_status(
+        job_id: Revision, project_id: Identifier | None = None
+    ) -> CallToolResult:
+        """Read compilation state in the original project. When completed, use document_job with action save to obtain the PDF link."""
+        return await invoke(
+            "documents:write",
+            "document_job",
+            {"request": {"action": "status", "job_id": job_id}},
             project_id,
         )
 
@@ -248,10 +309,10 @@ def register(
         """Internal Pengolo transport for generation-bound tools; unavailable to external OAuth callers."""
         identity = get_access_token()
         if identity is None or identity.client_id != "galadril-pengolo":
-            raise ValueError("Generation-bound tool unavailable")
+            raise ToolError("Generation-bound tool unavailable")
         operation = request.get("operation")
         if not isinstance(operation, str):
-            raise ValueError("Invalid tool operation")
+            raise ToolError("Invalid tool operation")
         arguments = {
             key: value for key, value in request.items() if key != "operation"
         }

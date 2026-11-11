@@ -11,6 +11,7 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import httpx2
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -28,16 +29,26 @@ from uvicorn import Config
 
 
 class _Verifier:
-    def __init__(self, token: str = "fixture-token") -> None:
+    def __init__(
+        self, token: str = "fixture-token", *, unified: bool = False
+    ) -> None:
         self.token = token
+        self.resource = (
+            "https://mcp.example/" if unified else "https://mcp.example/law/mcp"
+        )
+        self.scopes = (
+            ["workspace:use", "legal:read", "documents:read", "documents:write"]
+            if unified
+            else ["legal:read"]
+        )
 
     async def verify_token(self, token: str) -> AccessToken | None:
         return (
             AccessToken(
                 token=token,
                 client_id="fixture",
-                scopes=["legal:read"],
-                resource="https://mcp.example/law/mcp",
+                scopes=self.scopes,
+                resource=self.resource,
             )
             if token == self.token
             else None
@@ -45,6 +56,303 @@ class _Verifier:
 
 
 class LawMCPTest(unittest.IsolatedAsyncioTestCase):
+    async def test_librejustice_keeps_both_sides_and_the_full_research_evidence(
+        self,
+    ) -> None:
+        evidence = {
+            "url": "https://librejustice.fr/decision/ce/case-id",
+            "text": "Vu la procédure. Considérant les motifs. DÉCIDE : rejet.",
+            "case_chronology": [{"solution": "REJET"}],
+        }
+        official_id = "CETATEXT000025041089"
+        passage = "Considérant les motifs."
+        source = {
+            "provider": "legifrance",
+            "operation": "consult",
+            "id": official_id,
+            "data": {
+                "text": {
+                    "id": official_id,
+                    "juridiction": "Conseil d'État",
+                    "num": "123456",
+                    "dateTexte": "2025-12-10",
+                    "texte": evidence["text"],
+                }
+            },
+        }
+        template_id, version, project, job = (
+            "a" * 32,
+            "b" * 64,
+            "c" * 32,
+            "d" * 64,
+        )
+        document_ops: list[str] = []
+        requests: list[httpx.Request] = []
+
+        def libre(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "gateway.example":
+                self.assertEqual(
+                    request.headers["authorization"], "Bearer fixture-token"
+                )
+                payload = json.loads(request.content)
+                self.assertEqual(payload["project_id"], project)
+                args = payload["request"]["request"]
+                operation = payload["request"]["operation"]
+                document_ops.append(operation)
+                if operation == "document_templates":
+                    return httpx.Response(
+                        200, json={"document_source_target": "requete.tex"}
+                    )
+                if operation == "compile_document":
+                    self.assertEqual(args["template_id"], template_id)
+                    self.assertEqual(args["version"], version)
+                    self.assertIn(passage, args["document"]["source"])
+                    return httpx.Response(
+                        200, json={"job_id": job, "status": "queued"}
+                    )
+                self.assertEqual(operation, "document_job")
+                self.assertEqual(args["job_id"], job)
+                if args["action"] == "status":
+                    return httpx.Response(
+                        200, json={"job_id": job, "status": "completed"}
+                    )
+                self.assertEqual(args["action"], "save")
+                return httpx.Response(
+                    200, json={"file": {"id": "e" * 32, "name": "recours.pdf"}}
+                )
+            requests.append(request)
+            self.assertEqual(request.url.host, "librejustice.fr")
+            self.assertEqual(
+                request.headers["Authorization"], "Bearer ljk_fixture"
+            )
+            if request.url.path == "/api/search":
+                return httpx.Response(
+                    200,
+                    json={
+                        "hits": [{"url": evidence["url"]}],
+                        "facets": {"date_lecture_year": {"2026": 2}},
+                        "total": 21,
+                    },
+                )
+            if request.url.path == "/api/decision/case-id":
+                return httpx.Response(200, json=evidence)
+            if request.url.path == "/api/norm/BOI-BIC-PROV-50/130":
+                return httpx.Response(200, json={"text": "Paragraphe fiscal"})
+            self.assertEqual(request.url.path, "/api/norm/fr/code-civil/47")
+            self.assertEqual(request.url.params["as_of"], "2020-02-29")
+            return httpx.Response(200, json={"text": "Version historique"})
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LIBREJUSTICE_API_KEY": "ljk_fixture",
+                    "LIBREJUSTICE_API_KEY_FILE": "",
+                    "MCP_WORKSPACE_GATEWAY_URL": "https://gateway.example/tools",
+                    "MCP_DOWNLOAD_ORIGIN": "https://galadril.example",
+                },
+            ),
+            patch("galadril_mcp_service.providers.piste.PisteCredentials.load"),
+            patch(
+                "galadril_mcp_service.providers.piste.PisteClient.decision",
+                return_value=source,
+            ),
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(libre)
+            ) as outgoing:
+                server = create_server(
+                    MCPAuth(
+                        issuer="https://auth.example/",
+                        resource="https://mcp.example/",
+                        jwks_url="https://auth.example/jwks",
+                        scopes=("workspace:use",),
+                    ),
+                    outgoing,
+                    provider="unified",
+                    verifier=_Verifier(unified=True),
+                )
+                app = server.namespace_app()
+                async with (
+                    app.router.lifespan_context(app),
+                    httpx.AsyncClient(
+                        transport=httpx.ASGITransport(app),
+                        base_url="https://mcp.example",
+                        headers={
+                            "authorization": "Bearer fixture-token",
+                            "accept": "application/json, text/event-stream",
+                        },
+                    ) as client,
+                ):
+
+                    async def call(
+                        name: str, arguments: dict[str, object]
+                    ) -> dict:
+                        response = await client.post(
+                            "/",
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "method": "tools/call",
+                                "params": {
+                                    "name": name,
+                                    "arguments": arguments,
+                                },
+                            },
+                        )
+                        return response.json()["result"]
+
+                    for outcomes in (
+                        ["ANNULATION", "SATISFACTION_PARTIELLE"],
+                        ["REJET"],
+                    ):
+                        result = await call(
+                            "search_decisions",
+                            {
+                                "request": {
+                                    "query": "vice de procédure",
+                                    "seat": ["FR.CE"],
+                                    "solution": outcomes,
+                                    "sort": "date_desc",
+                                    "date_from": "2026-01-01",
+                                },
+                            },
+                        )
+                        data = result["structuredContent"]
+                        self.assertEqual(data["total"], 21)
+                        self.assertEqual(
+                            data["facets"]["date_lecture_year"]["2026"], 2
+                        )
+                        self.assertEqual(
+                            requests[-1].url.params.get_list("solution"),
+                            outcomes,
+                        )
+                        self.assertEqual(
+                            requests[-1].url.params["seat"], "FR.CE"
+                        )
+                        self.assertEqual(
+                            requests[-1].url.params["sort"], "date_desc"
+                        )
+                    result = await call(
+                        "get_decision", {"url": evidence["url"]}
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["case_chronology"],
+                        evidence["case_chronology"],
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["text"], evidence["text"]
+                    )
+                    result = await call(
+                        "get_norm",
+                        {
+                            "request": {
+                                "url": "https://librejustice.fr/norm/fr/code-civil/47",
+                                "as_of": "2020-02-29",
+                            }
+                        },
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["text"],
+                        "Version historique",
+                    )
+                    result = await call(
+                        "get_norm",
+                        {
+                            "request": {
+                                "text_id": "BOI-BIC-PROV-50",
+                                "article": "130",
+                            }
+                        },
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["text"], "Paragraphe fiscal"
+                    )
+                    result = await call(
+                        "verify_citation",
+                        {
+                            "citation": {
+                                "provider": "legifrance",
+                                "identifier": official_id,
+                                "court": "Conseil d'État",
+                                "number": "123456",
+                                "date": "2025-12-10",
+                                "passage": passage,
+                            }
+                        },
+                    )
+                    verification = result["structuredContent"]
+                    self.assertTrue(verification["identity_verified"])
+                    self.assertTrue(verification["passage_verified"])
+                    self.assertFalse(verification["applicability_verified"])
+                    result = await call(
+                        "document_templates",
+                        {
+                            "project_id": project,
+                            "request": {
+                                "action": "read",
+                                "template_id": template_id,
+                                "version": version,
+                            },
+                        },
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["document_source_target"],
+                        "requete.tex",
+                    )
+                    result = await call(
+                        "compile_document",
+                        {
+                            "project_id": project,
+                            "request": {
+                                "template_id": template_id,
+                                "version": version,
+                                "idempotency_key": "265953a8-690d-4d19-9816-7097cfd320e6",
+                                "document": {"source": passage},
+                            },
+                        },
+                    )
+                    self.assertEqual(result["structuredContent"]["job_id"], job)
+                    result = await call(
+                        "document_job_status",
+                        {"project_id": project, "job_id": job},
+                    )
+                    self.assertEqual(
+                        result["structuredContent"]["status"], "completed"
+                    )
+                    result = await call(
+                        "document_job",
+                        {
+                            "project_id": project,
+                            "request": {
+                                "action": "save",
+                                "job_id": job,
+                                "name": "recours.pdf",
+                            },
+                        },
+                    )
+                    self.assertIn(
+                        "resource_link",
+                        {block["type"] for block in result["content"]},
+                    )
+                    self.assertEqual(
+                        document_ops,
+                        [
+                            "document_templates",
+                            "compile_document",
+                            "document_job",
+                            "document_job",
+                        ],
+                    )
+                    before = len(requests)
+                    for url in (
+                        "https://other.example/decision/ce/a",
+                        "https://librejustice.fr/decision/ce/%2e%2e",
+                    ):
+                        result = await call("get_decision", {"url": url})
+                        self.assertTrue(result["isError"])
+                    self.assertEqual(len(requests), before)
+
     async def test_federated_search_runs_both_providers_and_deduplicates(
         self,
     ) -> None:
@@ -128,7 +436,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                     provider="piste",
                     verifier=_Verifier(),
                 )
-                app = server.streamable_http_app()
+                app = server.namespace_app()
                 async with (
                     app.router.lifespan_context(app),
                     httpx.AsyncClient(
@@ -202,7 +510,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                     provider="piste",
                     verifier=_Verifier(),
                 )
-                app = server.streamable_http_app()
+                app = server.namespace_app()
                 async with (
                     app.router.lifespan_context(app),
                     httpx.AsyncClient(
@@ -265,7 +573,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                 provider="piste",
                 verifier=_Verifier(),
             )
-            app = server.streamable_http_app()
+            app = server.namespace_app()
             async with app.router.lifespan_context(app):
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app),
@@ -442,13 +750,13 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
             {"value": "public"},
         )
         for result in (
-            CallToolResult(content=[], isError=True),
+            CallToolResult(content=[], is_error=True),
             CallToolResult(content=[]),
             CallToolResult(content=[text("{}"), text("{}")]),
             CallToolResult(content=[text("x" * 262145)]),
             CallToolResult(content=[text("[]")]),
             CallToolResult(
-                content=[], structuredContent={"value": "x" * 262144}
+                content=[], structured_content={"value": "x" * 262144}
             ),
         ):
             with (
@@ -571,14 +879,16 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                 """Return public fixture data without contacting PISTE."""
                 return {"value": "verified"}
 
-            app = server.streamable_http_app()
+            app = server.namespace_app()
+
+            mcp_client = httpx2.AsyncClient
 
             def transport(
                 *, headers: dict[str, str], timeout: float, trust_env: bool
-            ) -> httpx.AsyncClient:
+            ) -> httpx2.AsyncClient:
                 self.assertEqual(headers["authorization"], "Bearer " + child)
-                return original_client(
-                    transport=httpx.ASGITransport(app),
+                return mcp_client(
+                    transport=httpx2.ASGITransport(app),
                     headers=headers,
                     timeout=timeout,
                     trust_env=trust_env,
@@ -586,7 +896,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
 
             async with server.session_manager.run():
                 with patch(
-                    "galadril_mcp_core.client.httpx.AsyncClient",
+                    "galadril_mcp_core.client.httpx2.AsyncClient",
                     side_effect=transport,
                 ):
                     result = await delegated_call(
@@ -627,7 +937,7 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
             server = create_server(
                 settings, outgoing, provider="piste", verifier=_Verifier()
             )
-            app = server.streamable_http_app()
+            app = server.namespace_app()
             async with (
                 server.session_manager.run(),
                 httpx.AsyncClient(
@@ -659,10 +969,29 @@ class LawMCPTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(listed.status_code, 200)
                 self.assertEqual(
                     {tool["name"] for tool in listed.json()["result"]["tools"]},
-                    {"search", "fetch", "verify_citation"},
+                    {
+                        "search",
+                        "fetch",
+                        "verify_citation",
+                        "search_decisions",
+                        "get_decision",
+                        "search_norms",
+                        "get_norm",
+                    },
                 )
             names = {tool.name for tool in await server.list_tools()}
-            self.assertEqual(names, {"search", "fetch", "verify_citation"})
+            self.assertEqual(
+                names,
+                {
+                    "search",
+                    "fetch",
+                    "verify_citation",
+                    "search_decisions",
+                    "get_decision",
+                    "search_norms",
+                    "get_norm",
+                },
+            )
 
 
 if __name__ == "__main__":

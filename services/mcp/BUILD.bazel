@@ -7,6 +7,14 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push", "oc
 py_library(
     name = "lib",
     srcs = glob(["src/**/*.py"]),
+    data = glob([
+        "src/galadril_mcp_service/client_plugin/**/*.md",
+        "src/galadril_mcp_service/client_plugin/**/*.yaml",
+        "src/galadril_mcp_service/client_plugin/*.json",
+        "src/galadril_mcp_service/client_plugin/assets/*",
+    ]) + [
+        "src/galadril_mcp_service/providers/document_job.html",
+    ],
     imports = ["src"],
     visibility = ["//visibility:public"],
     deps = [
@@ -15,6 +23,7 @@ py_library(
         "@pip//httpx",
         "@pip//mcp",
         "@pip//pydantic",
+        "@pip//pyyaml",
         "@pip//uvicorn",
         "@pip//starlette",
         "@pip//opentelemetry_api",

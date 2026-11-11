@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Document compilation</title>
+<style>
+  :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
+  body { margin: 0; padding: 1rem; }
+  h1 { font-size: 1rem; margin: 0 0 .5rem; }
+  p { margin: 0; }
+</style>
+<h1>Document compilation</h1>
+<p id="status" role="status">Waiting for the compilation status.</p>
+<script>
+  const host = window.parent;
+  const status = document.getElementById("status");
+  let ready = false;
+
+  function send(message) {
+    host.postMessage({ jsonrpc: "2.0", ...message }, "*");
+  }
+
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (event.source !== host || message?.jsonrpc !== "2.0") return;
+
+    if (!ready && message.id === 1 && message.result?.protocolVersion) {
+      ready = true;
+      send({ method: "ui/notifications/initialized" });
+      return;
+    }
+    if (!ready) return;
+
+    if (message.method === "ui/resource-teardown" && message.id != null) {
+      send({ id: message.id, result: {} });
+    }
+    if (message.method !== "ui/notifications/tool-result") return;
+    const result = message.params;
+    const state = result?.structuredContent?.status;
+    status.textContent = result?.isError || typeof state !== "string"
+      ? "The compilation status is unavailable."
+      : state.slice(0, 80);
+  });
+
+  send({
+    id: 1,
+    method: "ui/initialize",
+    params: {
+      appInfo: { name: "galadril-document-job", version: "1.0.0" },
+      appCapabilities: {},
+      protocolVersion: "2026-01-26",
+    },
+  });
+</script>
+</html>

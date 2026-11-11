@@ -63,25 +63,6 @@ manifest:
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
-    cuda.bindings.cudla: cuda_bindings
-    cuda.bindings.cufile: cuda_bindings
-    cuda.bindings.cycudla: cuda_bindings
-    cuda.bindings.cycufile: cuda_bindings
-    cuda.bindings.cydriver: cuda_bindings
-    cuda.bindings.cynvfatbin: cuda_bindings
-    cuda.bindings.cynvjitlink: cuda_bindings
-    cuda.bindings.cynvml: cuda_bindings
-    cuda.bindings.cynvrtc: cuda_bindings
-    cuda.bindings.cynvvm: cuda_bindings
-    cuda.bindings.cyruntime: cuda_bindings
-    cuda.bindings.driver: cuda_bindings
-    cuda.bindings.nvfatbin: cuda_bindings
-    cuda.bindings.nvjitlink: cuda_bindings
-    cuda.bindings.nvml: cuda_bindings
-    cuda.bindings.nvrtc: cuda_bindings
-    cuda.bindings.nvvm: cuda_bindings
-    cuda.bindings.runtime: cuda_bindings
-    cuda.bindings.utils: cuda_bindings
     cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
@@ -207,7 +188,6 @@ manifest:
     httpcore2: httpcore2
     httpx: httpx
     httpx2: httpx2
-    httpx_sse: httpx_sse
     huggingface_hub: huggingface_hub
     idna: idna
     igraph: igraph
@@ -217,10 +197,6 @@ manifest:
     insightface_privateframe_bootstrap: insightface
     interface_meta: interface_meta
     isympy: sympy
-    jaraco.classes: jaraco_classes
-    jaraco.context: jaraco_context
-    jaraco.functools: jaraco_functools
-    jeepney: jeepney
     jinja2: jinja2
     jiter: jiter
     jmespath: jmespath
@@ -233,7 +209,6 @@ manifest:
     jwt: pyjwt
     kaldiio: kaldiio
     key_value: py_key_value_aio
-    keyring: keyring
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
     librosa: librosa
@@ -250,11 +225,11 @@ manifest:
     matplotlib: matplotlib
     maturin: maturin
     mcp: mcp
+    mcp_types: mcp_types
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     moka_py: moka_py
     momentchi2: momentchi2
-    more_itertools: more_itertools
     moto: moto
     mpl_toolkits.axes_grid1: matplotlib
     mpl_toolkits.axisartist: matplotlib
@@ -390,7 +365,6 @@ manifest:
     scikit_build_core: scikit_build_core
     scipy: scipy
     scs: scs
-    secretstorage: secretstorage
     sentencepiece: sentencepiece
     setup: cvxpy
     setuptools: setuptools
@@ -434,19 +408,6 @@ manifest:
     torchvision: torchvision
     tqdm: tqdm
     transformers: transformers
-    triton.backends: triton
-    triton.compiler: triton
-    triton.errors: triton
-    triton.experimental: triton
-    triton.instrumentation.libGPUInstrumentationTestLib: triton
-    triton.knobs: triton
-    triton.language: triton
-    triton.plugins.libMLIRDialectPlugin: triton
-    triton.plugins.libTritonPluginsTestLib: triton
-    triton.profiler: triton
-    triton.runtime: triton
-    triton.testing: triton
-    triton.tools: triton
     truststore: truststore
     typer: typer
     typing_extensions: typing_extensions
@@ -465,4 +426,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: d28bf923aa018551ded879ea2e40782236a12ab84a030685bedc3a1cfa14660b
+integrity: c526f6ea2cacbb80f4b143511da0f1ead2525ccb73357dc26164b11bdda24c8c

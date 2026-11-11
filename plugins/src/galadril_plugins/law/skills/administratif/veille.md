@@ -16,3 +16,10 @@ nécessite une planification distincte.
 Pour le rôle normes, établis les textes applicables, leurs versions temporelles,
 la compétence, la hiérarchie normative, les exceptions et le champ matériel.
 Un texte actuel ne prouve pas le droit applicable à la date litigieuse.
+
+Pour les décisions récentes, recherche par juridiction et dans chaque sens
+avec `search_decisions`, `solution`, `sort: "date_desc"` et des termes courts.
+Relève les années signalées dans `facets.date_lecture_year`, puis relis
+les motifs, le dispositif et les recours de chaque décision retenue. Pour les
+textes, applique le protocole ci-dessous avec `valid_from` et `as_of`, et
+consigne la version et la date d'effet vérifiées auprès de l'éditeur officiel.

@@ -8,6 +8,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "@pip//httpx",
+        "@pip//httpx2",
         "@pip//mcp",
         "@pip//pyjwt",
         "@pip//pydantic",

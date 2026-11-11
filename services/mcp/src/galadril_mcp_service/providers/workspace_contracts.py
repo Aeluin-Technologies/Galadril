@@ -103,7 +103,15 @@ class Document(RequestModel):
     variables: dict[str, str | int | bool] = Field(
         default_factory=dict, max_length=64
     )
-    source: str | None = Field(default=None, max_length=1024 * 1024)
+    source: str | None = Field(
+        default=None,
+        max_length=1024 * 1024,
+        description=(
+            "Actual UTF-8 LaTeX replacing the document_source_target reported "
+            "by the selected template. Omit only "
+            "when the unchanged template content is intended."
+        ),
+    )
 
 
 class Compilation(RequestModel):

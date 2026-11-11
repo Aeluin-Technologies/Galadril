@@ -13,6 +13,21 @@ from galadril_plugins import PluginRegistry
 
 
 class PackagedTemplatesTest(unittest.TestCase):
+    def test_pengolo_receives_the_legal_method_and_reference_material(
+        self,
+    ) -> None:
+        skills = {
+            skill.capability.id: skill.instructions
+            for skill in PluginRegistry.discover().skills()
+        }
+        case_law = skills["law.skill.jurisprudence"]
+        self.assertIn("case_chronology", case_law)
+        self.assertIn("FR.TA.JUGE_REFERES", case_law)
+        norms = skills["law.skill.veille"]
+        self.assertIn("valid_from", norms)
+        self.assertIn("The renumbering blind spot", norms)
+        self.assertIn("UNTS", norms)
+
     def test_law_template_and_specialists_are_discoverable(self) -> None:
         registry = PluginRegistry.discover()
         workers = [
