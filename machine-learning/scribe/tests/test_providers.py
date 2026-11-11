@@ -735,11 +735,14 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
     model_name: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_generation(event: str, **metadata: object) -> None:
-        raise AssertionError(event) from sys.exception()
+    generation_errors: list[BaseException] = []
+
+    def capture_generation_error(event: str, **metadata: object) -> None:
+        if (error := sys.exception()) is not None:
+            generation_errors.append(error)
 
     monkeypatch.setattr(
-        "galadril_scribe.runtime.logger.warning", fail_generation
+        "galadril_scribe.runtime.logger.warning", capture_generation_error
     )
     monkeypatch.setenv("OPENAI_BASE_URL", "http://attacker/v1")
     calls: list[httpx.Request] = []
@@ -782,6 +785,10 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "search_emails",
             "read_email",
             "utils_mcp_email_email",
+            "law_mcp_research_search_decisions",
+            "law_mcp_research_get_decision",
+            "law_mcp_research_search_norms",
+            "law_mcp_research_get_norm",
             "law_mcp_research_search_official_law",
             "law_mcp_research_consult_official_law",
             "law_mcp_research_verify_official_citation",
@@ -876,6 +883,8 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             if effort is not None:
                 payload["reasoning_effort"] = effort
             response = await client.post("/runs", json=payload)
+    if generation_errors:
+        raise generation_errors[0]
     assert response.status_code == 200
     chunks = [json.loads(line) for line in response.text.splitlines()]
     assert chunks[-1]["kind"] == "completed", [
