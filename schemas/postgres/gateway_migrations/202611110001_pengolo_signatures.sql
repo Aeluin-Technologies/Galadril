@@ -1,5 +1,5 @@
 -- Personal marks cannot be read through project or tenant administration.
-CREATE TABLE pengolo_signatures (
+CREATE TABLE IF NOT EXISTS pengolo_signatures (
     tenant_id TEXT NOT NULL,
     owner_id TEXT NOT NULL CHECK (owner_id <> ''),
     id TEXT NOT NULL CHECK (id ~ '^[a-f0-9]{32}$'),
@@ -11,6 +11,7 @@ CREATE TABLE pengolo_signatures (
 
 ALTER TABLE pengolo_signatures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pengolo_signatures FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS personal_signature_scope ON pengolo_signatures;
 CREATE POLICY personal_signature_scope ON pengolo_signatures
     USING (
         tenant_id = current_setting('app.tenant_id', true)
