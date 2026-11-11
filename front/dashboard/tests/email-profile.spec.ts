@@ -139,7 +139,27 @@ for (const scenario of ["ready", "stale", "forbidden"] as const) {
       page.getByRole("status").filter({ hasText: "Email sent" }),
     ).toBeVisible();
     expect(actions).toEqual(["approve", "send"]);
-    await page.reload();
+    // Reloading starts a new session check and draft read before the receipt renders.
+    const [draftResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const request = response.request();
+        if (
+          request.method() !== "POST" ||
+          new URL(response.url()).pathname !== "/graphql"
+        )
+          return false;
+        const payload = request.postDataJSON();
+        if (!payload?.query?.includes("emailOperation")) return false;
+        const operation = JSON.parse(payload.variables.request);
+        return (
+          operation.operation === "draft" &&
+          operation.account === accountId &&
+          operation.draft === draftId
+        );
+      }),
+      page.reload(),
+    ]);
+    expect(draftResponse.ok()).toBe(true);
     await expect(
       page.getByRole("status").filter({ hasText: "Email sent" }),
     ).toBeVisible();
