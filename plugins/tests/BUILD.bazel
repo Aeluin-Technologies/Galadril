@@ -24,7 +24,7 @@ py_test(
     srcs = ["test_law_mcp.py"],
     main = "test_law_mcp.py",
     legacy_create_init = False,
-    deps = ["//services/mcp:lib", "@pip//httpx", "@pip//mcp", "@pip//cryptography"],
+    deps = ["//services/mcp:lib", "@pip//httpx", "@pip//httpx2", "@pip//mcp", "@pip//cryptography"],
 )
 
 py_test(

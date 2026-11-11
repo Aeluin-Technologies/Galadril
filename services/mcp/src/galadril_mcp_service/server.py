@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
+import logging
 import os
 import re
 import ssl
@@ -19,19 +21,127 @@ from galadril_plugins.telemetry import telemetry
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from mcp.server.extension import Extension
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, InputRequiredResult, TextContent
 from mcp.types import Tool as MCPTool
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
+from opentelemetry import trace
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+)
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from galadril_mcp_service.authorization import ToolScopeRequired
 from galadril_mcp_service.providers.unified import SCOPES as UNIFIED_SCOPES
+from galadril_mcp_service.providers.workspace import document_apps
+from galadril_mcp_service.skills import PackagedSkills
+
+DOCUMENT_WORKFLOW = (
+    "To produce a PDF, use document_templates to find and read the authorized "
+    "template, then compile_document with document.source containing the actual "
+    "requested text for the document_source_target returned by the template. "
+    "Use document_case_status to check project fields and private profile readiness. "
+    "Poll with document_job_status, then save with document_job and return its "
+    "download link. Compiling and saving a PDF do not send or file anything. "
+    "For email, use read_email to identify the mailbox, contact and original "
+    "thread, then save_email_draft. Sending is a separate confirmed action."
+)
+LEGAL_WORKFLOW = (
+    "Use the recherche-jurisprudence and recherche-normes skills. Send only "
+    "public legal terms. Run search_decisions with opposing solution filters "
+    "and read full decisions and appeals with get_decision. Resolve dated norms "
+    "with search_norms and get_norm. Use search and fetch for official sources "
+    "and verify_citation to confirm each French citation against Légifrance."
+)
 
 
-class NamespaceServer(FastMCP):
+class NamespaceServer(MCPServer[None]):
+    def __init__(
+        self,
+        provider: str,
+        settings: MCPAuth,
+        verifier: TokenVerifier,
+        request_body_limit: int,
+    ) -> None:
+        extensions: list[Extension] = [PackagedSkills(provider)]
+        if provider in {"unified", "workspace"}:
+            extensions.append(document_apps())
+        super().__init__(
+            provider,
+            extensions=extensions,
+            instructions={
+                "unified": f"{LEGAL_WORKFLOW}\n\n{DOCUMENT_WORKFLOW}",
+                "workspace": DOCUMENT_WORKFLOW,
+                "piste": LEGAL_WORKFLOW,
+            }.get(provider),
+            subscriptions=False,
+            token_verifier=verifier,
+            auth=AuthSettings(
+                issuer_url=AnyHttpUrl(settings.issuer),
+                resource_server_url=AnyHttpUrl(settings.resource),
+                required_scopes=list(settings.scopes),
+                validate_token_resource=True,
+            ),
+        )
+        self._resource = urlsplit(settings.resource)
+        self._required_scopes = settings.scopes
+        self._request_body_limit = request_body_limit
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, JsonValue],
+        context: Context[None, object] | None = None,
+    ) -> CallToolResult | InputRequiredResult:
+        """Let the client request additional consent for a verified caller."""
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as failure:
+            error = failure.__cause__
+            if not isinstance(error, ToolScopeRequired):
+                raise
+            trace.get_current_span().add_event("mcp.tool.insufficient_scope")
+            path = self._resource.path.rstrip("/")
+            metadata = f"https://{self._resource.netloc}/.well-known/oauth-protected-resource{path}"
+            scopes = " ".join(
+                dict.fromkeys((*self._required_scopes, error.scope))
+            )
+            challenge = (
+                f"Bearer resource_metadata={json.dumps(metadata)}, "
+                'error="insufficient_scope", '
+                'error_description="Additional Galadril permissions are required", '
+                f"scope={json.dumps(scopes)}"
+            )
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(error))],
+                is_error=True,
+                _meta={"mcp/www_authenticate": [challenge]},
+            )
+
+    def namespace_app(self) -> Starlette:
+        """Apply the same audience, host and size policy to both protocol versions."""
+        return self.streamable_http_app(
+            stateless_http=True,
+            json_response=True,
+            streamable_http_path=self._resource.path,
+            max_request_body_size=self._request_body_limit,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=[self._resource.netloc],
+                allowed_origins=["https://" + self._resource.netloc],
+            ),
+        )
+
     async def list_tools(self) -> list[MCPTool]:
         """Internal adapters are not part of the public workspace tool catalogue."""
         tools = await super().list_tools()
@@ -53,7 +163,7 @@ def create_server(
     provider: str,
     verifier: TokenVerifier | None = None,
     request_body_limit: int = 65536,
-) -> FastMCP:
+) -> NamespaceServer:
     """Create an authenticated namespace from operator-owned provider configuration.
 
     Args:
@@ -67,27 +177,13 @@ def create_server(
     """
     if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", provider) is None:
         raise ValueError("Invalid installed MCP provider")
-    host = urlsplit(settings.resource).netloc
     if not 65536 <= request_body_limit <= 1024 * 1024:
         raise ValueError("Invalid MCP request body limit")
     server = NamespaceServer(
         provider,
-        stateless_http=True,
-        json_response=True,
-        streamable_http_path=urlsplit(settings.resource).path,
-        max_request_body_size=request_body_limit,
-        token_verifier=verifier or OAuthVerifier(settings, http),
-        auth=AuthSettings(
-            issuer_url=AnyHttpUrl(settings.issuer),
-            resource_server_url=AnyHttpUrl(settings.resource),
-            required_scopes=list(settings.scopes),
-            validate_token_resource=True,
-        ),
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=[host],
-            allowed_origins=["https://" + host],
-        ),
+        settings,
+        verifier or OAuthVerifier(settings, http),
+        request_body_limit,
     )
     module = importlib.import_module(
         "galadril_mcp_service.providers." + provider
@@ -97,7 +193,7 @@ def create_server(
     return server
 
 
-RegisterProvider = Callable[[FastMCP, httpx.AsyncClient], None]
+RegisterProvider = Callable[[MCPServer[None], httpx.AsyncClient], None]
 
 
 class Namespace(BaseModel):
@@ -175,7 +271,7 @@ async def serve() -> None:
                 verifier=verifier,
                 request_body_limit=namespace.request_body_limit,
             )
-            app = server.streamable_http_app()
+            app = server.namespace_app()
             apps.append(app)
             routes[namespace.path] = app
             metadata = "/.well-known/oauth-protected-resource"
@@ -219,6 +315,8 @@ async def serve() -> None:
 
 def main() -> None:
     """Initialize OTLP before accepting requests or loading provider credentials."""
+    for name in ("httpx", "httpx2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     with telemetry("galadril-mcp"):
         asyncio.run(serve())
 

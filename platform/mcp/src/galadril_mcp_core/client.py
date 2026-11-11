@@ -6,10 +6,14 @@ import json
 from urllib.parse import urlsplit
 
 import httpx
-from mcp import ClientSession, McpError
+import httpx2
+from mcp import Client, MCPError
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
 from opentelemetry import trace
+from opentelemetry.trace.propagation.tracecontext import (
+    TraceContextTextMapPropagator,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
 
 
@@ -25,9 +29,9 @@ class _Grant(BaseModel):
 
 def _public_result(result: CallToolResult) -> dict[str, JsonValue]:
     """Accept bounded structured output without treating tool errors as evidence."""
-    if result.isError:
+    if result.is_error:
         raise MCPUnavailable("MCP provider did not confirm a result")
-    value = result.structuredContent
+    value = result.structured_content
     if value is None:
         texts = [item.text for item in result.content if item.type == "text"]
         if len(texts) != 1 or len(texts[0]) > 262144:
@@ -46,7 +50,7 @@ async def _call(
     arguments: dict[str, JsonValue],
 ) -> dict[str, JsonValue]:
     """Keep the attenuated token inside the transport, outside tool arguments."""
-    async with httpx.AsyncClient(
+    async with httpx2.AsyncClient(
         headers={
             "authorization": "Bearer " + grant.token.get_secret_value(),
             "host": urlsplit(resource).netloc,
@@ -54,14 +58,17 @@ async def _call(
         timeout=40,
         trust_env=False,
     ) as transport:
-        async with (
+        async with Client(
             streamable_http_client(
                 endpoint, http_client=transport, terminate_on_close=False
-            ) as (read, write, _),
-            ClientSession(read, write) as session,
-        ):
-            await session.initialize()
-            result = await session.call_tool(tool, arguments)
+            ),
+            read_timeout_seconds=40,
+        ) as client:
+            metadata: dict[str, str] = {}
+            TraceContextTextMapPropagator().inject(metadata)
+            result = await client.call_tool(
+                tool, arguments, meta=metadata or None
+            )
     return _public_result(result)
 
 
@@ -115,5 +122,11 @@ async def delegated_call(
                 raise MCPUnavailable("MCP delegation unavailable")
             grant = _Grant.model_validate_json(response.content)
             return await _call(grant, resource, endpoint, tool, arguments)
-        except (httpx.HTTPError, ValueError, McpError, ExceptionGroup):
+        except (
+            httpx.HTTPError,
+            httpx2.HTTPError,
+            ValueError,
+            MCPError,
+            ExceptionGroup,
+        ):
             raise MCPUnavailable("MCP transport unavailable") from None

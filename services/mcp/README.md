@@ -4,6 +4,40 @@ The public MCP at https://mcp.gravitalia.com/ serves Galadril tools through the
 existing Envoy and Cloudflare Tunnel. The service also accepts legacy resource
 URLs and generation grants scoped to native Pengolo tools.
 
+## ChatGPT plugin package
+
+The portable archive contains both manifests at its root, the Galadril icon
+and five skills, including the adapted LibreJustice procedures and references.
+Build it from the repository root.
+
+```sh
+uv run --package galadril-mcp-service python -m galadril_mcp_service.package_plugin /tmp/galadril-chatgpt.zip
+```
+
+To test the MCP tools in ChatGPT Web, use **Plugins → Add custom MCP server**
+with `https://mcp.gravitalia.com/` and OAuth, then install the resulting
+connection and select it in a new Work chat. Register the exact callback
+displayed for that connection under the Galadril OAuth client. The callback
+can differ between connections. See the
+[OpenAI Web quickstart](https://developers.openai.com/plugins/quickstart).
+
+To test the complete package with skills, follow the
+[OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins)
+and bind the test package to the MCP connection registered in ChatGPT.
+For distribution through the public directory, upload the portable ZIP in the
+[submission portal](https://developers.openai.com/plugins/deploy/submission)
+and complete MCP connection and review there.
+
+The server supports MCP `2026-07-28` through `server/discover` and
+`2025-11-25` through `initialize`. Modern clients discover the Skills extension,
+then use `skills/list` and `skills/get` to get the manifest and SHA-256 for each
+file. Resource-aware clients can also use `resources/list` and `resources/read`
+at `skill://` URIs. Hosts with plugin skills can use the bundled files directly.
+MCP discovery and tool calls require a bearer token. The HTTP OAuth challenge
+starts the initial connection. If a verified caller lacks a tool scope, the
+tool returns an OAuth challenge in `mcp/www_authenticate` so ChatGPT can
+request additional consent.
+
 ## Workspace tools
 
 `https://mcp.gravitalia.com/` exposes legal search, mailbox reads, draft preparation,
@@ -51,8 +85,9 @@ prior revision, and repeating a completed send returns its status.
 
 Discover a template and read its entrypoint, CLS and included TeX before writing.
 Use the same `project_id` throughout discovery, compilation and job polling. Use
-a stable UUID `idempotency_key` for each compilation. Poll `document_job`, then
-save its PDF or a batch archive.
+a stable UUID `idempotency_key` for each compilation. For a vault-bound template,
+check readiness with `document_case_status` and pass the requested body in
+`document.source`. Poll `document_job_status`, then save with `document_job`.
 
 External compiler executions are bound to tenant, user, OAuth client and project;
 they do not create artificial Pengolo generations. Native generations reuse the
@@ -90,6 +125,18 @@ individually. `up` mounts them as read-only files. Other deployments can set
 `LIBREJUSTICE_API_KEY` through the service environment. Send only public legal
 search terms to these services.
 
+Use `search_decisions` for reproducible LibreJustice passes. Its `request`
+supports `solution`, `seat`, `formation`, `publication`, `legal_domain`,
+`legal_instrument`, `legal_article`, `search_in`, date bounds, mode and sort.
+The response retains the upstream facets, pinned hits and reported total.
+`get_decision` reads the complete response, including the appeal chronology
+when present. `search_norms` and `get_norm` accept `as_of` and preserve the
+provider's source and version information. Use `fetch` and `verify_citation`
+to check French decisions against Légifrance and use the dated official funds
+to establish the applicable French norm. Consult the official publisher for
+other legal orders. Oversized responses require another authorized source for
+the complete document.
+
 Each provider can be unavailable independently. The citation verifier always
 re-fetches from Légifrance and never uses LibreJustice or Judilibre as proof.
 
@@ -110,9 +157,40 @@ PISTE errors never include credential details in the tool result.
 
 ## Validation
 
-Run the Bazel targets for MCP schemas, OAuth audiences, delegated operation scopes,
-private attachment projections, legal-provider availability, Scribe's fallback
-loop and the browser approval flow. The E2E environment loads the real central
-MCP image and uses the shipped Scribe transport. Its Pengolo smoke test requires
-a successful Gateway search result, rather than accepting an unavailable tool
-as an empty result. Tests must not send real emails or use production PISTE keys.
+The following command runs the fixture scenario and regression suites.
+
+```sh
+bazel test //services/mcp/tests:workspace_test //plugins/tests:law_mcp_test \
+  //plugins/tests:mcp_auth_test //plugins/tests:document_templates_test \
+  //plugins/tests:piste_test //plugins/tests:law_instruction_test
+```
+
+The scenario starts with opposing `solution` filters, reads a decision and a
+historical norm, verifies the citation against an official-source fixture,
+then reads the `recoursadmin` template target, submits LaTeX, polls the
+compilation and receives a session-protected PDF link. LibreJustice, PISTE and
+Gateway are fixture boundaries. The scenario exercises the actual MCP tools
+and wire contracts.
+
+## Protocol integration boundaries
+
+The workflow package describes tool usage for both ChatGPT and Galadril clients.
+The same Markdown sources and references are served as MCP resources. Skill
+installation and MCP resource discovery do not grant access to workspace data.
+
+| Convention | Integration and verification |
+| --- | --- |
+| SEP-414 | The native MCP client places W3C trace context in request metadata. Workspace operations continue that trace into Gateway over HTTP. Baggage stays at the incoming boundary. |
+| SEP-986, SEP-1303, SEP-1613 | Keep existing tool names and typed request schemas stable. Invalid arguments must return a tool error before Gateway is invoked. |
+| SEP-1330, SEP-1036 | The authorized Galadril review link remains the out-of-band confirmation path for email accounts with review enabled. Protocol elicitation remains pending. |
+| SEP-1024 | Applies to installing locally executable MCP servers on the client. This plugin connects to a remote HTTPS endpoint. |
+| SEP-1577 | Galadril research uses its own model runtime. |
+| SEP-1686, SEP-2663 | Compilation has durable job handles through `compile_document` and `document_job`. The standard Tasks extension and durable legal research through the external MCP catalogue remain pending. |
+| SEP-1865 | `document_job_status` has a read-only, network-free MCP App. The same tool returns text and structured data to clients without App support. |
+| SEP-2640 | The modern Skills catalogue lists the shipped files with digests. |
+| MCP Events | Subscriptions, webhook delivery and scheduled legal monitoring remain pending. |
+
+The `mcp.librejustice.request` trace records provider operation, HTTP status
+and outcome. The `galadril.mcp.librejustice.duration` OTLP histogram records
+seconds by operation and outcome. Queries, source addresses and credentials
+stay out of those dimensions.

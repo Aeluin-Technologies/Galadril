@@ -15,7 +15,7 @@ from galadril_scribe.contracts import RunRequest, Settings
 from galadril_scribe.dependencies import Dependencies
 from galadril_scribe.extensions import ToolExtension
 from galadril_scribe.runtime import Runtime
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -29,9 +29,7 @@ class RecoveryTransportTest(unittest.IsolatedAsyncioTestCase):
         state = {"now": 0.0, "ready": False}
         effects: list[str | None] = []
         factories: list[bool] = []
-        server = FastMCP(
-            "optional-backend", stateless_http=True, json_response=True
-        )
+        server = MCPServer("optional-backend")
 
         @server.tool()
         async def ready(ctx: Context) -> str:
@@ -49,7 +47,9 @@ class RecoveryTransportTest(unittest.IsolatedAsyncioTestCase):
             port = listener.getsockname()[1]
             http = uvicorn.Server(
                 uvicorn.Config(
-                    server.streamable_http_app(),
+                    server.streamable_http_app(
+                        stateless_http=True, json_response=True
+                    ),
                     log_level="critical",
                     access_log=False,
                 )
@@ -164,7 +164,7 @@ class RecoveryTransportTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         clock = {"now": 0.0}
         received_authority: list[str | None] = []
-        server = FastMCP("recovering", stateless_http=True, json_response=True)
+        server = MCPServer("recovering")
 
         @server.tool()
         async def ready(ctx: Context) -> str:
@@ -179,7 +179,9 @@ class RecoveryTransportTest(unittest.IsolatedAsyncioTestCase):
             port = listener.getsockname()[1]
             http = uvicorn.Server(
                 uvicorn.Config(
-                    server.streamable_http_app(),
+                    server.streamable_http_app(
+                        stateless_http=True, json_response=True
+                    ),
                     log_level="critical",
                     access_log=False,
                 )

@@ -5,6 +5,7 @@ from datetime import date
 from typing import Literal
 
 from galadril_mcp_core.client import MCPUnavailable, delegated_call
+from galadril_mcp_core.legal import DecisionSearch, NormRead, NormSearch
 from galadril_scribe.dependencies import Dependencies
 from galadril_scribe.extensions import MediatedToolset
 from pydantic import JsonValue
@@ -18,6 +19,10 @@ Fund = Literal["CETAT", "JURI", "CODE_DATE", "LODA_DATE", "JORF"]
 def research_tools() -> FunctionToolset[Dependencies]:
     result = MediatedToolset()
     result.replayable_names = (
+        "search_decisions",
+        "get_decision",
+        "search_norms",
+        "get_norm",
         "search_official_law",
         "consult_official_law",
         "verify_official_citation",
@@ -48,6 +53,42 @@ def research_tools() -> FunctionToolset[Dependencies]:
                 "status": "unavailable",
                 "fallback": "Use authorized public web research. No source or citation has been verified by this failed call.",
             }
+
+    @result.tool
+    async def search_decisions(
+        ctx: RunContext[Dependencies], request: DecisionSearch
+    ) -> dict[str, JsonValue]:
+        """Search public decisions with separate solution, court and date filters. Send only public legal wording and filters, excluding any private dossier facts or identities."""
+        return await call(
+            ctx,
+            "search_decisions",
+            {"request": request.model_dump(mode="json")},
+        )
+
+    @result.tool
+    async def get_decision(
+        ctx: RunContext[Dependencies], url: str
+    ) -> dict[str, JsonValue]:
+        """Read the full public decision and appeal chronology. Verify French citations separately against Légifrance."""
+        return await call(ctx, "get_decision", {"url": url})
+
+    @result.tool
+    async def search_norms(
+        ctx: RunContext[Dependencies], request: NormSearch
+    ) -> dict[str, JsonValue]:
+        """Find public norms by code, jurisdiction, as_of and valid_from. Exclude private details from the query."""
+        return await call(
+            ctx, "search_norms", {"request": request.model_dump(mode="json")}
+        )
+
+    @result.tool
+    async def get_norm(
+        ctx: RunContext[Dependencies], request: NormRead
+    ) -> dict[str, JsonValue]:
+        """Read a public norm using the applicable legal date and compare it with the official publisher."""
+        return await call(
+            ctx, "get_norm", {"request": request.model_dump(mode="json")}
+        )
 
     @result.tool
     async def search_official_law(

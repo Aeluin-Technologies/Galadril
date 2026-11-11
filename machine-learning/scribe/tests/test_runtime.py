@@ -844,12 +844,12 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
     import uvicorn
     from galadril_pipeline.capabilities import Capability
     from galadril_scribe.extensions import ToolExtension
-    from mcp.server.fastmcp import Context, FastMCP
+    from mcp.server.mcpserver import Context, MCPServer
     from pydantic_ai.mcp import MCPToolset
     from starlette.requests import Request
 
     calls: list[tuple[str, str | None]] = []
-    server = FastMCP("test-web", stateless_http=True, json_response=True)
+    server = MCPServer("test-web")
 
     @server.tool()
     async def web_search(question: str, ctx: Context) -> str:
@@ -865,7 +865,9 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
         port = listener.getsockname()[1]
         http = uvicorn.Server(
             uvicorn.Config(
-                server.streamable_http_app(),
+                server.streamable_http_app(
+                    stateless_http=True, json_response=True
+                ),
                 log_level="critical",
                 access_log=False,
             )
