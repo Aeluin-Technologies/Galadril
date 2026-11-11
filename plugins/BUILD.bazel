@@ -8,7 +8,7 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 py_library(
     name = "galadril_plugins",
     srcs = glob(["src/**/*.py"]),
-    data = glob(["src/**/*.json", "src/**/*.md", "src/**/*.tex", "src/**/*.cls"], allow_empty = True),
+    data = glob(["src/**/*.json", "src/**/*.md", "src/**/*.tex", "src/**/*.cls", "src/**/skills/**/*.yaml"], allow_empty = True),
     imports = ["src"],
     visibility = ["//visibility:public"],
     deps = [

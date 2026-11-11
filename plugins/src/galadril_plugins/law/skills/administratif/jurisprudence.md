@@ -4,6 +4,10 @@ Formule les questions de droit et leurs variantes en termes génériques.
 Exclus des requêtes publiques les noms des parties, numéros de dossier,
 coordonnées, extraits de pièces et autres informations confidentielles.
 
+Applique les passes LibreJustice ci-dessous, juridiction par juridiction.
+Relis les motifs et le dispositif et vérifie les passages dans Légifrance
+avant de présenter une décision française comme une autorité vérifiée.
+
 Si la recherche Web est disponible, privilégie les décisions publiées sur
 [ArianeWeb](https://www.conseil-etat.fr/arianeweb/),
 [Légifrance](https://www.legifrance.gouv.fr/) et le

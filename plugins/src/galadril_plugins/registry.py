@@ -70,7 +70,26 @@ class Binding(BaseModel):
     scribe: str | None = None
     model: str | None = None
     skill: str | None = None
+    skill_references: tuple[str, ...] = Field(default=(), max_length=8)
     service: str | None = None
+
+    @model_validator(mode="after")
+    def validate_skill_references(self) -> Binding:
+        """Keep supplementary instructions inside the deployed plugin package."""
+        if self.skill_references and self.skill is None:
+            raise ValueError("Skill references require a primary resource")
+        for path in self.skill_references:
+            if (
+                len(path) > 192
+                or not path.endswith(".md")
+                or any(part in {"", ".", ".."} for part in path.split("/"))
+                or not all(
+                    char.isascii() and (char.isalnum() or char in "_/.-")
+                    for char in path
+                )
+            ):
+                raise ValueError("Invalid packaged skill reference")
+        return self
 
 
 class NativeService(BaseModel):
@@ -779,15 +798,17 @@ class PluginRegistry:
     def _skills(manifest: PluginManifest) -> tuple[PackagedSkill, ...]:
         result = []
         for capability in manifest.capabilities:
-            path = manifest.bindings[capability.id].skill
+            binding = manifest.bindings[capability.id]
+            path = binding.skill
             if path is not None:
-                instructions = (
-                    files(f"galadril_plugins.{manifest.id}")
-                    .joinpath(path)
-                    .read_text(encoding="utf-8")
-                )
+                package = files(f"galadril_plugins.{manifest.id}")
+                parts = [
+                    package.joinpath(resource).read_text(encoding="utf-8")
+                    for resource in (path, *binding.skill_references)
+                ]
+                instructions = "\n\n".join(parts)
                 if (
-                    not instructions.strip()
+                    not all(part.strip() for part in parts)
                     or len(instructions.encode()) > 32768
                 ):
                     raise ValueError("Packaged Skill exceeds limit or is empty")

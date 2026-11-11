@@ -617,10 +617,23 @@
       "skill": "skills/administratif/recevabilite.md"
     },
     "law.skill.jurisprudence": {
-      "skill": "skills/administratif/jurisprudence.md"
+      "skill": "skills/administratif/jurisprudence.md",
+      "skill_references": [
+        "skills/librejustice/recherche-jurisprudence/SKILL.md",
+        "skills/librejustice/recherche-jurisprudence/references/install-mcp.md",
+        "skills/librejustice/recherche-jurisprudence/references/procedures.md"
+      ]
     },
     "law.skill.veille": {
-      "skill": "skills/administratif/veille.md"
+      "skill": "skills/administratif/veille.md",
+      "skill_references": [
+        "skills/librejustice/recherche-normes/SKILL.md",
+        "skills/librejustice/recherche-normes/references/install-mcp.md",
+        "skills/librejustice/recherche-normes/references/corpus.md",
+        "skills/librejustice/recherche-normes/references/traps.md",
+        "skills/librejustice/recherche-normes/references/foreign-law.md",
+        "skills/librejustice/recherche-normes/references/external-sources.md"
+      ]
     },
     "law.skill.partie-adverse": {
       "skill": "skills/administratif/partie-adverse.md"
