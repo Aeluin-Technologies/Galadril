@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-47543022.js";
+            window.path_to_searchindex_js = "../searchindex-399e3419.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-e13b2548.js"></script>
@@ -229,7 +229,7 @@ loopback MCP listener on port 8098, with an exact host match for
 <p>Add a public hostname to the existing Cloudflare Tunnel configuration:
 <code>mcp.gravitalia.com</code> → <code>http://127.0.0.1:8098</code>, preserving the original Host
 header (or explicitly setting it to <code>mcp.gravitalia.com</code>). The existing Compose
-connector <code>utils-email-tunnel</code> shares the API proxy network namespace. Its
+connector <code>tunnel</code> shares the API proxy network namespace. Its
 <code>tunnel</code> profile enables the connector independently of email tracking. An independently managed
 connector can be reused if it can reach this loopback listener. Native Pengolo
 calls do not require Cloudflare. No host port is published for MCP, and the
@@ -259,9 +259,9 @@ paths. Future providers use this registration contract and the shared verifier.<
 <p>The root resource requires <code>workspace:use</code> and a scope for each tool family.
 Add <code>documents:read</code>, <code>documents:write</code> or <code>data:read</code> for those tools.
 Native Pengolo operations use the
-same MCP transport with generation-scoped grants. External email sends require
-review of the exact draft revision in a primary Galadril session; MCP annotations
-are descriptive hints, not approval authority. See
+same MCP transport with generation-scoped grants. Connected OAuth clients
+handle approval of an exact email draft revision by default. Users can require
+a separate review in Galadril from Account settings. See
 <a href="../../../services/mcp/README.html">the service guide</a> for tools, scopes,
 private attachment handling and compilation workflow.</p>
 <p>PISTE secrets are mounted only into the MCP service, never Scribe, the tunnel,
