@@ -295,6 +295,16 @@ impl Template {
         })
     }
 
+    /// Identifies the file replaced by submitted LaTeX without exposing
+    /// bindings.
+    pub fn document_source_target(&self) -> &str {
+        if self.bound_variables().next().is_some() {
+            "draft.tex"
+        } else {
+            &self.entrypoint
+        }
+    }
+
     pub fn validate_submission(&self, document: &Document) -> Result<()> {
         let placeholders = self
             .bound_variables()
@@ -402,13 +412,14 @@ impl Template {
         let entrypoint = render(source)?;
         let mut assets = Vec::with_capacity(self.assets.len());
         let mut total = entrypoint.len();
+        let source_target = self.document_source_target();
         for asset in self
             .assets
             .iter()
             .filter(|asset| asset.path != self.entrypoint)
         {
             let data = if let Some(body) =
-                body.filter(|_| asset.path == "draft.tex")
+                body.filter(|_| asset.path == source_target)
             {
                 body.as_bytes().to_vec()
             } else if matches!(

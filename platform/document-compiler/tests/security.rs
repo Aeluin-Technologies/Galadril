@@ -155,6 +155,7 @@ fn plugin_bindings_are_supplied_only_at_render_time() -> anyhow::Result<()> {
         variables: BTreeMap::new(),
         source: Some("Generated body".into()),
     };
+    assert_eq!(template.document_source_target(), "draft.tex");
     template.validate_submission(&draft)?;
     assert!(template.render(&draft).is_err());
     let forged = Document {
@@ -183,5 +184,28 @@ fn plugin_bindings_are_supplied_only_at_render_time() -> anyhow::Result<()> {
             .any(|asset| asset.path == "draft.tex" &&
                 asset.data == b"Generated body")
     );
+    Ok(())
+}
+
+#[test]
+fn ordinary_template_source_targets_the_discovered_entrypoint()
+-> anyhow::Result<()> {
+    let mut template = template();
+    let original = template
+        .assets
+        .iter_mut()
+        .find(|asset| asset.path == template.entrypoint)
+        .ok_or_else(|| anyhow::anyhow!("Missing fixture entrypoint"))?;
+    original.path = "custom-entry.tex".into();
+    template.entrypoint = original.path.clone();
+    assert_eq!(template.document_source_target(), "custom-entry.tex");
+    let rendered = template.render(&Document {
+        variables: BTreeMap::from([(
+            "name".into(),
+            serde_json::json!("Example"),
+        )]),
+        source: Some("Requested content".into()),
+    })?;
+    assert_eq!(rendered.entrypoint, b"Requested content");
     Ok(())
 }
