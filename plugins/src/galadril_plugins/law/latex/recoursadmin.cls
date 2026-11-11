@@ -393,13 +393,57 @@
  \end{center}\vspace{-.15em}{\color{Filet}\hrule height .55pt}
  \vspace{.55em}}
 \makeatletter
+% Opt-in widgets preserve ordinary exports and avoid an unavailable eforms bundle.
+\newif\ifGaladrilSignatureFields
+\newcommand{\GaladrilEnableSignatureFields}{%
+  \ifXeTeX
+    \ifGaladrilSignatureFields\else
+      \GaladrilSignatureFieldstrue
+      \AddToHook{shipout/firstpage}{%
+        \special{pdf:obj @galadrilsigfields []}%
+        \special{pdf:put @catalog << /AcroForm << /Fields @galadrilsigfields /SigFlags 3 >> >>}}%
+    \fi
+  \else
+    \ClassError{recoursadmin}{Signature fields require XeTeX}{Compile with Tectonic.}%
+  \fi}
+\@onlypreamble\GaladrilEnableSignatureFields
+\ExplSyntaxOn
+\prop_new:N \g_ra_signature_slots_prop
+\NewDocumentCommand{\GaladrilSignatureSlot}{mmm}
+ {
+  \ifGaladrilSignatureFields
+    \regex_match:nnTF {\A[a-z][a-z0-9\-]{0,55}\Z} {#1}
+      {
+        \prop_if_in:NnTF \g_ra_signature_slots_prop {#1}
+          {\ClassError{recoursadmin}{Duplicate~signature~field}{Use~unique~names.}}
+          {
+            \prop_gput:Nnn \g_ra_signature_slots_prop {#1} {}
+            \leavevmode\hbox_to_wd:nn {#2}
+              {
+                \vrule width 0pt height #3 depth 0pt
+                \special{pdf:ann~@galadrilsig#1~width~\dim_eval:n{#2}~
+                  height~\dim_eval:n{#3}~depth~0pt~
+                  <</Subtype~/Widget~/FT~/Sig~/T~(galadril:#1)~/F~4~/P~@thispage>>}
+                \special{pdf:put~@galadrilsigfields~@galadrilsig#1}
+                \hfil
+              }
+          }
+      }
+      {\ClassError{recoursadmin}{Invalid~signature~field~name}{Use~lowercase~ASCII,~digits~and~hyphens.}}
+  \fi
+ }
+\ExplSyntaxOff
 \newcommand{\SignatureRequerant}{%
  \par\addvspace{1.45em}\ifdefempty{\ra@ville}{Le}{Fait à \ra@ville, le} \ra@date.\par
- \vspace{1.4cm}\hfill\begin{minipage}{.42\textwidth}
- \centering \ra@nom\end{minipage}\par}
+ \ifGaladrilSignatureFields\else\vspace{1.4cm}\fi\hfill\begin{minipage}{.42\textwidth}
+ \centering
+ \ifGaladrilSignatureFields\GaladrilSignatureSlot{claimant}{136bp}{34bp}\par\fi
+ \ra@nom\end{minipage}\par}
 \newcommand{\SignatureCourrier}{%
  \par\addvspace{1.30em}\hfill
- \begin{minipage}{.42\textwidth}\centering \ra@nom\end{minipage}\par}
+ \begin{minipage}{.42\textwidth}\centering
+ \ifGaladrilSignatureFields\GaladrilSignatureSlot{sender}{136bp}{34bp}\par\fi
+ \ra@nom\end{minipage}\par}
 \makeatother
 \newcommand{\TitreBordereau}[1]{%
  \begin{center}{\large\bfseries\color{TitreTexte}\MakeUppercase{#1}}\end{center}
