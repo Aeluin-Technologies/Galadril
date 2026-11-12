@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { signaturePadAspectRatio } from "~/utils/signature-ink";
 type Point = [number, number];
 const strokes = defineModel<Point[][]>({ required: true });
 defineProps<{ disabled: boolean }>();
@@ -108,7 +109,8 @@ function keyboard(event: KeyboardEvent): void {
     :tabindex="disabled ? -1 : 0"
     viewBox="0 0 1000 1000"
     preserveAspectRatio="none"
-    class="group h-48 w-full sm:h-56 touch-none rounded-control border border-border-control bg-surface text-foreground focus-visible:outline-focus"
+    :style="{ aspectRatio: signaturePadAspectRatio }"
+    class="group block w-full touch-none rounded-control border border-border-control bg-surface text-foreground focus-visible:outline-focus"
     @pointerdown="!disabled && pointerDown($event)"
     @pointermove="!disabled && pointerMove($event)"
     @pointerup="pointerEnd"

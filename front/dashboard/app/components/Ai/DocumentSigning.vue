@@ -17,9 +17,9 @@ import {
 import {
   inspectSigningLayout,
   type SigningPlacement,
-  parseSigningTrace,
   signPdf,
 } from "~/utils/pdf-signing";
+import { parseSignatureInk } from "~/utils/signature-ink";
 import { createSigningVault, unlockSigningKey } from "~/utils/signing-vault";
 import type { SigningVault } from "~/utils/signing-vault";
 import {
@@ -271,7 +271,7 @@ async function confirmSigning() {
         ? {
             field,
             placement: placement.value,
-            trace: parseSigningTrace(drawing),
+            ...parseSignatureInk(drawing),
             caption: lines,
           }
         : null,

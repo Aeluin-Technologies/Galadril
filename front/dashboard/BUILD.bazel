@@ -454,6 +454,7 @@ js_test(
     name = "pdf_signing_test",
     data = [
         "app/utils/pdf-signing.ts",
+        "app/utils/signature-ink.ts",
         "app/utils/signing-vault.ts",
         ":signing_fixture",
         ":node_modules/@libpdf/core",

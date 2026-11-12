@@ -57,6 +57,13 @@
     "signedOn": "On {date}"
   },
   "signatureSettings": {
+    "method": "Signature source",
+    "drawMethod": "Draw",
+    "uploadMethod": "Upload",
+    "dropLabel": "Drop your signature here",
+    "uploadHelp": "Drop a PNG or JPEG here, or choose an image up to 5 MB.",
+    "chooseImage": "Choose image",
+    "imageError": "This image could not be used. Choose a PNG or JPEG with a visible signature.",
     "includeCaption": "Include electronic signature note",
     "title": "Handwritten signatures",
     "help": "Your saved marks are private and encrypted. A handwritten mark is visual.",

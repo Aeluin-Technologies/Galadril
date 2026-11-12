@@ -1,5 +1,12 @@
 {
   "signatureSettings": {
+    "method": "Source de la signature",
+    "drawMethod": "Dessiner",
+    "uploadMethod": "Importer",
+    "dropLabel": "Déposez votre signature ici",
+    "uploadHelp": "Déposez un PNG ou un JPEG, ou choisissez une image de 5 Mo maximum.",
+    "chooseImage": "Choisir une image",
+    "imageError": "Cette image ne peut pas être utilisée. Choisissez un PNG ou JPEG avec une signature visible.",
     "includeCaption": "Ajouter la mention de signature électronique",
     "help": "Vos tracés sont privés et chiffrés. Un tracé manuscrit est visuel."
   },
