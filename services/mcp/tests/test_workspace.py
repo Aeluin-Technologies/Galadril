@@ -42,12 +42,67 @@ class Verifier:
 
 
 class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
-    def test_portable_plugin_bundles_both_legal_procedures(self) -> None:
+    def test_default_plugin_uses_galadril_app_and_english_label(self) -> None:
         from galadril_mcp_service.package_plugin import package_plugin
 
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "galadril.zip"
             package_plugin(archive)
+            with ZipFile(archive) as plugin:
+                app = next(
+                    iter(json.loads(plugin.read(".app.json"))["apps"].values())
+                )
+                self.assertEqual(
+                    app["id"], "asdk_app_6af5f40dc3208191b60534eb3ea28b75"
+                )
+                for name in ("plugin.json", ".codex-plugin/plugin.json"):
+                    manifest = json.loads(plugin.read(name))
+                    interface = (
+                        manifest
+                        if name.startswith(".")
+                        else manifest["extensions"]["com.openai"]
+                    )["interface"]
+                    self.assertEqual(
+                        interface["shortDescription"],
+                        "Legal research, email and LaTeX documents",
+                    )
+
+    def test_chatgpt_bundle_keeps_both_manifests_and_hosted_app(self) -> None:
+        from galadril_mcp_service.package_plugin import package_plugin
+
+        suffix = "a" * 32
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "galadril.zip"
+            package_plugin(archive, chatgpt_app_id=f"plugin_asdk_app_{suffix}")
+            with ZipFile(archive) as plugin:
+                self.assertEqual(
+                    json.loads(plugin.read(".app.json")),
+                    {"apps": {f"dev-{suffix}": {"id": f"asdk_app_{suffix}"}}},
+                )
+                portable = json.loads(plugin.read("plugin.json"))
+                native = json.loads(plugin.read(".codex-plugin/plugin.json"))
+                self.assertEqual(
+                    portable["extensions"]["com.openai"]["apps"], "./.app.json"
+                )
+                self.assertEqual(native["apps"], "./.app.json")
+                self.assertEqual(native["mcpServers"], "./.mcp.json")
+                servers = json.loads(plugin.read("mcp.json"))["mcpServers"]
+                self.assertEqual(
+                    json.loads(plugin.read(".mcp.json")),
+                    {"mcpServers": servers},
+                )
+                server = servers["galadril"]
+                self.assertEqual(
+                    server["extensions"]["com.openai"]["auth"]["resource"],
+                    server["url"],
+                )
+
+    def test_portable_plugin_bundles_both_legal_procedures(self) -> None:
+        from galadril_mcp_service.package_plugin import package_plugin
+
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "galadril.zip"
+            package_plugin(archive, chatgpt_app_id=None)
             with ZipFile(archive) as plugin:
                 self.assertIsNone(plugin.testzip())
                 self.assertEqual(
