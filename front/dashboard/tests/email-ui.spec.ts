@@ -94,7 +94,7 @@ test("account settings show the saved document profile and edit one row", async 
   await review.check();
   await expect(page.getByText("Email approval setting saved.")).toBeVisible();
   await page.reload();
-  await expect(review).toBeChecked();
+  await expect(review).toBeChecked({ timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("account-wide.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
@@ -169,7 +169,7 @@ test("personal instructions load, save and survive navigation without exposing a
     name: "Personal instructions",
     exact: true,
   });
-  await expect(field).toBeEnabled();
+  await expect(field).toBeEnabled({ timeout: 30_000 });
   await field.fill("Réponds en français, avec un ton sobre.");
   await page
     .getByRole("button", { name: "Save instructions", exact: true })

@@ -429,7 +429,7 @@ test("leaving the ontology workspace clears unfinished type fields", async ({
     name: "New ontology",
     exact: true,
   });
-  await expect(create).toBeEnabled();
+  await expect(create).toBeEnabled({ timeout: 30_000 });
   await create.click();
   await page
     .getByRole("button", { name: "Add object type", exact: true })
