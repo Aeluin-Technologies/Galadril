@@ -198,6 +198,46 @@ def test_startup_wait_preserves_scope_and_caps_backoff() -> None:
     ]
 
 
+def test_startup_retries_an_unresponsive_registry() -> None:
+    config = bootstrap()
+    attempts = 0
+
+    async def load(*_args: object) -> VisionConfig:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            await asyncio.Event().wait()
+        return config
+
+    async def exercise() -> VisionConfig:
+        return await asyncio.wait_for(
+            wait_for_published_pipeline(config, "tenant_a", "daily"), 1.0
+        )
+
+    sleep = AsyncMock()
+    with (
+        patch("galadril_vision.common.pipelines.load_published_pipeline", load),
+        patch(
+            "galadril_vision.common.pipelines._PUBLICATION_ATTEMPT_TIMEOUT",
+            0.01,
+        ),
+        patch("galadril_vision.common.pipelines.asyncio.sleep", sleep),
+        patch("galadril_vision.common.pipelines.logger.warning") as warning,
+    ):
+        assert asyncio.run(exercise()) is config
+    assert attempts == 2
+    sleep.assert_awaited_once_with(1.0)
+    warning.assert_called_once_with(
+        "pipeline_publication_pending",
+        tenant_id="tenant_a",
+        pipeline_id="daily",
+        revision_id=None,
+        reason="Registry publication lookup timed out",
+        attempt=1,
+        retry_seconds=1.0,
+    )
+
+
 @pytest.mark.parametrize(
     "error", [PipelineUnavailable("invalid"), asyncio.CancelledError()]
 )
