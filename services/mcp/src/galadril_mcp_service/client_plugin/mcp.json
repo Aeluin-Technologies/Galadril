@@ -13,7 +13,10 @@
               "clientId": "galadril-mcp-chatgpt",
               "tokenEndpointAuthMethod": "none"
             },
-            "baseScopes": ["workspace:use"]
+            "baseScopes": [
+              "workspace:use"
+            ],
+            "resource": "https://mcp.gravitalia.com/"
           }
         }
       }

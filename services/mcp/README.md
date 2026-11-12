@@ -6,8 +6,8 @@ URLs and generation grants scoped to native Pengolo tools.
 
 ## ChatGPT plugin package
 
-The portable archive contains both manifests at its root, the Galadril icon
-and five skills, including the adapted LibreJustice procedures and references.
+The default archive links the hosted Galadril app and includes the Galadril
+icon and five skills, including the adapted LibreJustice procedures and references.
 Build it from the repository root.
 
 ```sh
@@ -21,12 +21,23 @@ displayed for that connection under the Galadril OAuth client. The callback
 can differ between connections. See the
 [OpenAI Web quickstart](https://developers.openai.com/plugins/quickstart).
 
-To test the complete package with skills, follow the
-[OpenAI packaging guide](https://developers.openai.com/plugins/build/plugins)
-and bind the test package to the MCP connection registered in ChatGPT.
-For distribution through the public directory, upload the portable ZIP in the
-[submission portal](https://developers.openai.com/plugins/deploy/submission)
-and complete MCP connection and review there.
+To link a different hosted Galadril app in ChatGPT, pass that connection's app ID. Both the `asdk_app_…` ID and the
+`plugin_asdk_app_…` form copied from the ChatGPT URL are accepted.
+
+```sh
+uv run --package galadril-mcp-service python -m galadril_mcp_service.package_plugin \
+  /tmp/galadril-chatgpt-linked.zip --chatgpt-app-id "$GALADRIL_CHATGPT_APP_ID"
+```
+
+The linked archive includes `.app.json`, both plugin manifests and both
+MCP manifests. Both plugin manifests reference the hosted app and both MCP
+manifests describe the same OAuth resource. Import it into a ChatGPT
+workspace with access to the referenced app, check that the plugin shows
+both the app and the skills, then invoke a read-only tool in a new chat.
+
+For public distribution, build with `--portable`, upload the portable ZIP
+in the [submission portal](https://developers.openai.com/plugins/deploy/submission)
+using **With MCP**, and complete MCP connection and review there.
 
 The server supports MCP `2026-07-28` through `server/discover` and
 `2025-11-25` through `initialize`. Modern clients discover the Skills extension,
