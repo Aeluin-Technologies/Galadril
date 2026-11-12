@@ -304,6 +304,13 @@ def register(
             project_id,
         )
 
+    @server.tool(annotations=annotations(True), meta=auth("documents:read"))
+    async def request_document_signature(file_id: Identifier) -> CallToolResult:
+        """Return the Galadril page where the user can review and sign an accessible PDF."""
+        return await invoke(
+            "documents:read", "request_document_signature", {"file_id": file_id}
+        )
+
     @server.tool(annotations=annotations(False, True, True))
     async def invoke_tool(request: dict[str, JsonValue]) -> CallToolResult:
         """Internal Pengolo transport for generation-bound tools; unavailable to external OAuth callers."""

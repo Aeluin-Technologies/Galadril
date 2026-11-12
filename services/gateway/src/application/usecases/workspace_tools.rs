@@ -2,6 +2,7 @@
 //! execution.
 
 use galadril_document_compiler::delegation::{AuthorizationRequest, Grant};
+use galadril_document_compiler::domain::validate_id;
 use galadril_document_compiler::tools::JobOperation;
 
 use super::*;
@@ -234,6 +235,31 @@ impl ChatTools {
             Some("email_save_draft")
         {
             return self.workspace_save_draft(identity, input.request).await;
+        }
+        if input.request.get("operation").and_then(Value::as_str) ==
+            Some("request_document_signature")
+        {
+            let id = input
+                .request
+                .get("file_id")
+                .and_then(Value::as_str)
+                .context("Invalid document identifier")?;
+            validate_id(id, 32)?;
+            let file = self
+                .pengolo_service()?
+                .download(&actor, json!({"id": id}))
+                .await?;
+            ensure!(
+                file.get("mime").and_then(Value::as_str) ==
+                    Some("application/pdf"),
+                "Only PDFs can be signed"
+            );
+            let origin = workspace_public_origin()?;
+            return Ok(json!({
+                "status": "signature_required",
+                "review_url": format!("{}/mcp/sign/{id}", origin.trim_end_matches('/')),
+                "message": "Open this PDF in Galadril to review and sign it. Signing requires your own credential."
+            }));
         }
         let request: ToolRequest = serde_json::from_value(input.request)?;
         match request {
@@ -539,21 +565,26 @@ impl ChatTools {
                 );
             },
         }
-        let origin = std::env::var("MCP_DOWNLOAD_ORIGIN")
-            .context("MCP public origin unavailable")?;
-        let url = reqwest::Url::parse(&origin)?;
-        ensure!(
-            url.scheme() == "https" &&
-                url.host_str().is_some() &&
-                url.username().is_empty() &&
-                url.password().is_none() &&
-                url.query().is_none() &&
-                url.fragment().is_none() &&
-                matches!(url.path(), "" | "/"),
-            "Invalid MCP public origin"
-        );
+        let origin = workspace_public_origin()?;
         Ok(
             json!({"status":"approval_required", "review_url":format!("{}/mcp/email/{}/{}/{}", origin.trim_end_matches('/'), review.account, review.draft, review.revision), "message":"Review this exact draft in Galadril and confirm sending. This tool has not sent any email."}),
         )
     }
+}
+
+fn workspace_public_origin() -> Result<String> {
+    let origin = std::env::var("MCP_DOWNLOAD_ORIGIN")
+        .context("MCP public origin unavailable")?;
+    let url = reqwest::Url::parse(&origin)?;
+    ensure!(
+        url.scheme() == "https" &&
+            url.host_str().is_some() &&
+            url.username().is_empty() &&
+            url.password().is_none() &&
+            url.query().is_none() &&
+            url.fragment().is_none() &&
+            matches!(url.path(), "" | "/"),
+        "Invalid MCP public origin"
+    );
+    Ok(origin)
 }

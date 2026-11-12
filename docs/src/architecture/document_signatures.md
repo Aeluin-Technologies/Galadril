@@ -2,7 +2,7 @@
 
 Galadril can sign a PDF from its library preview. The browser signs a copy of
 the bytes shown in the preview with a personal key and embeds a self-signed
-certificate. The native path runs without a Documenso service or license.
+certificate.
 
 | Concept | Meaning in Galadril |
 | --- | --- |
@@ -38,10 +38,6 @@ certificate. The native path runs without a Documenso service or license.
   is granted to TeX.
 - **Registry:** continues to own ontology and pipeline revisions. Personal marks
   and document signature state are not ontology or pipeline entities.
-- **Official plugins:** `galadril_plugins.signatures.SignatureProvider` defines
-  draft, distribution, status, cancellation and retrieval. The Documenso package
-  supplies a transport but declares no tool, pipeline binding or worker. Merely
-  discovering it does not start a process or contact an external provider.
 
 ## Named fields in LaTeX
 
@@ -59,48 +55,21 @@ the class owns the AcroForm; combining it with another form package is not
 supported. Ordinary exports keep their prior layout and have no new widgets.
 No field constitutes a consent or a cryptographic signature.
 
-## Documenso compatibility
-
-The adapter uploads a draft only when the bytes match the requested SHA-256,
-passes the ordered signer roster and explicit signature rectangles, and keeps
-distribution separate from draft creation. The rectangle contract uses
-percentages from the top left of an unrotated page. The public Documenso API
-[normalizes and can flatten uploaded forms](https://github.com/documenso/documenso/blob/main/packages/trpc/server/envelope-router/create-envelope.ts),
-so the adapter takes coordinates separately instead of relying on the widgets
-to survive upload. Galadril does not yet extract those coordinates automatically.
-
-The adapter requires the envelope read to confirm the requested CSC tier,
-sequential order, request identifier and signer roster before distribution.
-The [public V2 response schema reviewed](https://github.com/documenso/documenso/blob/main/packages/lib/types/envelope.ts)
-does not expose `signatureLevel`. An instance with that schema will refuse
-distribution through this adapter; a compatible vendor API is required. An
-unknown or lower tier is never treated as confirmation. Use a dedicated
-provider team and operator controlled endpoint, with credentials scoped to the
-tenant, if this transport is wired later.
-
-[Documenso CSC](https://docs.documenso.com/docs/self-hosting/configuration/signing-certificate/csc-qes)
-describes per-recipient PAdES, direct signer authentication and a final archival
-timestamp. Do not bypass its timestamp or trust-service configuration. The adapter
-never adds its own terminal seal. It does not use a downloaded PDF, provider
-status, or a requested tier to assert cryptographic validity or qualification.
-
-The documented [webhook secret](https://docs.documenso.com/docs/developers/webhooks/verification)
-is a shared header value, not a MAC over the payload. The adapter compares it
-in constant time and returns only a terminal event hint; it discards recipient
-tokens and payload details. A future receiver must authenticate the hint,
-resolve the envelope in a trusted local mapping and reconcile with an
-authenticated V2 read. Mutating calls do not retry ambiguous responses.
-Documenso's `externalId` correlates requests but does not prove idempotency.
-
 ## Native signing and evidence
 
-Choose **Sign PDF** in the preview, select a field and a saved mark when a
-visible field is available, and confirm consent. The browser fills the
-existing visible widget and includes the appearance in the signature's covered
-bytes. When there is no available visible field, it adds an invisible signature
-field. The downloaded file contains the original bytes followed by the
-incremental update. The LibPDF 0.5.3 patch preserves existing widget geometry
-and page association during signing.
+Choose **Sign PDF** in the document actions menu. Keep or move an existing
+field, or drag a rectangle on a PDF page to create a field. PDFs without a
+predefined field can also be signed without a visible mark. A visible mark can
+include the account display name and local signing date in English or French.
+Confirm consent and unlock the key, then download the signed PDF in the final
+step. The original bytes precede the incremental update, and the signature
+covers the appearance and caption.
+
+The MCP tool `request_document_signature` requires `documents:read`. Gateway
+checks live file authorization and returns a link on the configured Galadril
+origin. The browser checks access again under the signed-in user's session
+when opening the PDF and before signing. The tool creates no signature and
+receives no signing credentials.
 
 At first use, the browser generates an RSA signing key and certificate. It
 wraps the PKCS#8 private key with AES-256-GCM using a dedicated password, a
@@ -112,6 +81,11 @@ unlock method. Gateway receives the ciphertext and public certificate. The
 password, PRF output and plaintext private key stay in the browser. Every
 signing operation imports a non-exportable key after unlock. The authenticator
 may verify the user with biometrics or a device PIN.
+An enrolled PRF signing passkey takes precedence. Password unlock is shown
+when the browser reports no compatible platform authenticator or reports that
+the credential cannot be found. WebAuthn's ambiguous cancellation error
+does not unlock password fallback. Login passkeys and PRF signing enrollment
+are separate.
 
 The native path embeds a basic PAdES signature. A PDF verifier can check the
 integrity of the signed bytes and their relationship to the embedded key.
@@ -156,7 +130,7 @@ reuse, missing scope, deletion of marks and rejection of duplicate vault
 enrollment. Gateway tests passed for trace bounds, ciphertext binding and
 tampering, and the dashboard GraphQL schema contract. The broader Gateway
 suite had one connection reset in the HTTP request body limit test.
-The two plugin Bazel targets passed. The PDF test was skipped in Bazel because
+The PDF test was skipped in Bazel because
 the tools are absent from its environment; it passed locally with Tectonic 0.17
 and qpdf, checking opt-in, names, physical pages and unsigned values.
 
@@ -166,4 +140,4 @@ and the existing account settings. The new UI was inspected at desktop and
 Workspace Rust formatting reported differences in unrelated files. The
 workspace Bazel run stopped during analysis of the Linux ARM compiler image
 because the macOS runner had no matching C++ toolchain. The native tests use
-self-signed certificates and require no Documenso envelope.
+self-signed certificates.

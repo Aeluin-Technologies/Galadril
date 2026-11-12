@@ -67,6 +67,7 @@ pub fn required_scope(request: &Value) -> Result<&'static str> {
             },
             _ => bail!("MCP template operation denied"),
         },
+        Some("request_document_signature") => Ok("documents:read"),
         Some("compile_document" | "document_job") => Ok("documents:write"),
         _ => bail!("MCP operation denied"),
     }
