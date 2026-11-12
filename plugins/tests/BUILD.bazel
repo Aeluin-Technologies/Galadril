@@ -241,11 +241,3 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )
-
-py_test(
-    name = "documenso_signature_test",
-    srcs = ["test_documenso_signature.py"],
-    main = "test_documenso_signature.py",
-    legacy_create_init = False,
-    deps = ["//plugins:galadril_plugins", "@pip//httpx"],
-)

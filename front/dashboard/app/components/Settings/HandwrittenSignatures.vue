@@ -133,6 +133,12 @@ function preview(id: string): Promise<void> {
   });
 }
 
+function closePreview(): void {
+  selected.value = undefined;
+  confirming.value = false;
+  error.value = "";
+}
+
 function remove(): Promise<void> | undefined {
   const id = selected.value?.id;
   if (!id || !confirming.value) return;
@@ -183,7 +189,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section aria-labelledby="signature-settings-heading" class="space-y-4">
+  <UiCard aria-labelledby="signature-settings-heading" class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2 id="signature-settings-heading" class="text-lg font-semibold">
         {{ $t("signatureSettings.title") }}
@@ -203,60 +209,69 @@ onBeforeUnmount(() => {
     <p v-if="marks?.length === 0" class="text-sm text-muted">
       {{ $t("signatureSettings.empty") }}
     </p>
-    <ul v-if="marks?.length" class="flex flex-wrap gap-2">
+    <ul
+      v-if="marks?.length"
+      class="divide-y divide-border rounded-panel border border-border"
+    >
       <li v-for="mark in marks" :key="mark.id">
         <UiButton
           variant="secondary"
           :disabled="busy"
-          :aria-pressed="selected?.id === mark.id"
+          class="w-full"
+          align="start"
           @click="preview(mark.id)"
           >{{ mark.label }}</UiButton
         >
       </li>
     </ul>
-    <div
-      v-if="selected"
-      class="space-y-3 rounded-panel border border-border bg-surface p-4"
+    <UiDialog
+      :open="!!selected"
+      :title="marks?.find((mark) => mark.id === selected?.id)?.label ?? ''"
+      :dismissible="!busy"
+      @close="closePreview"
     >
-      <svg
-        role="img"
-        :aria-label="$t('signatureSettings.preview')"
-        viewBox="0 0 1000 1000"
-        preserveAspectRatio="none"
-        class="h-32 w-full text-foreground"
-      >
-        <polyline
-          v-for="(path, index) in selected.paths"
-          :key="index"
-          :points="path"
-          vector-effect="non-scaling-stroke"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
-      <div v-if="confirming" class="flex flex-wrap items-center gap-2">
-        <span>{{ $t("signatureSettings.confirmHelp") }}</span>
+      <template v-if="selected">
+        <svg
+          role="img"
+          :aria-label="$t('signatureSettings.preview')"
+          viewBox="0 0 1000 1000"
+          preserveAspectRatio="none"
+          class="h-32 w-full text-foreground"
+        >
+          <polyline
+            v-for="(path, index) in selected.paths"
+            :key="index"
+            :points="path"
+            vector-effect="non-scaling-stroke"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <div v-if="confirming" class="flex flex-wrap items-center gap-2">
+          <span>{{ $t("signatureSettings.confirmHelp") }}</span>
+          <UiButton
+            variant="secondary"
+            :disabled="busy"
+            @click="confirming = false"
+            >{{ $t("actions.cancel") }}</UiButton
+          >
+          <UiButton variant="danger" :loading="busy" @click="remove">{{
+            $t("signatureSettings.confirm")
+          }}</UiButton>
+        </div>
         <UiButton
+          v-else
           variant="secondary"
           :disabled="busy"
-          @click="confirming = false"
-          >{{ $t("actions.cancel") }}</UiButton
+          @click="confirming = true"
+          >{{ $t("signatureSettings.remove") }}</UiButton
         >
-        <UiButton variant="danger" :loading="busy" @click="remove">{{
-          $t("signatureSettings.confirm")
-        }}</UiButton>
-      </div>
-      <UiButton
-        v-else
-        variant="secondary"
-        :disabled="busy"
-        @click="confirming = true"
-        >{{ $t("signatureSettings.remove") }}</UiButton
-      >
-    </div>
+        <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
+      </template>
+    </UiDialog>
     <UiDialog
       :open="drawing"
       :title="$t('signatureSettings.draw')"
@@ -313,7 +328,9 @@ onBeforeUnmount(() => {
     <p v-if="marks && marks.length >= 8" class="text-sm text-muted">
       {{ $t("signatureSettings.limit") }}
     </p>
-    <UiAlert v-if="error && !drawing" tone="danger">{{ error }}</UiAlert>
+    <UiAlert v-if="error && !drawing && !selected" tone="danger">{{
+      error
+    }}</UiAlert>
     <UiButton
       v-if="error && !marks"
       variant="secondary"
@@ -322,5 +339,5 @@ onBeforeUnmount(() => {
       >{{ $t("signatureSettings.reload") }}</UiButton
     >
     <p v-if="notice" role="status" class="text-sm text-success">{{ notice }}</p>
-  </section>
+  </UiCard>
 </template>

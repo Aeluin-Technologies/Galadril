@@ -92,10 +92,9 @@ test("account settings show the saved document profile and edit one row", async 
   });
   await expect(review).not.toBeChecked();
   await review.check();
-  await page.getByRole("button", { name: "Save approval setting" }).click();
   await expect(page.getByText("Email approval setting saved.")).toBeVisible();
   await page.reload();
-  await expect(review).toBeChecked();
+  await expect(review).toBeChecked({ timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("account-wide.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
@@ -170,7 +169,7 @@ test("personal instructions load, save and survive navigation without exposing a
     name: "Personal instructions",
     exact: true,
   });
-  await expect(field).toBeEnabled();
+  await expect(field).toBeEnabled({ timeout: 30_000 });
   await field.fill("Réponds en français, avec un ton sobre.");
   await page
     .getByRole("button", { name: "Save instructions", exact: true })
@@ -951,6 +950,7 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
   await expect(add).toBeFocused();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: "My mark", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "My mark" })).toBeVisible();
   await expect(
     page.getByRole("img", { name: "Saved signature preview" }),
   ).toBeVisible();

@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { pengoloMutation } from "~/utils/pengolo-api";
-import { ArrowDownTrayIcon } from "@heroicons/vue/24/outline";
+import {
+  ArrowDownTrayIcon,
+  EllipsisHorizontalIcon,
+} from "@heroicons/vue/24/outline";
 const props = defineProps<{
   file: { id: string; name?: string; mime?: string; size?: number } | null;
   temporarySession?: string;
+  startSigning?: boolean;
 }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
@@ -120,9 +124,18 @@ async function load() {
       reader.releaseLock();
     }
     if (own !== epoch) return;
+    if (
+      props.startSigning &&
+      (mime.value !== "application/pdf" || size > 16 * 1024 * 1024)
+    )
+      throw new Error("SIGNING_UNSUPPORTED");
     const blob = new Blob(parts, { type: mime.value });
     source.value = blob;
     url.value = URL.createObjectURL(blob);
+    signing.value =
+      !!props.startSigning &&
+      mime.value === "application/pdf" &&
+      blob.size <= 16 * 1024 * 1024;
   } catch (failure) {
     if (
       own === epoch &&
@@ -168,7 +181,12 @@ onDeactivated(clear);
 onBeforeUnmount(clear);
 </script>
 <template>
-  <UiDialog :open="!!file" :title="title" size="wide" @close="emit('close')">
+  <UiDialog
+    :open="!!file"
+    :title="signing ? $t('documentSigning.title') : title"
+    size="wide"
+    @close="emit('close')"
+  >
     <p v-if="loading" role="status">{{ $t("documents.previewLoading") }}</p>
     <UiAlert v-if="error" tone="danger"
       >{{ error }}
@@ -191,23 +209,13 @@ onBeforeUnmount(clear);
       class="mx-auto max-h-[75vh] max-w-full"
     />
     <iframe
-      v-else-if="url"
+      v-else-if="url && !signing"
       :src="url"
       :title="title"
       :sandbox="mime === 'application/pdf' ? undefined : ''"
       class="h-[75vh] w-full border-0"
     />
-    <template #footer>
-      <UiButton
-        v-if="
-          source &&
-          source.size <= 16 * 1024 * 1024 &&
-          mime === 'application/pdf' &&
-          !signing
-        "
-        @click="signing = true"
-        >{{ $t("documentSigning.title") }}</UiButton
-      >
+    <template v-if="!signing" #footer>
       <UiButton
         variant="secondary"
         :disabled="loading || !url"

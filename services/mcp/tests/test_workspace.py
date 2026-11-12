@@ -335,6 +335,37 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(self.calls), 1)
 
+    async def test_signature_request_returns_only_a_review_link(self) -> None:
+        file_id = "a" * 32
+        self.response = {
+            "status": "signature_required",
+            "review_url": f"https://galadril.example/mcp/sign/{file_id}",
+        }
+        request = {
+            "name": "request_document_signature",
+            "arguments": {"file_id": file_id},
+        }
+        result = await self.request("tools/call", request)
+        self.assertFalse(result["result"].get("isError", False))
+        self.assertEqual(result["result"]["structuredContent"], self.response)
+        self.assertEqual(
+            self.calls,
+            [
+                {
+                    "project_id": None,
+                    "request": {
+                        "operation": "request_document_signature",
+                        "file_id": file_id,
+                    },
+                }
+            ],
+        )
+        verifier = Verifier()
+        verifier.scopes = ["workspace:use"]
+        denied = await self.request("tools/call", request, verifier=verifier)
+        self.assertTrue(denied["result"]["isError"])
+        self.assertEqual(len(self.calls), 1)
+
     async def test_document_preflight_and_poll_use_read_actions_only(
         self,
     ) -> None:

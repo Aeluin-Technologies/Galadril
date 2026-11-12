@@ -6,7 +6,8 @@ import {
   pengoloRequest,
 } from "~/utils/pengolo-api";
 import {
-  inspectSigningFields,
+  inspectSigningLayout,
+  type SigningPlacement,
   parseSigningTrace,
   signPdf,
 } from "~/utils/pdf-signing";
@@ -24,12 +25,18 @@ const props = defineProps<{
   temporarySession?: string;
 }>();
 const emit = defineEmits<{ close: [] }>();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { session } = useAccount();
 const tracer = trace.getTracer("galadril.dashboard");
 const vault = shallowRef<SigningVault | null>();
 const original = shallowRef<Uint8Array<ArrayBuffer>>();
-const fields = shallowRef<string[]>([]);
+const fields = shallowRef<Awaited<ReturnType<typeof inspectSigningLayout>>>([]);
+const placement = ref<SigningPlacement>();
+const step = ref(1);
+const caption = ref(false);
+const signedUrl = ref("");
+const passkeyUnavailable = ref(false);
+const checkingPasskey = ref(false);
 const marks = shallowRef<{ id: string; label: string }[]>([]);
 const selectedField = ref("");
 const selectedMark = ref("");
@@ -39,19 +46,23 @@ const enrollPasskey = ref(false);
 const consent = ref(false);
 const busy = ref(false);
 const error = ref("");
-const complete = ref(false);
+
 const supportsPasskey = typeof PublicKeyCredential !== "undefined";
 const fieldOptions = computed(() =>
-  fields.value.map((name) => ({ label: name, value: name })),
+  fields.value.map(({ name }) => ({ label: name, value: name })),
 );
 const markOptions = computed(() =>
   marks.value.map(({ id, label }) => ({ label, value: id })),
 );
+const hasVisual = computed(() => !!selectedField.value || !!placement.value);
+const placementReady = computed(
+  () => !!original.value && (!hasVisual.value || !!selectedMark.value),
+);
+const usePasskey = computed(
+  () => !!vault.value?.passkey && supportsPasskey && !passkeyUnavailable.value,
+);
 const canSign = computed(
-  () =>
-    !!original.value &&
-    consent.value &&
-    (!fields.value.length || (!!selectedField.value && !!selectedMark.value)),
+  () => placementReady.value && consent.value && step.value === 2,
 );
 const canUsePassword = computed(
   () =>
@@ -76,19 +87,18 @@ onMounted(async () => {
       ),
     ]);
     const bytes = new Uint8Array(buffer);
-    const available = await inspectSigningFields(bytes);
-    const savedMarks = available.length
-      ? await pengoloRequest<{ id: string; label: string }[]>(
-          pengoloOperation("PengoloHandwrittenSignatures"),
-          {},
-          signal,
-        )
-      : [];
+    const available = await inspectSigningLayout(bytes);
+    const savedMarks = await pengoloRequest<{ id: string; label: string }[]>(
+      pengoloOperation("PengoloHandwrittenSignatures"),
+      {},
+      signal,
+    );
     if (signal.aborted) return;
     original.value = bytes;
     fields.value = available;
     marks.value = savedMarks;
-    selectedField.value = available[0] ?? "";
+    selectedField.value = available[0]?.name ?? "";
+    placement.value = available[0]?.placement;
     selectedMark.value = savedMarks[0]?.id ?? "";
     vault.value = stored === null ? null : JSON.parse(stored);
   } catch {
@@ -99,22 +109,46 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   controller.abort();
+  if (signedUrl.value) URL.revokeObjectURL(signedUrl.value);
   original.value = undefined;
   password.value = "";
   confirmation.value = "";
 });
 
-async function confirmSigning(usePasskey: boolean) {
+watch(selectedField, (name) => {
+  placement.value = fields.value.find(
+    (field) => field.name === name,
+  )?.placement;
+});
+
+async function authenticate() {
+  step.value = 2;
+  error.value = "";
+  if (!usePasskey.value) return;
+  checkingPasskey.value = true;
+  try {
+    passkeyUnavailable.value =
+      !(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+  } catch {
+    // A probe failure gives no evidence that a credential is absent.
+  } finally {
+    checkingPasskey.value = false;
+  }
+}
+
+async function confirmSigning() {
+  const passkey = usePasskey.value;
   const bytes = original.value;
   const actor = session.value;
   if (
     busy.value ||
-    complete.value ||
+    checkingPasskey.value ||
+    signedUrl.value ||
     !actor ||
     !bytes ||
     !canSign.value ||
     vault.value === undefined ||
-    (usePasskey ? !vault.value?.passkey : !canUsePassword.value)
+    (passkey ? !vault.value?.passkey : !canUsePassword.value)
   )
     return;
   const scope = { tenant: actor.tenant, subject: actor.subject };
@@ -160,7 +194,7 @@ async function confirmSigning(usePasskey: boolean) {
     }
     const enrolled = vault.value;
     errorKey = "documentSigning.unlockFailed";
-    if (usePasskey && enrolled.passkey)
+    if (passkey && enrolled.passkey)
       prf = await unlockSigningPasskey(enrolled.passkey);
     const key = await unlockSigningKey(
       scope,
@@ -179,34 +213,59 @@ async function confirmSigning(usePasskey: boolean) {
     );
     const field = selectedField.value;
     const mark = selectedMark.value;
-    const drawing = fields.value.length
+    const drawing = hasVisual.value
       ? await pengoloRequest<string | null>(
           pengoloOperation("PengoloHandwrittenSignatureTrace"),
           { id: mark },
           signal,
         )
       : null;
-    if (fields.value.length && !drawing)
+    if (hasVisual.value && !drawing)
       throw new Error("Signature drawing unavailable");
     if (!current()) return;
+    const time = new Date();
+    const lines =
+      caption.value && actor.displayName?.trim()
+        ? [
+            t("documentSigning.signedBy", { name: actor.displayName }),
+            t("documentSigning.signedOn", {
+              date: new Intl.DateTimeFormat(locale.value, {
+                dateStyle: "short",
+                timeStyle: "short",
+              }).format(time),
+            }),
+          ]
+        : undefined;
     const signed = await signPdf(
       bytes,
       enrolled,
       key,
-      drawing ? { field, trace: parseSigningTrace(drawing) } : null,
+      drawing
+        ? {
+            field,
+            placement: placement.value,
+            trace: parseSigningTrace(drawing),
+            caption: lines,
+          }
+        : null,
+      time,
     );
     if (!current()) return;
-    const url = URL.createObjectURL(
+    signedUrl.value = URL.createObjectURL(
       new Blob([new Uint8Array(signed)], { type: "application/pdf" }),
     );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = props.name.replace(/\.pdf$/i, "") + "-signed.pdf";
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    complete.value = true;
+    step.value = 3;
     span.setStatus({ code: SpanStatusCode.OK });
-  } catch {
+  } catch (failure) {
+    if (
+      current() &&
+      passkey &&
+      errorKey === "documentSigning.unlockFailed" &&
+      failure instanceof DOMException &&
+      ["NotSupportedError", "NotFoundError"].includes(failure.name)
+    ) {
+      passkeyUnavailable.value = true;
+    }
     span.setStatus({ code: SpanStatusCode.ERROR });
     if (current()) error.value = t(errorKey);
   } finally {
@@ -219,88 +278,155 @@ async function confirmSigning(usePasskey: boolean) {
 </script>
 
 <template>
-  <section
-    class="mb-4 space-y-3 rounded-panel border border-border p-4"
-    :aria-label="$t('documentSigning.title')"
-  >
+  <section class="space-y-4" :aria-label="$t('documentSigning.title')">
+    <p class="break-words font-semibold">{{ name }}</p>
+    <ol class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted">
+      <li
+        v-for="(label, index) in [
+          'placement',
+          'authenticate',
+          'downloadSigned',
+        ]"
+        :key="label"
+        :aria-current="step === index + 1 ? 'step' : undefined"
+        :class="{ 'font-semibold text-foreground': step === index + 1 }"
+      >
+        {{ index + 1 }}. {{ $t(`documentSigning.${label}`) }}
+      </li>
+    </ol>
     <p v-if="busy && !original" role="status">
       {{ $t("documentSigning.loading") }}
     </p>
-    <p v-if="complete" role="status">{{ $t("documentSigning.complete") }}</p>
+    <div v-if="step === 1 && original" class="space-y-3">
+      <p class="text-sm text-muted">
+        {{ $t("documentSigning.placementHelp") }}
+      </p>
+      <UiSelect
+        v-if="fields.length"
+        v-model="selectedField"
+        :label="$t('documentSigning.field')"
+        :options="fieldOptions"
+      />
+      <UiSelect
+        v-if="marks.length"
+        v-model="selectedMark"
+        :label="$t('documentSigning.mark')"
+        :options="markOptions"
+      />
+      <p v-else class="text-sm text-muted">
+        {{ $t("documentSigning.noMark") }}
+      </p>
+      <AiSigningPlacement
+        v-if="marks.length"
+        v-model="placement"
+        :bytes="original"
+      />
+      <UiButton
+        v-if="placement && !selectedField"
+        variant="secondary"
+        @click="placement = undefined"
+      >
+        {{ $t("documentSigning.clearPlacement") }}
+      </UiButton>
+      <p v-if="!hasVisual" class="text-sm text-muted">
+        {{ $t("documentSigning.invisible") }}
+      </p>
+      <UiCheckbox
+        v-if="hasVisual && session?.displayName"
+        v-model="caption"
+        :label="$t('documentSigning.includeCaption')"
+      />
+      <div class="flex flex-wrap justify-end gap-2">
+        <UiButton variant="secondary" @click="emit('close')">{{
+          $t("actions.cancel")
+        }}</UiButton>
+        <UiButton :disabled="!placementReady" @click="authenticate">{{
+          $t("documentSigning.continue")
+        }}</UiButton>
+      </div>
+    </div>
     <form
-      v-else-if="vault !== undefined"
+      v-if="step === 2 && vault !== undefined"
       class="space-y-3"
-      @submit.prevent="confirmSigning(false)"
+      @submit.prevent="confirmSigning"
     >
       <p class="text-sm text-muted">
         {{ $t("documentSigning.certificateNotice") }}
       </p>
-      <template v-if="fields.length">
-        <UiSelect
-          v-model="selectedField"
-          :label="$t('documentSigning.field')"
-          :options="fieldOptions"
-          :disabled="busy"
-        />
-        <UiSelect
-          v-if="marks.length"
-          v-model="selectedMark"
-          :label="$t('documentSigning.mark')"
-          :options="markOptions"
-          :disabled="busy"
-        />
-        <p v-else>{{ $t("documentSigning.noMark") }}</p>
-      </template>
-      <p v-else>{{ $t("documentSigning.invisible") }}</p>
       <UiCheckbox
         v-model="consent"
         :label="$t('documentSigning.consent')"
         :disabled="busy"
       />
-      <UiInput
-        v-model="password"
-        type="password"
-        :label="$t('documentSigning.password')"
-        :autocomplete="vault ? 'current-password' : 'new-password'"
-        :disabled="busy"
-      />
-      <template v-if="!vault">
+      <p v-if="usePasskey" class="text-sm text-muted">
+        {{ $t("documentSigning.passkeyRequired") }}
+      </p>
+      <template v-else>
         <UiInput
-          v-model="confirmation"
+          v-model="password"
           type="password"
-          :label="$t('documentSigning.confirmPassword')"
-          autocomplete="new-password"
-          :help="$t('documentSigning.passwordHelp')"
-          :disabled="busy"
+          :label="$t('documentSigning.password')"
+          :autocomplete="vault ? 'current-password' : 'new-password'"
+          :disabled="busy || checkingPasskey"
         />
-        <UiCheckbox
-          v-if="supportsPasskey"
-          v-model="enrollPasskey"
-          :label="$t('documentSigning.enablePasskey')"
-          :disabled="busy"
-        />
+        <template v-if="!vault">
+          <UiInput
+            v-model="confirmation"
+            type="password"
+            :label="$t('documentSigning.confirmPassword')"
+            autocomplete="new-password"
+            :help="$t('documentSigning.passwordHelp')"
+            :disabled="busy"
+          />
+          <UiCheckbox
+            v-if="supportsPasskey"
+            v-model="enrollPasskey"
+            :label="$t('documentSigning.enablePasskey')"
+            :disabled="busy"
+          />
+        </template>
       </template>
-      <div class="flex flex-wrap gap-2">
+      <div class="flex flex-wrap justify-end gap-2">
         <UiButton
           type="button"
           variant="secondary"
           :disabled="busy"
-          @click="emit('close')"
-          >{{ $t("actions.cancel") }}</UiButton
+          @click="
+            step = 1;
+            consent = false;
+            password = '';
+            confirmation = '';
+            error = '';
+          "
         >
-        <UiButton type="submit" :loading="busy" :disabled="!canUsePassword">{{
-          $t("documentSigning.sign")
-        }}</UiButton>
+          {{ $t("documentSigning.back") }}
+        </UiButton>
         <UiButton
-          v-if="vault?.passkey && supportsPasskey"
-          type="button"
-          variant="secondary"
-          :disabled="busy || !canSign"
-          @click="confirmSigning(true)"
-          >{{ $t("documentSigning.signWithPasskey") }}</UiButton
+          type="submit"
+          :loading="busy"
+          :disabled="
+            checkingPasskey || (usePasskey ? !canSign : !canUsePassword)
+          "
         >
+          {{
+            $t(
+              usePasskey
+                ? "documentSigning.signWithPasskey"
+                : "documentSigning.sign",
+            )
+          }}
+        </UiButton>
       </div>
     </form>
+    <div v-if="step === 3" class="space-y-3">
+      <p role="status">{{ $t("documentSigning.complete") }}</p>
+      <a
+        class="inline-flex rounded-control bg-primary px-3 py-2 text-on-primary"
+        :href="signedUrl"
+        :download="name.replace(/\.pdf$/i, '') + '-signed.pdf'"
+        >{{ $t("documentSigning.downloadSigned") }}</a
+      >
+    </div>
     <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
   </section>
 </template>

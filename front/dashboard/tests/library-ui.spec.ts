@@ -439,11 +439,16 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
   const { mkdir } = await import("node:fs/promises");
   const dir = testInfo.outputPath("signing");
   await mkdir(dir, { recursive: true });
-  const variants = [true, false].map((visible, index) => ({
+  const variants = [true, false, false].map((visible, index) => ({
+    custom: index === 2,
     bytes: compileSigningPdf(dir, visible),
     visible,
     id: String(index + 1).repeat(32),
-    name: visible ? "With field.pdf" : "Without field.pdf",
+    name: visible
+      ? "With field.pdf"
+      : index === 2
+        ? "Custom field.pdf"
+        : "Without field.pdf",
   }));
   const authenticator = await page.context().newCDPSession(page);
   await authenticator.send("WebAuthn.enable");
@@ -553,10 +558,12 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
     return route.fulfill({ json: { data } });
   });
   const shell = await page.request.get("/login");
-  await page.route(/\/pengolo(?:\/library)?(?:\?.*)?$/, (route) =>
-    route.request().isNavigationRequest()
-      ? route.fulfill({ response: shell })
-      : route.continue(),
+  await page.route(
+    /(?:\/pengolo(?:\/library)?|\/mcp\/sign\/[a-f0-9]{32})(?:\?.*)?$/,
+    (route) =>
+      route.request().isNavigationRequest()
+        ? route.fulfill({ response: shell })
+        : route.continue(),
   );
   await page.addInitScript(() =>
     localStorage.setItem(
@@ -568,17 +575,58 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
   if (libraryUrl.hostname === "127.0.0.1") libraryUrl.hostname = "localhost";
   await page.goto(libraryUrl.href);
   for (const variant of variants) {
-    await page
-      .getByRole("button", { name: `Actions for ${variant.name}` })
+    if (variant.custom) {
+      await page.addInitScript(() => {
+        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable =
+          async () => false;
+      });
+      await page.goto(new URL(`/mcp/sign/${variant.id}`, libraryUrl).href);
+    } else {
+      await page
+        .getByRole("button", { name: `Actions for ${variant.name}` })
+        .click();
+      await page
+        .getByRole("menuitem", { name: "Sign PDF", exact: true })
+        .click();
+    }
+    const dialog = page.getByRole("dialog", { name: "Sign PDF", exact: true });
+    if (variant.custom) {
+      const canvas = dialog.locator("canvas");
+      const center = dialog.getByRole("button", {
+        name: "Place at page center",
+      });
+      await expect(center).toBeEnabled({ timeout: 15000 });
+      await canvas.scrollIntoViewIfNeeded();
+      const rect = await canvas.boundingBox();
+      if (!rect) throw new Error("Missing PDF page");
+      await page.mouse.move(
+        rect.x + rect.width * 0.18,
+        rect.y + rect.height * 0.19,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        rect.x + rect.width * 0.56,
+        rect.y + rect.height * 0.28,
+      );
+      await page.mouse.up();
+      await dialog
+        .getByRole("checkbox", {
+          name: "Add my name and signing date below the mark",
+        })
+        .check();
+    }
+    if (variant.visible)
+      await expect(
+        dialog.getByText("galadril:claimant", { exact: true }),
+      ).toBeVisible();
+    await dialog
+      .getByRole("button", { name: "Continue to authentication" })
       .click();
-    await page.getByRole("menuitem", { name: "Preview", exact: true }).click();
-    const dialog = page.getByRole("dialog", {
-      name: variant.name,
+    const sign = dialog.getByRole("button", {
+      name:
+        variant.visible || variant.custom ? "Sign PDF" : "Sign with passkey",
       exact: true,
     });
-    await dialog.getByRole("button", { name: "Sign PDF", exact: true }).click();
-    const sign = dialog.getByRole("button", { name: "Sign and download" });
-    const input = dialog.getByLabel("Signing password", { exact: true });
     await expect(sign).toBeDisabled();
     await dialog
       .getByRole("checkbox", {
@@ -586,44 +634,48 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
       })
       .check();
     if (variant.visible) {
-      await expect(
-        dialog.getByText("galadril:claimant", { exact: true }),
-      ).toBeVisible();
+      await dialog
+        .getByLabel("Signing password", { exact: true })
+        .fill(password);
       await dialog.getByLabel("Confirm signing password").fill(password);
       await dialog
         .getByRole("checkbox", {
           name: "Also enable unlock with a compatible passkey",
         })
         .check();
-    } else {
-      await expect(
-        dialog.getByText("This PDF has no available visible field."),
-      ).toBeVisible();
+    } else if (variant.custom) {
+      const input = dialog.getByLabel("Signing password", { exact: true });
       await input.fill("incorrect signing password");
       await sign.click();
       await expect(
         dialog.getByText("The signing key could not be unlocked."),
       ).toBeVisible();
-    }
-    const download = page.waitForEvent("download", { timeout: 20_000 });
-    if (variant.visible) {
       await input.fill(password);
-      await sign.click();
     } else {
-      await dialog.getByRole("button", { name: "Sign with passkey" }).click();
+      await expect(
+        dialog.getByLabel("Signing password", { exact: true }),
+      ).toHaveCount(0);
     }
+    await sign.click();
+    const downloadButton = dialog.getByRole("link", {
+      name: "Download signed PDF",
+    });
+    await expect(downloadButton).toBeVisible({ timeout: 20000 });
+    const download = page.waitForEvent("download", { timeout: 20000 });
+    await downloadButton.click();
     const output = await download;
     const path = join(dir, output.suggestedFilename());
     await output.saveAs(path);
     const certificate = await assertSignedPdf(
       path,
       variant.bytes,
-      variant.visible,
+      variant.visible || variant.custom,
+      variant.custom ? { page: 0 } : undefined,
     );
     if (firstCertificate) expect(certificate).toBe(firstCertificate);
     else firstCertificate = certificate;
     await dialog.getByRole("button", { name: "Close dialog" }).click();
   }
   expect(enrollments).toBe(1);
-  expect(marksRead).toBe(1);
+  expect(marksRead).toBe(2);
 });

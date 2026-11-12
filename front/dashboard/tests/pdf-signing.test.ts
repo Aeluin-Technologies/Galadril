@@ -83,6 +83,19 @@ for (const visible of [true, false]) {
         const path = join(dir, "signed.pdf");
         writeFileSync(path, signed);
         await assertSignedPdf(path, original, visible);
+        const placement = {
+          page: 0,
+          rect: [30, 30, 190, 85],
+        } as const;
+        const placed = await signPdf(original, vault, key, {
+          field: visible ? "galadril:claimant" : "",
+          trace: parseSigningTrace(JSON.stringify(signingTrace)),
+          placement,
+          caption: ["Electronically signed by Alice", "On 12 November"],
+        });
+        const placedPath = join(dir, "placed.pdf");
+        writeFileSync(placedPath, placed);
+        await assertSignedPdf(placedPath, original, true, placement);
         if (visible) {
           const pdfsig = process.env.GALADRIL_PDFSIG ?? "pdfsig";
           const changed = Buffer.from(signed);

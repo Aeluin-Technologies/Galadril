@@ -25,6 +25,7 @@ const emit = defineEmits<{
   select: [checked: boolean];
   attach: [];
   preview: [];
+  sign: [];
   download: [];
   remove: [];
   reindex: [];
@@ -51,6 +52,16 @@ const items = computed<MenuItem[]>(() => [
     icon: ArrowDownTrayIcon,
     disabled: props.file.data.status !== "ready",
   },
+  ...(props.file.data.mime === "application/pdf" &&
+  props.file.data.size <= 16 * 1024 * 1024
+    ? [
+        {
+          id: "sign",
+          label: t("documentSigning.title"),
+          disabled: props.file.data.status !== "ready",
+        },
+      ]
+    : []),
   ...(props.canIndex
     ? [
         {
@@ -74,6 +85,7 @@ const items = computed<MenuItem[]>(() => [
 ]);
 function action(id: string) {
   if (id === "preview") emit("preview");
+  else if (id === "sign") emit("sign");
   else if (id === "download") emit("download");
   else if (id === "remove") emit("remove");
   else if (id === "reindex") emit("reindex");
