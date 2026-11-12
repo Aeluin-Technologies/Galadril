@@ -1,4 +1,13 @@
 <script setup lang="ts">
+import {
+  ArrowDownTrayIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckCircleIcon,
+  KeyIcon,
+  PencilSquareIcon,
+  XMarkIcon,
+} from "@heroicons/vue/24/outline";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
   pengoloMutation,
@@ -33,17 +42,19 @@ const original = shallowRef<Uint8Array<ArrayBuffer>>();
 const fields = shallowRef<Awaited<ReturnType<typeof inspectSigningLayout>>>([]);
 const placement = ref<SigningPlacement>();
 const step = ref(1);
-const caption = ref(false);
+const signingForm = useId();
 const signedUrl = ref("");
 const passkeyUnavailable = ref(false);
 const checkingPasskey = ref(false);
-const marks = shallowRef<{ id: string; label: string }[]>([]);
+const marks = shallowRef<
+  { id: string; label: string; includeCaption: boolean }[]
+>([]);
 const selectedField = ref("");
 const selectedMark = ref("");
 const password = ref("");
 const confirmation = ref("");
 const enrollPasskey = ref(false);
-const consent = ref(false);
+
 const busy = ref(false);
 const error = ref("");
 
@@ -56,14 +67,15 @@ const markOptions = computed(() =>
 );
 const hasVisual = computed(() => !!selectedField.value || !!placement.value);
 const placementReady = computed(
-  () => !!original.value && (!hasVisual.value || !!selectedMark.value),
+  () =>
+    !!original.value &&
+    vault.value !== undefined &&
+    (!hasVisual.value || !!selectedMark.value),
 );
 const usePasskey = computed(
   () => !!vault.value?.passkey && supportsPasskey && !passkeyUnavailable.value,
 );
-const canSign = computed(
-  () => placementReady.value && consent.value && step.value === 2,
-);
+const canSign = computed(() => placementReady.value && step.value === 2);
 const canUsePassword = computed(
   () =>
     canSign.value &&
@@ -88,11 +100,9 @@ onMounted(async () => {
     ]);
     const bytes = new Uint8Array(buffer);
     const available = await inspectSigningLayout(bytes);
-    const savedMarks = await pengoloRequest<{ id: string; label: string }[]>(
-      pengoloOperation("PengoloHandwrittenSignatures"),
-      {},
-      signal,
-    );
+    const savedMarks = await pengoloRequest<
+      { id: string; label: string; includeCaption: boolean }[]
+    >(pengoloOperation("PengoloHandwrittenSignatures"), {}, signal);
     if (signal.aborted) return;
     original.value = bytes;
     fields.value = available;
@@ -223,19 +233,36 @@ async function confirmSigning() {
     if (hasVisual.value && !drawing)
       throw new Error("Signature drawing unavailable");
     if (!current()) return;
+    const includeCaption =
+      drawing && marks.value.find((item) => item.id === mark)?.includeCaption;
+    const profile = includeCaption
+      ? await pengoloRequest<{
+          firstName: string;
+          lastName: string;
+          email: string;
+        }>(pengoloOperation("PengoloDocumentProfile"), {}, signal)
+      : undefined;
+    if (!current()) return;
+    const signerName = profile
+      ? [profile.firstName, profile.lastName]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(" ") ||
+        profile.email.trim() ||
+        (actor.displayName?.includes("@") ? actor.displayName.trim() : "")
+      : "";
     const time = new Date();
-    const lines =
-      caption.value && actor.displayName?.trim()
-        ? [
-            t("documentSigning.signedBy", { name: actor.displayName }),
-            t("documentSigning.signedOn", {
-              date: new Intl.DateTimeFormat(locale.value, {
-                dateStyle: "short",
-                timeStyle: "short",
-              }).format(time),
-            }),
-          ]
-        : undefined;
+    const lines = signerName
+      ? [
+          t("documentSigning.signedBy", { name: signerName }),
+          t("documentSigning.signedOn", {
+            date: new Intl.DateTimeFormat(locale.value, {
+              dateStyle: "short",
+              timeStyle: "short",
+            }).format(time),
+          }),
+        ]
+      : undefined;
     const signed = await signPdf(
       bytes,
       enrolled,
@@ -275,89 +302,85 @@ async function confirmSigning() {
     span.end();
   }
 }
+
+function back() {
+  step.value = 1;
+  password.value = "";
+  confirmation.value = "";
+  error.value = "";
+}
+
+function downloadSigned() {
+  if (!signedUrl.value) return;
+  const link = document.createElement("a");
+  link.href = signedUrl.value;
+  link.download = props.name.replace(/\.pdf$/i, "") + "-signed.pdf";
+  link.click();
+}
 </script>
 
 <template>
-  <section class="space-y-4" :aria-label="$t('documentSigning.title')">
-    <p class="break-words font-semibold">{{ name }}</p>
-    <ol class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted">
-      <li
-        v-for="(label, index) in [
-          'placement',
-          'authenticate',
-          'downloadSigned',
-        ]"
-        :key="label"
-        :aria-current="step === index + 1 ? 'step' : undefined"
-        :class="{ 'font-semibold text-foreground': step === index + 1 }"
-      >
-        {{ index + 1 }}. {{ $t(`documentSigning.${label}`) }}
-      </li>
-    </ol>
+  <UiDialog
+    :open="true"
+    :size="step === 1 ? 'wide' : 'default'"
+    :title="$t('documentSigning.title')"
+    :description="name"
+    :dismissible="!busy || !original"
+    @close="emit('close')"
+  >
     <p v-if="busy && !original" role="status">
       {{ $t("documentSigning.loading") }}
     </p>
-    <div v-if="step === 1 && original" class="space-y-3">
-      <p class="text-sm text-muted">
-        {{ $t("documentSigning.placementHelp") }}
-      </p>
-      <UiSelect
-        v-if="fields.length"
-        v-model="selectedField"
-        :label="$t('documentSigning.field')"
-        :options="fieldOptions"
-      />
-      <UiSelect
-        v-if="marks.length"
-        v-model="selectedMark"
-        :label="$t('documentSigning.mark')"
-        :options="markOptions"
-      />
-      <p v-else class="text-sm text-muted">
-        {{ $t("documentSigning.noMark") }}
-      </p>
+    <div
+      v-if="step === 1 && original"
+      class="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]"
+    >
+      <div class="space-y-3">
+        <h3 class="font-semibold">{{ $t("documentSigning.placement") }}</h3>
+        <p class="text-sm text-muted">
+          {{ $t("documentSigning.placementHelp") }}
+        </p>
+        <UiSelect
+          v-if="fields.length > 1"
+          v-model="selectedField"
+          :label="$t('documentSigning.field')"
+          :options="fieldOptions"
+        />
+        <UiSelect
+          v-if="marks.length"
+          v-model="selectedMark"
+          :label="$t('documentSigning.mark')"
+          :options="markOptions"
+        />
+        <p v-else class="text-sm text-muted">
+          {{ $t("documentSigning.noMark") }}
+        </p>
+        <UiButton
+          v-if="placement && !selectedField"
+          variant="ghost"
+          @click="placement = undefined"
+        >
+          <XMarkIcon aria-hidden="true" />{{
+            $t("documentSigning.clearPlacement")
+          }}
+        </UiButton>
+        <p v-if="!hasVisual" class="text-sm text-muted">
+          {{ $t("documentSigning.invisible") }}
+        </p>
+      </div>
       <AiSigningPlacement
-        v-if="marks.length"
         v-model="placement"
         :bytes="original"
+        :editable="marks.length > 0"
       />
-      <UiButton
-        v-if="placement && !selectedField"
-        variant="secondary"
-        @click="placement = undefined"
-      >
-        {{ $t("documentSigning.clearPlacement") }}
-      </UiButton>
-      <p v-if="!hasVisual" class="text-sm text-muted">
-        {{ $t("documentSigning.invisible") }}
-      </p>
-      <UiCheckbox
-        v-if="hasVisual && session?.displayName"
-        v-model="caption"
-        :label="$t('documentSigning.includeCaption')"
-      />
-      <div class="flex flex-wrap justify-end gap-2">
-        <UiButton variant="secondary" @click="emit('close')">{{
-          $t("actions.cancel")
-        }}</UiButton>
-        <UiButton :disabled="!placementReady" @click="authenticate">{{
-          $t("documentSigning.continue")
-        }}</UiButton>
-      </div>
     </div>
     <form
-      v-if="step === 2 && vault !== undefined"
-      class="space-y-3"
+      v-if="step === 2"
+      :id="signingForm"
+      class="space-y-4"
       @submit.prevent="confirmSigning"
     >
-      <p class="text-sm text-muted">
-        {{ $t("documentSigning.certificateNotice") }}
-      </p>
-      <UiCheckbox
-        v-model="consent"
-        :label="$t('documentSigning.consent')"
-        :disabled="busy"
-      />
+      <p class="text-sm text-muted">{{ $t("documentSigning.consent") }}</p>
       <p v-if="usePasskey" class="text-sm text-muted">
         {{ $t("documentSigning.passkeyRequired") }}
       </p>
@@ -386,47 +409,56 @@ async function confirmSigning() {
           />
         </template>
       </template>
-      <div class="flex flex-wrap justify-end gap-2">
-        <UiButton
-          type="button"
-          variant="secondary"
-          :disabled="busy"
-          @click="
-            step = 1;
-            consent = false;
-            password = '';
-            confirmation = '';
-            error = '';
-          "
-        >
-          {{ $t("documentSigning.back") }}
-        </UiButton>
-        <UiButton
-          type="submit"
-          :loading="busy"
-          :disabled="
-            checkingPasskey || (usePasskey ? !canSign : !canUsePassword)
-          "
-        >
-          {{
-            $t(
-              usePasskey
-                ? "documentSigning.signWithPasskey"
-                : "documentSigning.sign",
-            )
-          }}
-        </UiButton>
-      </div>
     </form>
-    <div v-if="step === 3" class="space-y-3">
-      <p role="status">{{ $t("documentSigning.complete") }}</p>
-      <a
-        class="inline-flex rounded-control bg-primary px-3 py-2 text-on-primary"
-        :href="signedUrl"
-        :download="name.replace(/\.pdf$/i, '') + '-signed.pdf'"
-        >{{ $t("documentSigning.downloadSigned") }}</a
-      >
-    </div>
+    <p v-if="step === 3" role="status" class="flex items-center gap-2">
+      <CheckCircleIcon class="size-5 text-success" aria-hidden="true" />
+      {{ $t("documentSigning.complete") }}
+    </p>
     <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
-  </section>
+    <template #footer>
+      <UiButton
+        v-if="step === 2"
+        variant="secondary"
+        :disabled="busy"
+        @click="back"
+      >
+        <ArrowLeftIcon aria-hidden="true" />{{ $t("documentSigning.back") }}
+      </UiButton>
+      <UiButton v-else variant="secondary" @click="emit('close')">
+        {{ $t(step === 1 ? "actions.cancel" : "actions.close") }}
+      </UiButton>
+      <UiButton
+        v-if="step === 1"
+        :disabled="!placementReady"
+        @click="authenticate"
+      >
+        {{ $t("documentSigning.continue")
+        }}<ArrowRightIcon aria-hidden="true" />
+      </UiButton>
+      <UiButton
+        v-else-if="step === 2"
+        type="submit"
+        :form="signingForm"
+        :loading="busy"
+        :disabled="checkingPasskey || (usePasskey ? !canSign : !canUsePassword)"
+      >
+        <KeyIcon v-if="usePasskey" aria-hidden="true" /><PencilSquareIcon
+          v-else
+          aria-hidden="true"
+        />
+        {{
+          $t(
+            usePasskey
+              ? "documentSigning.signWithPasskey"
+              : "documentSigning.sign",
+          )
+        }}
+      </UiButton>
+      <UiButton v-else @click="downloadSigned">
+        <ArrowDownTrayIcon aria-hidden="true" />{{
+          $t("documentSigning.downloadSigned")
+        }}
+      </UiButton>
+    </template>
+  </UiDialog>
 </template>

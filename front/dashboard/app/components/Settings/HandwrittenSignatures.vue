@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import {
+  ArrowRightIcon,
+  PencilSquareIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@heroicons/vue/24/outline";
+import {
   pengoloMutation,
   pengoloOperation,
   pengoloRequest,
@@ -9,6 +15,7 @@ interface Mark {
   id: string;
   label: string;
   createdAt: number;
+  includeCaption: boolean;
 }
 
 type Point = [number, number];
@@ -20,6 +27,9 @@ const marks = shallowRef<Mark[]>();
 const strokes = ref<Point[][]>([]);
 const label = ref("");
 const selected = shallowRef<{ id: string; paths: string[] }>();
+const currentMark = computed(() =>
+  marks.value?.find((mark) => mark.id === selected.value?.id),
+);
 const confirming = ref(false);
 const busy = ref(false);
 const error = ref("");
@@ -139,6 +149,24 @@ function closePreview(): void {
   error.value = "";
 }
 
+function updateCaption(value: boolean | undefined): Promise<void> | undefined {
+  const id = selected.value?.id;
+  if (!id || value === undefined) return;
+  return request(async (signal) => {
+    const saved = await pengoloRequest<boolean>(
+      pengoloOperation("updatePengoloHandwrittenSignatureCaption"),
+      { id, includeCaption: value },
+      signal,
+    );
+    if (!saved) throw new Error("Signature preference unavailable");
+    return () => {
+      marks.value = marks.value?.map((mark) =>
+        mark.id === id ? { ...mark, includeCaption: value } : mark,
+      );
+    };
+  });
+}
+
 function remove(): Promise<void> | undefined {
   const id = selected.value?.id;
   if (!id || !confirming.value) return;
@@ -189,44 +217,48 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <UiCard aria-labelledby="signature-settings-heading" class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="signature-settings-heading" class="text-lg font-semibold">
-        {{ $t("signatureSettings.title") }}
-      </h2>
+  <UiCard
+    :title="$t('signatureSettings.title')"
+    :description="$t('signatureSettings.help')"
+  >
+    <template #actions>
       <UiButton
         v-if="marks && marks.length < 8"
         :disabled="busy"
         @click="openDrawing"
       >
-        {{ $t("signatureSettings.add") }}
+        <PlusIcon aria-hidden="true" />{{ $t("signatureSettings.add") }}
       </UiButton>
-    </div>
-    <p class="text-sm text-muted">{{ $t("signatureSettings.help") }}</p>
+    </template>
     <p v-if="!marks && busy" role="status">
       {{ $t("signatureSettings.loading") }}
     </p>
     <p v-if="marks?.length === 0" class="text-sm text-muted">
       {{ $t("signatureSettings.empty") }}
     </p>
-    <ul
-      v-if="marks?.length"
-      class="divide-y divide-border rounded-panel border border-border"
-    >
-      <li v-for="mark in marks" :key="mark.id">
-        <UiButton
-          variant="secondary"
-          :disabled="busy"
-          class="w-full"
-          align="start"
-          @click="preview(mark.id)"
-          >{{ mark.label }}</UiButton
-        >
+    <ul v-if="marks?.length" class="divide-y divide-border">
+      <li v-for="mark in marks" :key="mark.id" class="py-2">
+        <UiNavigationLink>
+          <button
+            type="button"
+            class="w-full"
+            :disabled="busy"
+            @click="preview(mark.id)"
+          >
+            <span class="flex min-w-0 flex-1 items-center gap-4 py-3">
+              <PencilSquareIcon class="size-6 shrink-0" aria-hidden="true" />
+              <span class="min-w-0 flex-1 break-words font-semibold">{{
+                mark.label
+              }}</span>
+              <ArrowRightIcon class="size-5 shrink-0" aria-hidden="true" />
+            </span>
+          </button>
+        </UiNavigationLink>
       </li>
     </ul>
     <UiDialog
       :open="!!selected"
-      :title="marks?.find((mark) => mark.id === selected?.id)?.label ?? ''"
+      :title="currentMark?.label ?? ''"
       :dismissible="!busy"
       @close="closePreview"
     >
@@ -250,26 +282,40 @@ onBeforeUnmount(() => {
             stroke-linejoin="round"
           />
         </svg>
-        <div v-if="confirming" class="flex flex-wrap items-center gap-2">
-          <span>{{ $t("signatureSettings.confirmHelp") }}</span>
-          <UiButton
-            variant="secondary"
-            :disabled="busy"
-            @click="confirming = false"
-            >{{ $t("actions.cancel") }}</UiButton
-          >
-          <UiButton variant="danger" :loading="busy" @click="remove">{{
-            $t("signatureSettings.confirm")
-          }}</UiButton>
-        </div>
+        <UiCheckbox
+          v-if="currentMark && !confirming"
+          :model-value="currentMark.includeCaption"
+          :label="$t('signatureSettings.includeCaption')"
+          :disabled="busy"
+          @update:model-value="updateCaption"
+        />
+        <p v-if="confirming">{{ $t("signatureSettings.confirmHelp") }}</p>
+        <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
+      </template>
+      <template #footer>
         <UiButton
-          v-else
           variant="secondary"
           :disabled="busy"
-          @click="confirming = true"
-          >{{ $t("signatureSettings.remove") }}</UiButton
+          @click="confirming ? (confirming = false) : closePreview()"
         >
-        <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
+          {{ $t(confirming ? "actions.cancel" : "actions.close") }}
+        </UiButton>
+        <UiButton
+          v-if="confirming"
+          variant="danger"
+          :loading="busy"
+          @click="remove"
+        >
+          <TrashIcon aria-hidden="true" />{{ $t("signatureSettings.confirm") }}
+        </UiButton>
+        <UiButton
+          v-else
+          variant="danger"
+          :disabled="busy"
+          @click="confirming = true"
+        >
+          <TrashIcon aria-hidden="true" />{{ $t("signatureSettings.remove") }}
+        </UiButton>
       </template>
     </UiDialog>
     <UiDialog

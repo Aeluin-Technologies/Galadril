@@ -181,9 +181,18 @@ onDeactivated(clear);
 onBeforeUnmount(clear);
 </script>
 <template>
+  <DocumentSigning
+    v-if="signing && source && file"
+    :source="source"
+    :name="title"
+    :file-id="file.id"
+    :temporary-session="temporarySession"
+    @close="emit('close')"
+  />
   <UiDialog
+    v-else
     :open="!!file"
-    :title="signing ? $t('documentSigning.title') : title"
+    :title="title"
     size="wide"
     @close="emit('close')"
   >
@@ -194,14 +203,6 @@ onBeforeUnmount(clear);
         $t("email.retry")
       }}</UiButton></UiAlert
     >
-    <DocumentSigning
-      v-if="signing && source && file"
-      :source="source"
-      :name="title"
-      :file-id="file.id"
-      :temporary-session="temporarySession"
-      @close="signing = false"
-    />
     <img
       v-if="url && mime.startsWith('image/')"
       :src="url"
