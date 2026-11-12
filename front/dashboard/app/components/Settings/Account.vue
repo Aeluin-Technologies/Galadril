@@ -77,6 +77,8 @@ async function request(updated?: Profile, savingReview = false): Promise<void> {
       }
     }
   } catch {
+    if (!controller.signal.aborted && savingReview)
+      review.value = profile.value?.requireMcpEmailReview ?? false;
     if (!controller.signal.aborted)
       error.value = t(
         updated ? "accountSettings.saveError" : "accountSettings.loadError",
@@ -108,12 +110,11 @@ function save(): Promise<void> | undefined {
     return request({ ...profile.value, [editing.value]: draft.value.trim() });
 }
 
-function saveReview(): Promise<void> | undefined {
-  if (profile.value && editing.value === undefined)
-    return request(
-      { ...profile.value, requireMcpEmailReview: review.value },
-      true,
-    );
+function saveReview(value: boolean | undefined): Promise<void> | undefined {
+  if (value === undefined) return;
+  if (!profile.value || busy.value || editing.value !== undefined) return;
+  review.value = value;
+  return request({ ...profile.value, requireMcpEmailReview: value }, true);
 }
 
 function activate(): void {
@@ -188,30 +189,15 @@ onBeforeUnmount(() => {
       </dl>
     </div>
     <p class="text-sm text-muted">{{ $t("accountSettings.help") }}</p>
-    <form
-      v-if="profile"
-      class="space-y-3 rounded-panel border border-border bg-surface px-4 py-4 sm:px-6"
-      @submit.prevent="saveReview"
-    >
+    <UiCard v-if="profile">
       <UiCheckbox
-        v-model="review"
+        :model-value="review"
         :label="$t('accountSettings.emailApproval')"
         :help="$t('accountSettings.emailApprovalHelp')"
         :disabled="busy || editing !== undefined"
+        @update:model-value="saveReview"
       />
-      <div
-        v-if="review !== profile.requireMcpEmailReview"
-        class="flex justify-end"
-      >
-        <UiButton
-          type="submit"
-          :loading="busy"
-          :disabled="editing !== undefined"
-        >
-          {{ $t("accountSettings.saveEmailApproval") }}
-        </UiButton>
-      </div>
-    </form>
+    </UiCard>
     <UiDialog
       :open="editing !== undefined"
       :title="

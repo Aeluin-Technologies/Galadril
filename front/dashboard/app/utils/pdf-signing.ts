@@ -2,9 +2,12 @@ import {
   CryptoKeySigner,
   PDF,
   PdfArray,
+  PdfDict,
   PdfName,
   PdfNumber,
+  PdfRef,
   PdfStream,
+  Standard14Font,
 } from "@libpdf/core";
 import { decodeSigningBytes } from "./signing-vault.ts";
 import type { SigningVault } from "./signing-vault.ts";
@@ -41,6 +44,105 @@ export async function inspectSigningFields(
   bytes: Uint8Array,
 ): Promise<string[]> {
   return eligibleFields(await loadPdf(bytes)).map((field) => field.name);
+}
+
+export type SigningPlacement = {
+  page: number;
+  rect: readonly [number, number, number, number];
+};
+
+export async function inspectSigningLayout(bytes: Uint8Array) {
+  const pdf = await loadPdf(bytes);
+  const pages = pdf.getPages();
+  return eligibleFields(pdf).map((field) => {
+    const widget = field.getWidgets()[0];
+    const page = pages.findIndex(
+      (item) => item.ref.toString() === widget?.pageRef?.toString(),
+    );
+    return {
+      name: field.name,
+      placement: widget && page >= 0 ? { page, rect: widget.rect } : undefined,
+    };
+  });
+}
+
+function placeWidget(
+  pdf: PDF,
+  placement: SigningPlacement,
+  ref: PdfRef,
+  dict: PdfDict,
+) {
+  const page = pdf.getPages().at(placement.page);
+  const [left, bottom, right, top] = placement.rect;
+  if (
+    !page ||
+    placement.page < 0 ||
+    !Number.isInteger(placement.page) ||
+    !placement.rect.every(Number.isFinite) ||
+    right - left < 8 ||
+    top - bottom < 8
+  )
+    throw new Error("Invalid signature rectangle");
+  const box = page.getCropBox();
+  if (
+    left < box.x - 0.01 ||
+    bottom < box.y - 0.01 ||
+    right > box.x + box.width + 0.01 ||
+    top > box.y + box.height + 0.01
+  )
+    throw new Error("Signature rectangle outside the page");
+  const oldRef = dict.get("P");
+  const samePage =
+    oldRef instanceof PdfRef && oldRef.toString() === page.ref.toString();
+  const annotations = (target: PdfDict) =>
+    target.getArray("Annots", (id) => pdf.getObject(id));
+  if (!samePage) {
+    const oldPage = oldRef instanceof PdfRef ? pdf.getObject(oldRef) : null;
+    const oldAnnotations =
+      oldPage instanceof PdfDict ? annotations(oldPage) : undefined;
+    if (oldAnnotations && oldPage instanceof PdfDict)
+      oldPage.set(
+        "Annots",
+        new PdfArray(
+          [...oldAnnotations].filter(
+            (item) =>
+              !(item instanceof PdfRef && item.toString() === ref.toString()),
+          ),
+        ),
+      );
+    page.dict.set(
+      "Annots",
+      new PdfArray([...(annotations(page.dict) ?? []), ref]),
+    );
+  }
+  dict.set("P", page.ref);
+  dict.set("Rect", new PdfArray(placement.rect.map(PdfNumber.of)));
+}
+
+function captionCommands(
+  lines: readonly string[],
+  width: number,
+  height: number,
+  pad: number,
+) {
+  const font = Standard14Font.of("Helvetica");
+  const encoded = lines
+    .slice(0, 2)
+    .map((line) => line.slice(0, 180).replace(/[^\x20-\x7e\xa0-\xff]/gu, " "));
+  const size = Math.min(
+    6,
+    height / 8,
+    ...encoded.map(
+      (line) =>
+        (width - 2 * pad) / Math.max(1, font.widthOfTextAtSize(line, 1)),
+    ),
+  );
+  return encoded.reverse().map((line, index) => {
+    const hex = Array.from(line, (char) =>
+      char.charCodeAt(0).toString(16).padStart(2, "0"),
+    ).join("");
+    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${pad.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
+  });
 }
 
 type Point = readonly [number, number];
@@ -82,18 +184,45 @@ export async function signPdf(
   bytes: Uint8Array,
   vault: SigningVault,
   privateKey: CryptoKey,
-  visual: { field: string; trace: readonly (readonly Point[])[] } | null,
+  visual: {
+    field: string;
+    trace: readonly (readonly Point[])[];
+    placement?: SigningPlacement;
+    caption?: readonly string[];
+  } | null,
+  signingTime?: Date,
 ): Promise<Uint8Array> {
   const pdf = await loadPdf(bytes);
   const fields = eligibleFields(pdf);
   let fieldName = `Galadril-${crypto.randomUUID()}`;
-  if (fields.length) {
-    const field = fields.find((item) => item.name === visual?.field);
-    const widget = field?.getWidgets()[0];
-    if (!visual || !field || !widget)
-      throw new Error("Select a field and a handwritten mark");
+  if (visual) {
+    const field = visual.field
+      ? fields.find((item) => item.name === visual.field)
+      : !fields.length && visual.placement
+        ? pdf.getOrCreateForm().createSignatureField(fieldName)
+        : undefined;
+    if (!field) throw new Error("Select a signature field");
+    const parent = field.getRef();
+    const widget =
+      field.getWidgets()[0] ??
+      (parent && visual.placement
+        ? field.addWidget(
+            PdfDict.of({
+              Type: PdfName.of("Annot"),
+              Subtype: PdfName.of("Widget"),
+              Parent: parent,
+              F: PdfNumber.of(4),
+            }),
+          )
+        : undefined);
+    if (!widget) throw new Error("Missing signature widget");
+    if (visual.placement) {
+      if (!widget.ref) throw new Error("Signature widget cannot be moved");
+      placeWidget(pdf, visual.placement, widget.ref, widget.dict);
+    }
     const { width, height } = widget;
     const pad = Math.min(width, height) * 0.05;
+    const captionHeight = visual.caption?.length ? height * 0.32 : 0;
     const commands = [
       "q",
       "0 G",
@@ -104,13 +233,18 @@ export async function signPdf(
     for (const stroke of visual.trace) {
       for (const [i, [x, y]] of stroke.entries()) {
         const px = pad + (x / 1000) * (width - 2 * pad);
-        const py = pad + ((1000 - y) / 1000) * (height - 2 * pad);
+        const py =
+          pad +
+          captionHeight +
+          ((1000 - y) / 1000) * (height - 2 * pad - captionHeight);
         commands.push(
           `${px.toFixed(3)} ${py.toFixed(3)} ${i === 0 ? "m" : "l"}`,
         );
       }
       commands.push("S");
     }
+    if (visual.caption?.length)
+      commands.push(...captionCommands(visual.caption, width, height, pad));
     commands.push("Q");
     widget.setNormalAppearance(
       PdfStream.fromDict(
@@ -118,13 +252,23 @@ export async function signPdf(
           Type: PdfName.of("XObject"),
           Subtype: PdfName.of("Form"),
           BBox: new PdfArray([0, 0, width, height].map(PdfNumber.of)),
+          Resources: PdfDict.of({
+            Font: PdfDict.of({
+              Caption: PdfDict.of({
+                Type: PdfName.of("Font"),
+                Subtype: PdfName.of("Type1"),
+                BaseFont: PdfName.of("Helvetica"),
+                Encoding: PdfName.of("WinAnsiEncoding"),
+              }),
+            }),
+          }),
         },
         new TextEncoder().encode(commands.join("\n")),
       ),
     );
     fieldName = field.name;
-  } else if (visual) {
-    throw new Error("No visible signature field");
+  } else if (fields.length) {
+    throw new Error("Select a field and a handwritten mark");
   }
   const signer = new CryptoKeySigner(
     privateKey,
@@ -132,5 +276,6 @@ export async function signPdf(
     "RSA",
     "RSASSA-PKCS1-v1_5",
   );
-  return (await pdf.sign({ signer, fieldName, level: "B-B" })).bytes;
+  return (await pdf.sign({ signer, fieldName, level: "B-B", signingTime }))
+    .bytes;
 }

@@ -59,6 +59,7 @@
     "nuxt": "^4.6.2",
     "nuxt-echarts": "^1.1.0",
     "nuxt-security": "^2.7.0",
+    "pdfjs-dist": "5.7.284",
     "pinia": "^4.1.0",
     "prettier": "^3.9.10",
     "reflect-metadata": "0.2.2",

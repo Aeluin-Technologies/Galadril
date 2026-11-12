@@ -45,6 +45,7 @@ export async function assertSignedPdf(
   path: string,
   original: Buffer,
   visible: boolean,
+  placement?: { page: number; rect?: readonly number[] },
 ) {
   const signed = readFileSync(path);
   assert.deepEqual(signed.subarray(0, original.length), original);
@@ -57,10 +58,11 @@ export async function assertSignedPdf(
   assert.equal(widget.width > 0 && widget.height > 0, visible);
   assert.equal(widget.hasNormalAppearance(), visible);
   if (visible) {
-    assert.equal(field.name, "galadril:claimant");
+    if (!placement) assert.equal(field.name, "galadril:claimant");
+    if (placement?.rect) assert.deepEqual(widget.rect, placement.rect);
     assert.equal(
       widget.pageRef?.objectNumber,
-      result.getPages()[1]?.ref.objectNumber,
+      result.getPages()[placement?.page ?? 1]?.ref.objectNumber,
     );
     const appearance = widget.getNormalAppearance();
     assert.ok(appearance);

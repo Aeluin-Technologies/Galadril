@@ -80,7 +80,9 @@ async function reindex(file: FileRecord) {
     ui.error = t("documents.reindexError");
   }
 }
-const preview = ref<{ url: string; file: FileRecord } | null>(null);
+const preview = ref<{ url: string; file: FileRecord; signing: boolean } | null>(
+  null,
+);
 watch([preview, () => library.items], ([selected, files]) => {
   if (selected && !files.some((file) => file.id === selected.file.id))
     preview.value = null;
@@ -90,8 +92,8 @@ onDeactivated(() => {
   preview.value = null;
   deleting.value = [];
 });
-async function showPreview(file: FileRecord) {
-  preview.value = { url: "", file };
+async function showPreview(file: FileRecord, signing = false) {
+  preview.value = { url: "", file, signing };
 }
 const fileInput = ref<HTMLInputElement | null>(null);
 const refresh = async () => {
@@ -379,6 +381,7 @@ async function download(file: FileRecord) {
           @select="selection.toggle(file.id, $event)"
           @attach="emit('select', file)"
           @preview="showPreview(file)"
+          @sign="showPreview(file, true)"
           @download="download(file)"
           @remove="deleting = [file]"
           @reindex="reindex(file)"
@@ -444,6 +447,7 @@ async function download(file: FileRecord) {
             }
           : null
       "
+      :start-signing="preview?.signing"
       @close="preview = null"
     />
     <UiDialog
