@@ -1,0 +1,2 @@
+ALTER TABLE pengolo_signatures
+    ADD COLUMN IF NOT EXISTS include_caption BOOLEAN NOT NULL DEFAULT FALSE;

@@ -254,6 +254,32 @@ impl PengoloService {
     }
 
     #[tracing::instrument(skip_all)]
+    pub async fn update_signature_caption(
+        &self,
+        actor: &Principal<'_>,
+        id: &str,
+        include_caption: bool,
+    ) -> Result<bool> {
+        self.verify(actor).await?;
+        let id = mark_id(id)?;
+        let updated = self
+            .store
+            .update_signature_caption(
+                actor.tenant,
+                actor.user,
+                &id,
+                include_caption,
+            )
+            .await?;
+        if updated {
+            tracing::info!(
+                event.name = "pengolo.signature.caption_updated",
+                signature.id = id
+            );
+        }
+        Ok(updated)
+    }
+
     pub async fn delete_signature(
         &self,
         actor: &Principal<'_>,

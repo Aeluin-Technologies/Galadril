@@ -141,7 +141,7 @@ impl PengoloStore for PgPengoloStore {
         owner: &str,
     ) -> Result<Vec<SignatureMetadata>> {
         let mut tx = self.signature_scope(tenant, owner).await?;
-        let rows = sqlx::query_as("SELECT id, label, created_at FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2 ORDER BY created_at DESC, id LIMIT $3")
+        let rows = sqlx::query_as("SELECT id, label, created_at, include_caption FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2 ORDER BY created_at DESC, id LIMIT $3")
             .bind(tenant).bind(owner).bind(MAX_SAVED_SIGNATURES).fetch_all(&mut *tx).await?;
         tx.commit().await?;
         Ok(rows)
@@ -179,10 +179,24 @@ impl PengoloStore for PgPengoloStore {
             count < MAX_SAVED_SIGNATURES,
             "Saved signature limit reached"
         );
-        let row = sqlx::query_as("INSERT INTO pengolo_signatures (tenant_id,owner_id,id,label,created_at,sealed_trace) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,label,created_at")
+        let row = sqlx::query_as("INSERT INTO pengolo_signatures (tenant_id,owner_id,id,label,created_at,sealed_trace) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,label,created_at,include_caption")
             .bind(tenant).bind(owner).bind(id).bind(label).bind(now()).bind(sealed_trace).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok(row)
+    }
+
+    async fn update_signature_caption(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+        include_caption: bool,
+    ) -> Result<bool> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let updated = sqlx::query("UPDATE pengolo_signatures SET include_caption=$4 WHERE tenant_id=$1 AND owner_id=$2 AND id=$3")
+            .bind(tenant).bind(owner).bind(id).bind(include_caption).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(updated.rows_affected() == 1)
     }
 
     async fn delete_signature(
@@ -1722,7 +1736,18 @@ mod tests {
         store
             .create_signature("tenant_a", "alice", &id, "Initials", &sealed)
             .await?;
-        assert_eq!(store.signatures("tenant_a", "alice").await?.len(), 1);
+        assert!(
+            store
+                .update_signature_caption("tenant_a", "alice", &id, true)
+                .await?
+        );
+        assert!(
+            store
+                .signatures("tenant_a", "alice")
+                .await?
+                .iter()
+                .any(|mark| mark.include_caption)
+        );
         assert_eq!(
             store.signature_trace("tenant_a", "alice", &id).await?,
             Some(sealed)
@@ -1730,6 +1755,11 @@ mod tests {
         for (tenant, owner) in [("tenant_a", "bob"), ("tenant_b", "alice")] {
             assert!(store.signatures(tenant, owner).await?.is_empty());
             assert_eq!(store.signature_trace(tenant, owner, &id).await?, None);
+            assert!(
+                !store
+                    .update_signature_caption(tenant, owner, &id, false)
+                    .await?
+            );
             assert!(!store.delete_signature(tenant, owner, &id).await?);
         }
         let visible: i64 =

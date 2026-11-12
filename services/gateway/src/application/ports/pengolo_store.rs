@@ -102,6 +102,7 @@ pub const MAX_SAVED_SIGNATURES: i64 = 8;
 
 #[derive(serde::Serialize, sqlx::FromRow)]
 pub struct SignatureMetadata {
+    pub include_caption: bool,
     pub id: String,
     pub label: String,
     pub created_at: i64,
@@ -139,6 +140,13 @@ pub trait PengoloStore: Send + Sync {
         label: &str,
         sealed_trace: &[u8],
     ) -> Result<SignatureMetadata>;
+    async fn update_signature_caption(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+        include_caption: bool,
+    ) -> Result<bool>;
     async fn delete_signature(
         &self,
         tenant: &str,
