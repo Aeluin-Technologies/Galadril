@@ -543,6 +543,14 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
       envelope = variables.envelope;
       enrollments++;
       data = { createPengoloSigningVault: true };
+    } else if (query.includes("pengoloDocumentProfile")) {
+      data = {
+        pengoloDocumentProfile: {
+          firstName: "Camille",
+          lastName: "Martin",
+          email: "fixture@example.org",
+        },
+      };
     } else if (query.includes("pengoloSigningVault")) {
       data = { pengoloSigningVault: envelope };
     } else if (query.includes("pengoloHandwrittenSignatureTrace")) {
@@ -551,7 +559,12 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
     } else if (query.includes("pengoloHandwrittenSignatures")) {
       data = {
         pengoloHandwrittenSignatures: [
-          { id: "a".repeat(32), label: "My mark", createdAt: 1 },
+          {
+            id: "a".repeat(32),
+            label: "My mark",
+            createdAt: 1,
+            includeCaption: true,
+          },
         ],
       };
     }
@@ -591,34 +604,40 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
     }
     const dialog = page.getByRole("dialog", { name: "Sign PDF", exact: true });
     if (variant.custom) {
-      const canvas = dialog.locator("canvas");
-      const center = dialog.getByRole("button", {
-        name: "Place at page center",
+      const canvas = dialog.getByRole("button", {
+        name: "Place signature on page 1",
       });
-      await expect(center).toBeEnabled({ timeout: 15000 });
-      await canvas.scrollIntoViewIfNeeded();
-      const rect = await canvas.boundingBox();
-      if (!rect) throw new Error("Missing PDF page");
-      await page.mouse.move(
-        rect.x + rect.width * 0.18,
-        rect.y + rect.height * 0.19,
-      );
+      await expect(canvas).toBeEnabled();
+      await canvas.focus();
+      await canvas.press("Enter");
+      const move = dialog.getByRole("button", { name: "Move signature box" });
+      const resize = dialog.getByRole("button", {
+        name: "Resize signature box",
+      });
+      await expect(move).toBeVisible();
+      const before = await move.boundingBox();
+      if (!before) throw new Error("Missing placement rectangle");
+      const center = {
+        x: before.x + before.width / 2,
+        y: before.y + before.height / 2,
+      };
+      await page.mouse.move(center.x, center.y);
       await page.mouse.down();
-      await page.mouse.move(
-        rect.x + rect.width * 0.56,
-        rect.y + rect.height * 0.28,
-      );
+      await page.mouse.move(center.x + 20, center.y - 12, { steps: 3 });
       await page.mouse.up();
-      await dialog
-        .getByRole("checkbox", {
-          name: "Add my name and signing date below the mark",
-        })
-        .check();
+      await resize.press("ArrowDown");
+      const after = await move.boundingBox();
+      expect(after?.x).toBeGreaterThan(before.x);
+      expect(after?.height).toBeGreaterThan(before.height);
+      await page.screenshot({
+        path: testInfo.outputPath("signature-placement.png"),
+      });
+      const secondPage = dialog.getByRole("button", {
+        name: "Place signature on page 2",
+      });
+      await secondPage.scrollIntoViewIfNeeded();
+      await expect(secondPage).toBeEnabled();
     }
-    if (variant.visible)
-      await expect(
-        dialog.getByText("galadril:claimant", { exact: true }),
-      ).toBeVisible();
     await dialog
       .getByRole("button", { name: "Continue to authentication" })
       .click();
@@ -627,12 +646,16 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
         variant.visible || variant.custom ? "Sign PDF" : "Sign with passkey",
       exact: true,
     });
-    await expect(sign).toBeDisabled();
-    await dialog
-      .getByRole("checkbox", {
-        name: "I have reviewed this PDF and agree to sign this version.",
-      })
-      .check();
+    if (variant.visible || variant.custom) await expect(sign).toBeDisabled();
+    await page.screenshot({
+      path: testInfo.outputPath(
+        variant.visible
+          ? "signature-authentication.png"
+          : variant.custom
+            ? "signature-password.png"
+            : "signature-passkey.png",
+      ),
+    });
     if (variant.visible) {
       await dialog
         .getByLabel("Signing password", { exact: true })
@@ -657,7 +680,7 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
       ).toHaveCount(0);
     }
     await sign.click();
-    const downloadButton = dialog.getByRole("link", {
+    const downloadButton = dialog.getByRole("button", {
       name: "Download signed PDF",
     });
     await expect(downloadButton).toBeVisible({ timeout: 20000 });
@@ -671,6 +694,7 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
       variant.bytes,
       variant.visible || variant.custom,
       variant.custom ? { page: 0 } : undefined,
+      variant.visible || variant.custom ? "Camille Martin" : undefined,
     );
     if (firstCertificate) expect(certificate).toBe(firstCertificate);
     else firstCertificate = certificate;

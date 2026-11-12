@@ -46,6 +46,7 @@ export async function assertSignedPdf(
   original: Buffer,
   visible: boolean,
   placement?: { page: number; rect?: readonly number[] },
+  signerName?: string,
 ) {
   const signed = readFileSync(path);
   assert.deepEqual(signed.subarray(0, original.length), original);
@@ -66,10 +67,15 @@ export async function assertSignedPdf(
     );
     const appearance = widget.getNormalAppearance();
     assert.ok(appearance);
-    assert.match(
-      new TextDecoder().decode(appearance.getDecodedData()),
-      /\d l\n[\s\S]*S/,
-    );
+    const content = new TextDecoder().decode(appearance.getDecodedData());
+    assert.match(content, /\d l\n[\s\S]*S/);
+    if (signerName) {
+      assert.ok(
+        content.includes(Buffer.from(signerName, "latin1").toString("hex")),
+      );
+      const lineWidth = content.match(/^([\d.]+) w$/m)?.[1];
+      assert.ok(lineWidth && Number(lineWidth) <= 0.65);
+    }
   }
   const validation = execFileSync(
     process.env.GALADRIL_PDFSIG ?? "pdfsig",

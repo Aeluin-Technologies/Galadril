@@ -566,6 +566,7 @@ async def _assert_public_api_inventory(
         "createPengoloSigningVault",
         "createPengoloHandwrittenSignature",
         "deletePengoloHandwrittenSignature",
+        "updatePengoloHandwrittenSignatureCaption",
         "answerPengoloQuestion",
         "sendPengolo",
         "cancelPengolo",

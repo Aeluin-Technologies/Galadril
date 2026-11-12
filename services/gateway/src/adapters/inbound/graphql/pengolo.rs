@@ -735,6 +735,7 @@ pub struct DocumentProfile {
 #[derive(Deserialize, GraphQLObject)]
 #[graphql(name = "PengoloHandwrittenSignature")]
 pub struct HandwrittenSignature {
+    pub include_caption: bool,
     pub id: String,
     pub label: String,
     pub created_at: Long,

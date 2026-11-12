@@ -840,7 +840,9 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
   page,
 }, testInfo) => {
   const id = "a".repeat(32);
-  let mark: { id: string; label: string; createdAt: number } | undefined;
+  let mark:
+    | { id: string; label: string; createdAt: number; includeCaption: boolean }
+    | undefined;
   let trace: string | undefined;
   await page.route("**/auth/session", (route) =>
     route.fulfill({
@@ -861,9 +863,22 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     if (query.includes("createPengoloHandwrittenSignature")) {
       trace = variables.input.trace;
       expect(JSON.parse(trace ?? "[]")).toHaveLength(1);
-      mark = { id, label: variables.input.label, createdAt: 1 };
+      mark = {
+        id,
+        label: variables.input.label,
+        createdAt: 1,
+        includeCaption: false,
+      };
       return route.fulfill({
         json: { data: { createPengoloHandwrittenSignature: mark } },
+      });
+    }
+    if (query.includes("updatePengoloHandwrittenSignatureCaption")) {
+      expect(variables.id).toBe(id);
+      if (!mark) throw new Error("Missing fixture mark");
+      mark = { ...mark, includeCaption: variables.includeCaption };
+      return route.fulfill({
+        json: { data: { updatePengoloHandwrittenSignatureCaption: true } },
       });
     }
     if (query.includes("deletePengoloHandwrittenSignature")) {
@@ -949,6 +964,11 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
   await expect(drawing).toBeHidden();
   await expect(add).toBeFocused();
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await page
+    .getByRole("region", { name: "Handwritten signatures" })
+    .screenshot({
+      path: testInfo.outputPath("signature-list.png"),
+    });
   await page.getByRole("button", { name: "My mark", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "My mark" })).toBeVisible();
   await expect(
@@ -957,6 +977,15 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
   await page
     .getByRole("heading", { name: "Handwritten signatures" })
     .scrollIntoViewIfNeeded();
+  const mention = page.getByRole("checkbox", {
+    name: "Include electronic signature note",
+  });
+  await expect(mention).not.toBeChecked();
+  await mention.check();
+  await expect.poll(() => mark?.includeCaption).toBe(true);
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "My mark", exact: true }).click();
+  await expect(mention).toBeChecked();
   await page.screenshot({ path: testInfo.outputPath("signature-wide.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page

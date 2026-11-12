@@ -5,6 +5,7 @@ import {
   TableCellsIcon,
   EllipsisHorizontalIcon,
   EyeIcon,
+  PencilSquareIcon,
   ArrowDownTrayIcon,
   TrashIcon,
   ArrowPathIcon,
@@ -58,6 +59,7 @@ const items = computed<MenuItem[]>(() => [
         {
           id: "sign",
           label: t("documentSigning.title"),
+          icon: PencilSquareIcon,
           disabled: props.file.data.status !== "ready",
         },
       ]

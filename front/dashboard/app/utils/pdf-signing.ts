@@ -141,7 +141,8 @@ function captionCommands(
     const hex = Array.from(line, (char) =>
       char.charCodeAt(0).toString(16).padStart(2, "0"),
     ).join("");
-    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${pad.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
+    const left = (width - font.widthOfTextAtSize(line, size)) / 2;
+    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${left.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
   });
 }
 
@@ -222,21 +223,24 @@ export async function signPdf(
     }
     const { width, height } = widget;
     const pad = Math.min(width, height) * 0.05;
-    const captionHeight = visual.caption?.length ? height * 0.32 : 0;
+    const captionHeight = visual.caption?.length
+      ? Math.min(15, height * 0.32)
+      : 0;
+    const inkWidth = Math.min(112, width - 2 * pad);
+    const inkHeight = Math.min(27, height - 2 * pad - captionHeight);
+    const inkLeft = (width - inkWidth) / 2;
+    const inkBottom = (height - inkHeight + captionHeight) / 2;
     const commands = [
       "q",
       "0 G",
       "1 J",
       "1 j",
-      `${Math.max(0.1, pad * 0.65).toFixed(3)} w`,
+      `${Math.max(0.1, Math.min(0.65, inkHeight * 0.045)).toFixed(3)} w`,
     ];
     for (const stroke of visual.trace) {
       for (const [i, [x, y]] of stroke.entries()) {
-        const px = pad + (x / 1000) * (width - 2 * pad);
-        const py =
-          pad +
-          captionHeight +
-          ((1000 - y) / 1000) * (height - 2 * pad - captionHeight);
+        const px = inkLeft + (x / 1000) * inkWidth;
+        const py = inkBottom + ((1000 - y) / 1000) * inkHeight;
         commands.push(
           `${px.toFixed(3)} ${py.toFixed(3)} ${i === 0 ? "m" : "l"}`,
         );

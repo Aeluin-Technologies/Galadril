@@ -58,9 +58,12 @@ No field constitutes a consent or a cryptographic signature.
 ## Native signing and evidence
 
 Choose **Sign PDF** in the document actions menu. Keep or move an existing
-field, or drag a rectangle on a PDF page to create a field. PDFs without a
-predefined field can also be signed without a visible mark. A visible mark can
-include the account display name and local signing date in English or French.
+field, or drag a rectangle on a PDF page to create a field. Scroll through
+the document to load more pages. PDFs without a predefined field can also
+be signed without a visible mark. Enable the electronic signature note on a
+saved mark in Account settings. The note uses the name from the document
+profile, falls back to the email address, and adds the local signing date in
+English or French.
 Confirm consent and unlock the key, then download the signed PDF in the final
 step. The original bytes precede the incremental update, and the signature
 covers the appearance and caption.

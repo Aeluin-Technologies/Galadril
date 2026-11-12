@@ -3926,6 +3926,22 @@ impl Mutation {
         )
     }
 
+    async fn update_pengolo_handwritten_signature_caption(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+        include_caption: bool,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo
+                .update_signature_caption(
+                    &pengolo_actor(ctx)?,
+                    &id,
+                    include_caption,
+                )
+                .await,
+        )
+    }
+
     async fn delete_pengolo_handwritten_signature(
         #[graphql(context)] ctx: &AppContext,
         id: String,

@@ -17,6 +17,7 @@ from galadril_vision.common.config import SourceConfig, VisionConfig
 logger = structlog.get_logger(__name__)
 _PIPELINE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _REVISION = re.compile(r"[A-Za-z0-9_-]{20,128}")
+_PUBLICATION_ATTEMPT_TIMEOUT = 10.0
 
 
 class PipelineUnavailable(RuntimeError):
@@ -189,22 +190,27 @@ async def wait_for_published_pipeline(
     attempt = 0
     while True:
         try:
-            return await load_published_pipeline(
-                bootstrap, tenant_id, pipeline_id, revision_id
-            )
+            # Startup must keep retrying even when Registry never answers.
+            async with asyncio.timeout(_PUBLICATION_ATTEMPT_TIMEOUT):
+                return await load_published_pipeline(
+                    bootstrap, tenant_id, pipeline_id, revision_id
+                )
         except PipelinePending as error:
-            attempt += 1
-            logger.warning(
-                "pipeline_publication_pending",
-                tenant_id=tenant_id,
-                pipeline_id=pipeline_id,
-                revision_id=revision_id,
-                reason=str(error),
-                attempt=attempt,
-                retry_seconds=delay,
-            )
-            await asyncio.sleep(delay)
-            delay = min(delay * 2.0, 30.0)
+            reason = str(error)
+        except TimeoutError:
+            reason = "Registry publication lookup timed out"
+        attempt += 1
+        logger.warning(
+            "pipeline_publication_pending",
+            tenant_id=tenant_id,
+            pipeline_id=pipeline_id,
+            revision_id=revision_id,
+            reason=reason,
+            attempt=attempt,
+            retry_seconds=delay,
+        )
+        await asyncio.sleep(delay)
+        delay = min(delay * 2.0, 30.0)
 
 
 def _load_artifact(

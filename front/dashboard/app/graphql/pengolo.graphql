@@ -415,6 +415,7 @@ query PengoloHandwrittenSignatures {
     id
     label
     createdAt
+    includeCaption
   }
 }
 
@@ -429,7 +430,18 @@ mutation createPengoloHandwrittenSignature(
     id
     label
     createdAt
+    includeCaption
   }
+}
+
+mutation updatePengoloHandwrittenSignatureCaption(
+  $id: String!
+  $includeCaption: Boolean!
+) {
+  updatePengoloHandwrittenSignatureCaption(
+    id: $id
+    includeCaption: $includeCaption
+  )
 }
 
 mutation deletePengoloHandwrittenSignature($id: String!) {

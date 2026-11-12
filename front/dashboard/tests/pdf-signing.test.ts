@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { PDF, Standard14Font } from "@libpdf/core";
 import {
   createSigningVault,
   unlockSigningKey,
@@ -96,6 +97,28 @@ for (const visible of [true, false]) {
         const placedPath = join(dir, "placed.pdf");
         writeFileSync(placedPath, placed);
         await assertSignedPdf(placedPath, original, true, placement);
+        const result = await PDF.load(placed);
+        const widget = result
+          .getForm()
+          ?.getSignatureFields()[0]
+          ?.getWidgets()[0];
+        const appearance = widget?.getNormalAppearance();
+        assert.ok(widget && appearance);
+        const commands = new TextDecoder().decode(appearance.getDecodedData());
+        const captions = [
+          ...commands.matchAll(
+            /BT \/Caption ([\d.]+) Tf 1 0 0 1 ([\d.]+) [\d.]+ Tm <([a-f\d]+)> Tj ET/g,
+          ),
+        ];
+        assert.equal(captions.length, 2);
+        const font = Standard14Font.of("Helvetica");
+        for (const [, size, left, text] of captions) {
+          assert.ok(text);
+          const line = Buffer.from(text, "hex").toString("latin1");
+          const center =
+            Number(left) + font.widthOfTextAtSize(line, Number(size)) / 2;
+          assert.ok(Math.abs(center - widget.width / 2) < 0.05, line);
+        }
         if (visible) {
           const pdfsig = process.env.GALADRIL_PDFSIG ?? "pdfsig";
           const changed = Buffer.from(signed);
