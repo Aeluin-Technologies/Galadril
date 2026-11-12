@@ -409,3 +409,37 @@ mutation updatePengoloOpenai($input: PengoloOpenaiInput!) {
 mutation deletePengoloProject($input: PengoloProjectDeletionInput!) {
   deletePengoloProject(input: $input)
 }
+
+query PengoloHandwrittenSignatures {
+  pengoloHandwrittenSignatures {
+    id
+    label
+    createdAt
+  }
+}
+
+query PengoloHandwrittenSignatureTrace($id: String!) {
+  pengoloHandwrittenSignatureTrace(id: $id)
+}
+
+mutation createPengoloHandwrittenSignature(
+  $input: PengoloHandwrittenSignatureInput!
+) {
+  createPengoloHandwrittenSignature(input: $input) {
+    id
+    label
+    createdAt
+  }
+}
+
+mutation deletePengoloHandwrittenSignature($id: String!) {
+  deletePengoloHandwrittenSignature(id: $id)
+}
+
+query PengoloSigningVault {
+  pengoloSigningVault
+}
+
+mutation CreatePengoloSigningVault($envelope: String!) {
+  createPengoloSigningVault(envelope: $envelope)
+}

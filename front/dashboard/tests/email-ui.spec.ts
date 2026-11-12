@@ -28,6 +28,11 @@ test("account settings show the saved document profile and edit one row", async 
   );
   await page.route("**/graphql", (route) => {
     const body = route.request().postDataJSON();
+    if (body.query.includes("pengoloHandwrittenSignatures")) {
+      return route.fulfill({
+        json: { data: { pengoloHandwrittenSignatures: [] } },
+      });
+    }
     if (body.query.includes("savePengoloDocumentProfile")) {
       expect(body.variables.input).toEqual({
         ...profile,
@@ -60,9 +65,21 @@ test("account settings show the saved document profile and edit one row", async 
     page.getByRole("heading", { name: "General", exact: true }),
   ).toBeVisible({ timeout: 60000 });
   await expect(page.getByText("Camille", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Edit First name" }).click();
-  await page.getByRole("textbox", { name: "First name" }).fill("Dominique");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const edit = page.getByRole("button", { name: "Edit First name" });
+  await edit.click();
+  const dialog = page.getByRole("dialog", { name: "Edit First name" });
+  const input = dialog.getByRole("textbox", { name: "First name" });
+  await expect(input).toBeFocused();
+  await input.fill("Cancelled");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(edit).toBeFocused();
+  await expect(page.getByText("Camille", { exact: true })).toBeVisible();
+  await edit.click();
+  await expect(input).toHaveValue("Camille");
+  await input.fill("Dominique");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog).toBeHidden();
   await expect(
     page.getByRole("status").filter({ hasText: "Details saved." }),
   ).toBeVisible();
@@ -818,4 +835,142 @@ test("email references open authorized content and its thread without sending", 
     .click();
   await expect.poll(() => operations.includes("thread")).toBe(true);
   expect(operations).toEqual(["accounts", "messages", "message", "thread"]);
+});
+
+test("a handwritten mark can be saved, previewed, and removed", async ({
+  page,
+}, testInfo) => {
+  const id = "a".repeat(32);
+  let mark: { id: string; label: string; createdAt: number } | undefined;
+  let trace: string | undefined;
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    if (query.includes("createPengoloHandwrittenSignature")) {
+      trace = variables.input.trace;
+      expect(JSON.parse(trace ?? "[]")).toHaveLength(1);
+      mark = { id, label: variables.input.label, createdAt: 1 };
+      return route.fulfill({
+        json: { data: { createPengoloHandwrittenSignature: mark } },
+      });
+    }
+    if (query.includes("deletePengoloHandwrittenSignature")) {
+      expect(variables.id).toBe(id);
+      mark = undefined;
+      trace = undefined;
+      return route.fulfill({
+        json: { data: { deletePengoloHandwrittenSignature: true } },
+      });
+    }
+    if (query.includes("pengoloHandwrittenSignatureTrace")) {
+      expect(variables.id).toBe(id);
+      return route.fulfill({
+        json: { data: { pengoloHandwrittenSignatureTrace: trace } },
+      });
+    }
+    if (query.includes("pengoloHandwrittenSignatures"))
+      return route.fulfill({
+        json: { data: { pengoloHandwrittenSignatures: mark ? [mark] : [] } },
+      });
+    return route.fulfill({
+      json: {
+        data: {
+          pengoloDocumentProfile: {
+            revision: 0,
+            firstName: "",
+            lastName: "",
+            email: "",
+            address: "",
+            requireMcpEmailReview: false,
+          },
+        },
+      },
+    });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/settings\/user(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/settings/user#account");
+  await expect(page.getByText("No saved signatures.")).toBeVisible({
+    timeout: 60_000,
+  });
+  const add = page.getByRole("button", { name: "Add signature", exact: true });
+  const drawing = page.getByRole("dialog", { name: "Draw a signature" });
+  const label = drawing.getByRole("textbox", { name: "Signature label" });
+  await expect(
+    page.getByRole("textbox", { name: "Signature label" }),
+  ).toHaveCount(0);
+  await add.click();
+  await label.fill("Discard this");
+  await drawing.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(drawing).toBeHidden();
+  await expect(add).toBeFocused();
+  await add.click();
+  await expect(label).toHaveValue("");
+  await label.fill("My mark");
+  const pad = drawing.getByRole("img", { name: "Signature drawing area" });
+  await pad.scrollIntoViewIfNeeded();
+  const bounds = await pad.boundingBox();
+  if (!bounds) throw new Error("Missing signature drawing area");
+  await page.mouse.move(bounds.x + 25, bounds.y + 25);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 80, bounds.y + 50, { steps: 4 });
+  await page.mouse.up();
+  await page.screenshot({
+    path: testInfo.outputPath("signature-drawing-wide.png"),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawing).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("signature-drawing-narrow.png"),
+  });
+  await drawing.getByRole("button", { name: "Save signature" }).click();
+  await expect(drawing).toBeHidden();
+  await expect(add).toBeFocused();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "My mark", exact: true }).click();
+  await expect(
+    page.getByRole("img", { name: "Saved signature preview" }),
+  ).toBeVisible();
+  await page
+    .getByRole("heading", { name: "Handwritten signatures" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("signature-wide.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .getByRole("img", { name: "Saved signature preview" })
+    .scrollIntoViewIfNeeded();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("signature-narrow.png") });
+  await page
+    .getByRole("button", { name: "Remove signature", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm removal" }).click();
+  await expect(page.getByText("No saved signatures.")).toBeVisible();
 });

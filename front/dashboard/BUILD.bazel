@@ -11,6 +11,13 @@ package(
 
 npm_link_all_packages(name = "node_modules")
 
+# Own the copy here so browser and Node tests can share the same runfiles path.
+js_library(
+    name = "signing_fixture",
+    srcs = ["tests/signing-fixture.ts"],
+    visibility = ["//visibility:private"],
+)
+
 js_test(
     name = "pengolo_library_test",
     data = ["app/utils/pengolo-library.ts"],
@@ -32,6 +39,7 @@ js_test(
     data = [
         "tests/email-ui.spec.ts",
         "tests/library-ui.spec.ts",
+        ":signing_fixture",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",
         "//front:testing_support",
@@ -108,6 +116,7 @@ js_test(
         "tests/email-ui.spec.ts",
         "tests/email-profile.spec.ts",
         "tests/library-ui.spec.ts",
+        ":signing_fixture",
         "tests/pipeline-ui.spec.ts",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",
@@ -133,6 +142,7 @@ js_test(
         "tests/email-ui.spec.ts",
         "tests/email-profile.spec.ts",
         "tests/library-ui.spec.ts",
+        ":signing_fixture",
         "tests/pipeline-ui.spec.ts",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",
@@ -163,6 +173,7 @@ js_test(
         "tests/email-profile.spec.ts",
         "tests/email-ui.spec.ts",
         "tests/library-ui.spec.ts",
+        ":signing_fixture",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",
         "//front:testing_support",
@@ -437,4 +448,17 @@ js_test(
     name = "redaction_test",
     entry_point = "tests/redaction.test.ts",
     data = ["app/utils/pengolo-redaction.ts"],
+)
+
+js_test(
+    name = "pdf_signing_test",
+    data = [
+        "app/utils/pdf-signing.ts",
+        "app/utils/signing-vault.ts",
+        ":signing_fixture",
+        ":node_modules/@libpdf/core",
+        ":node_modules/@peculiar/x509",
+        ":node_modules/reflect-metadata",
+    ],
+    entry_point = "tests/pdf-signing.test.ts",
 )

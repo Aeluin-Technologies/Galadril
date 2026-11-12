@@ -3547,6 +3547,7 @@ mod tests {
 mod compiler;
 mod document_fields;
 mod mcp;
+mod signatures;
 pub(crate) use document_fields::compiler_binding_key_matches;
 mod agent_state;
 mod redaction;

@@ -9,8 +9,8 @@ use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::access_store::{AccessStore, AccessTuple};
 use crate::application::ports::conversation_store::EvidenceSource;
 use crate::application::ports::pengolo_store::{
-    Collection, ObjectExpiry, PengoloObjects, PengoloStore, RecordQuery,
-    Reservation, StagedFile,
+    Collection, MAX_SAVED_SIGNATURES, ObjectExpiry, PengoloObjects,
+    PengoloStore, RecordQuery, Reservation, SignatureMetadata, StagedFile,
 };
 use crate::domain::pengolo::{
     OutputEvent, Record, SendInput, TEMPORARY_TTL_MS,
@@ -43,6 +43,19 @@ fn now() -> i64 {
 impl PgPengoloStore {
     pub fn new(database: Database) -> Self {
         Self { database }
+    }
+
+    async fn signature_scope(
+        &self,
+        tenant: &str,
+        owner: &str,
+    ) -> Result<Transaction<'static, Postgres>> {
+        let mut tx = self.database.tenant(tenant).await?;
+        sqlx::query("SELECT set_config('app.signature_owner', $1, true)")
+            .bind(owner)
+            .execute(&mut *tx)
+            .await?;
+        Ok(tx)
     }
 
     async fn read(
@@ -97,6 +110,94 @@ impl PgPengoloStore {
 
 #[async_trait::async_trait]
 impl PengoloStore for PgPengoloStore {
+    async fn signing_vault(
+        &self,
+        tenant: &str,
+        owner: &str,
+    ) -> Result<Option<String>> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let envelope = sqlx::query_scalar("SELECT envelope FROM pengolo_signing_vaults WHERE tenant_id=$1 AND owner_id=$2")
+            .bind(tenant).bind(owner).fetch_optional(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(envelope)
+    }
+
+    async fn create_signing_vault(
+        &self,
+        tenant: &str,
+        owner: &str,
+        envelope: &str,
+    ) -> Result<bool> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let created = sqlx::query("INSERT INTO pengolo_signing_vaults (tenant_id, owner_id, envelope) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+            .bind(tenant).bind(owner).bind(envelope).execute(&mut *tx).await?.rows_affected() == 1;
+        tx.commit().await?;
+        Ok(created)
+    }
+
+    async fn signatures(
+        &self,
+        tenant: &str,
+        owner: &str,
+    ) -> Result<Vec<SignatureMetadata>> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let rows = sqlx::query_as("SELECT id, label, created_at FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2 ORDER BY created_at DESC, id LIMIT $3")
+            .bind(tenant).bind(owner).bind(MAX_SAVED_SIGNATURES).fetch_all(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
+
+    async fn signature_trace(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let row = sqlx::query_scalar("SELECT sealed_trace FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2 AND id=$3")
+            .bind(tenant).bind(owner).bind(id).fetch_optional(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(row)
+    }
+
+    async fn create_signature(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+        label: &str,
+        sealed_trace: &[u8],
+    ) -> Result<SignatureMetadata> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        // A transaction lock keeps concurrent creations within the owner's
+        // quota.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended(jsonb_build_array($1::text,$2::text)::text,713060))")
+            .bind(tenant).bind(owner).execute(&mut *tx).await?;
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2")
+            .bind(tenant).bind(owner).fetch_one(&mut *tx).await?;
+        ensure!(
+            count < MAX_SAVED_SIGNATURES,
+            "Saved signature limit reached"
+        );
+        let row = sqlx::query_as("INSERT INTO pengolo_signatures (tenant_id,owner_id,id,label,created_at,sealed_trace) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,label,created_at")
+            .bind(tenant).bind(owner).bind(id).bind(label).bind(now()).bind(sealed_trace).fetch_one(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(row)
+    }
+
+    async fn delete_signature(
+        &self,
+        tenant: &str,
+        owner: &str,
+        id: &str,
+    ) -> Result<bool> {
+        let mut tx = self.signature_scope(tenant, owner).await?;
+        let deleted = sqlx::query("DELETE FROM pengolo_signatures WHERE tenant_id=$1 AND owner_id=$2 AND id=$3")
+            .bind(tenant).bind(owner).bind(id).execute(&mut *tx).await?.rows_affected() == 1;
+        tx.commit().await?;
+        Ok(deleted)
+    }
+
     fn library_changes(
         &self,
     ) -> Result<
@@ -1598,6 +1699,63 @@ mod tests {
             assert_eq!(restored.data, checkpoint.data);
             assert_eq!(restored.expires_at, checkpoint.expires_at);
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn handwritten_marks_are_private_even_after_pool_reuse() -> Result<()>
+    {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect_with_limit(
+            &format!(
+                "postgres://galadril_app:galadril_app@{}:{}/postgres",
+                container.get_host().await?,
+                container.get_host_port_ipv4(5432).await?
+            ),
+            1,
+        )
+        .await?;
+        database.verify_security().await?;
+        let store = PgPengoloStore::new(database.clone());
+        let id = "a".repeat(32);
+        let sealed = vec![42; 40];
+        store
+            .create_signature("tenant_a", "alice", &id, "Initials", &sealed)
+            .await?;
+        assert_eq!(store.signatures("tenant_a", "alice").await?.len(), 1);
+        assert_eq!(
+            store.signature_trace("tenant_a", "alice", &id).await?,
+            Some(sealed)
+        );
+        for (tenant, owner) in [("tenant_a", "bob"), ("tenant_b", "alice")] {
+            assert!(store.signatures(tenant, owner).await?.is_empty());
+            assert_eq!(store.signature_trace(tenant, owner, &id).await?, None);
+            assert!(!store.delete_signature(tenant, owner, &id).await?);
+        }
+        let visible: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM pengolo_signatures")
+                .fetch_one(database.system())
+                .await?;
+        assert_eq!(visible, 0);
+        assert!(
+            store
+                .create_signing_vault("tenant_a", "alice", "first")
+                .await?
+        );
+        assert!(
+            !store
+                .create_signing_vault("tenant_a", "alice", "replacement")
+                .await?
+        );
+        assert_eq!(
+            store.signing_vault("tenant_a", "alice").await?.as_deref(),
+            Some("first")
+        );
+        assert!(store.signing_vault("tenant_b", "alice").await?.is_none());
+        assert!(store.signing_vault("tenant_a", "bob").await?.is_none());
+        assert!(store.delete_signature("tenant_a", "alice", &id).await?);
+        assert!(!store.delete_signature("tenant_a", "alice", &id).await?);
+        assert!(store.signatures("tenant_a", "alice").await?.is_empty());
         Ok(())
     }
 

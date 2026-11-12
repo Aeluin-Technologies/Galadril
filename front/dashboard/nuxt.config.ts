@@ -1,6 +1,12 @@
 import { isDevelopment } from "std-env";
 import { fileURLToPath } from "node:url";
 
+const pdfSigningDependencies = [
+  "@libpdf/core",
+  "@peculiar/x509",
+  "reflect-metadata",
+];
+
 export default defineNuxtConfig({
   $env: {
     "ui-test": {
@@ -20,6 +26,7 @@ export default defineNuxtConfig({
         optimizeDeps: {
           noDiscovery: true,
           include: [
+            ...pdfSigningDependencies,
             "@opentelemetry/api",
             "@simplewebauthn/browser",
             "fuse.js",
@@ -65,6 +72,7 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: [
+        ...pdfSigningDependencies,
         "grid-layout-plus",
         "vue-echarts",
         "@heroicons/vue/24/outline",

@@ -39,7 +39,7 @@ pub fn compiler_binding_key_matches(supplied: &str) -> bool {
     hmac::verify(&key, expected.as_bytes(), tag.as_ref()).is_ok()
 }
 
-fn vault_key() -> Result<aead::LessSafeKey> {
+pub(super) fn vault_key() -> Result<aead::LessSafeKey> {
     let value = std::env::var("PENGOLO_DOCUMENT_VAULT_KEY")
         .context("Document vault is unavailable")?;
     let bytes = base64::engine::general_purpose::STANDARD

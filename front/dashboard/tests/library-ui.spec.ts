@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { record } from "../shared/records.ts";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import JSZip from "jszip";
 
 test("library selection groups actions, hides completed progress and starts an attachment-only draft", async ({
@@ -424,4 +425,205 @@ test("projects use colored Heroicons and confirm owner deletion", async ({
     .click();
   await expect(row).toHaveCount(0);
   expect(removed).toBe(true);
+});
+
+test("sign Tectonic PDFs with the same encrypted account key", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    process.env.GALADRIL_SIGNING_E2E !== "1",
+    "Requires cached Tectonic bundle and pdfsig",
+  );
+  const { assertSignedPdf, compileSigningPdf, signingTrace } =
+    await import("./signing-fixture.ts");
+  const { mkdir } = await import("node:fs/promises");
+  const dir = testInfo.outputPath("signing");
+  await mkdir(dir, { recursive: true });
+  const variants = [true, false].map((visible, index) => ({
+    bytes: compileSigningPdf(dir, visible),
+    visible,
+    id: String(index + 1).repeat(32),
+    name: visible ? "With field.pdf" : "Without field.pdf",
+  }));
+  const authenticator = await page.context().newCDPSession(page);
+  await authenticator.send("WebAuthn.enable");
+  await authenticator.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      ctap2Version: "ctap2_1",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      hasPrf: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  const password = "a separate strong signing password";
+  let envelope: string | null = null;
+  let enrollments = 0;
+  let marksRead = 0;
+  let firstCertificate: string | undefined;
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage((message) => {
+      if (record(JSON.parse(String(message))).type === "connection_init")
+        socket.send(JSON.stringify({ type: "connection_ack" }));
+    }),
+  );
+  await page.route("**/signing-fixture/*", (route) => {
+    const file = variants.find(({ id }) =>
+      new URL(route.request().url()).pathname.endsWith(id),
+    );
+    if (!file) return route.abort();
+    return route.fulfill({
+      contentType: "application/pdf",
+      body: route.request().method() === "HEAD" ? undefined : file.bytes,
+    });
+  });
+  await page.route("**/graphql", (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    let data: Record<string, unknown> = {};
+    if (query.includes("query Workspace")) {
+      data = {
+        pengoloIdentity: {
+          version: "1",
+          administrator: false,
+          webSearchAvailable: false,
+        },
+        pengoloModels: { defaultModel: "local", models: [] },
+        pengoloProjects: [],
+        pengoloChats: { items: [], after: null },
+      };
+    } else if (query.includes("pengoloLibrary(")) {
+      data = {
+        pengoloLibrary: {
+          after: null,
+          items: variants.map((file) => ({
+            id: file.id,
+            ownerId: "owner",
+            projectId: null,
+            revision: 1,
+            updatedAt: 1,
+            expiresAt: null,
+            data: {
+              name: file.name,
+              mime: "application/pdf",
+              size: file.bytes.length,
+              status: "ready",
+              temporarySession: null,
+              retrieval: { status: "ready", warnings: [] },
+            },
+          })),
+        },
+      };
+    } else if (query.includes("pengoloDownload(")) {
+      data = {
+        pengoloDownload: { url: `/signing-fixture/${variables.input.id}` },
+      };
+    } else if (query.includes("createPengoloSigningVault(")) {
+      expect(envelope).toBeNull();
+      expect(typeof variables.envelope).toBe("string");
+      expect(variables.envelope).not.toContain(password);
+      envelope = variables.envelope;
+      enrollments++;
+      data = { createPengoloSigningVault: true };
+    } else if (query.includes("pengoloSigningVault")) {
+      data = { pengoloSigningVault: envelope };
+    } else if (query.includes("pengoloHandwrittenSignatureTrace")) {
+      marksRead++;
+      data = { pengoloHandwrittenSignatureTrace: JSON.stringify(signingTrace) };
+    } else if (query.includes("pengoloHandwrittenSignatures")) {
+      data = {
+        pengoloHandwrittenSignatures: [
+          { id: "a".repeat(32), label: "My mark", createdAt: 1 },
+        ],
+      };
+    }
+    return route.fulfill({ json: { data } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/pengolo(?:\/library)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const libraryUrl = new URL("/pengolo/library", shell.url());
+  if (libraryUrl.hostname === "127.0.0.1") libraryUrl.hostname = "localhost";
+  await page.goto(libraryUrl.href);
+  for (const variant of variants) {
+    await page
+      .getByRole("button", { name: `Actions for ${variant.name}` })
+      .click();
+    await page.getByRole("menuitem", { name: "Preview", exact: true }).click();
+    const dialog = page.getByRole("dialog", {
+      name: variant.name,
+      exact: true,
+    });
+    await dialog.getByRole("button", { name: "Sign PDF", exact: true }).click();
+    const sign = dialog.getByRole("button", { name: "Sign and download" });
+    const input = dialog.getByLabel("Signing password", { exact: true });
+    await expect(sign).toBeDisabled();
+    await dialog
+      .getByRole("checkbox", {
+        name: "I have reviewed this PDF and agree to sign this version.",
+      })
+      .check();
+    if (variant.visible) {
+      await expect(
+        dialog.getByText("galadril:claimant", { exact: true }),
+      ).toBeVisible();
+      await dialog.getByLabel("Confirm signing password").fill(password);
+      await dialog
+        .getByRole("checkbox", {
+          name: "Also enable unlock with a compatible passkey",
+        })
+        .check();
+    } else {
+      await expect(
+        dialog.getByText("This PDF has no available visible field."),
+      ).toBeVisible();
+      await input.fill("incorrect signing password");
+      await sign.click();
+      await expect(
+        dialog.getByText("The signing key could not be unlocked."),
+      ).toBeVisible();
+    }
+    const download = page.waitForEvent("download", { timeout: 20_000 });
+    if (variant.visible) {
+      await input.fill(password);
+      await sign.click();
+    } else {
+      await dialog.getByRole("button", { name: "Sign with passkey" }).click();
+    }
+    const output = await download;
+    const path = join(dir, output.suggestedFilename());
+    await output.saveAs(path);
+    const certificate = await assertSignedPdf(
+      path,
+      variant.bytes,
+      variant.visible,
+    );
+    if (firstCertificate) expect(certificate).toBe(firstCertificate);
+    else firstCertificate = certificate;
+    await dialog.getByRole("button", { name: "Close dialog" }).click();
+  }
+  expect(enrollments).toBe(1);
+  expect(marksRead).toBe(1);
 });

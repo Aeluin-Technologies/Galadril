@@ -1,5 +1,6 @@
 """Packaged template discovery never imports executable plugin bindings."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -135,6 +136,76 @@ class PackagedTemplatesTest(unittest.TestCase):
             rb"\DateDepot{<<galadril:project_document_date>>}",
             bytes(value for value in data if isinstance(value, int)),
         )
+
+    @unittest.skipUnless(
+        shutil.which("tectonic") and shutil.which("qpdf"),
+        "Requires Tectonic and qpdf",
+    )
+    def test_signature_fields_are_optional_named_and_empty(self) -> None:
+        sources = Path(galadril_plugins.__file__).parent / "law" / "latex"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copy2(sources / "recoursadmin.cls", root)
+            for enabled in (False, True):
+                setup = r"\GaladrilEnableSignatureFields" if enabled else ""
+                (root / "signature.tex").write_text(
+                    r"\documentclass{recoursadmin}"
+                    + "\n"
+                    + setup
+                    + "\n"
+                    + r"\begin{document}\SignatureRequerant\newpage"
+                    + (
+                        r"\GaladrilSignatureSlot{counsel}{136bp}{34bp}"
+                        if enabled
+                        else "{}Suite"
+                    )
+                    + r"\end{document}",
+                    encoding="utf-8",
+                )
+                compilation = subprocess.run(
+                    [
+                        "tectonic",
+                        "--only-cached",
+                        "--untrusted",
+                        "signature.tex",
+                    ],
+                    cwd=root,
+                    capture_output=True,
+                    check=False,
+                    timeout=60,
+                )
+                self.assertEqual(
+                    compilation.returncode,
+                    0,
+                    compilation.stderr.decode(errors="replace"),
+                )
+                pdf = subprocess.check_output(
+                    [
+                        "qpdf",
+                        "--json",
+                        "--json-key=acroform",
+                        root / "signature.pdf",
+                    ],
+                    timeout=30,
+                )
+                fields = json.loads(pdf)["acroform"]["fields"]
+                self.assertEqual(
+                    [
+                        (
+                            f["fullname"],
+                            f["fieldtype"],
+                            f["pageposfrom1"],
+                            f["value"],
+                        )
+                        for f in fields
+                    ],
+                    [
+                        ("galadril:claimant", "/Sig", 1, None),
+                        ("galadril:counsel", "/Sig", 2, None),
+                    ]
+                    if enabled
+                    else [],
+                )
 
     def test_packaged_classes_are_discovered_with_trusted_provenance(
         self,
