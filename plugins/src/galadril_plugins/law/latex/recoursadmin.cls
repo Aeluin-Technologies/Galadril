@@ -433,16 +433,20 @@
   \fi
  }
 \ExplSyntaxOff
+% Keep the closing lines and the taller widget on the same page.
+\newlength{\ra@signatureheight}
+\setlength{\ra@signatureheight}{64bp}
 \newcommand{\SignatureRequerant}{%
- \par\addvspace{1.45em}\ifdefempty{\ra@ville}{Le}{Fait à \ra@ville, le} \ra@date.\par
+ \par\ifGaladrilSignatureFields\needspace{\dimexpr\ra@signatureheight+5\baselineskip\relax}\fi
+ \addvspace{1.45em}\ifdefempty{\ra@ville}{Le}{Fait à \ra@ville, le} \ra@date.\par
  \ifGaladrilSignatureFields\else\vspace{1.4cm}\fi\hfill\begin{minipage}{.42\textwidth}
  \centering
- \ifGaladrilSignatureFields\GaladrilSignatureSlot{claimant}{136bp}{34bp}\par\fi
+ \ifGaladrilSignatureFields\GaladrilSignatureSlot{claimant}{136bp}{\ra@signatureheight}\par\fi
  \ra@nom\end{minipage}\par}
 \newcommand{\SignatureCourrier}{%
  \par\addvspace{1.30em}\hfill
  \begin{minipage}{.42\textwidth}\centering
- \ifGaladrilSignatureFields\GaladrilSignatureSlot{sender}{136bp}{34bp}\par\fi
+ \ifGaladrilSignatureFields\GaladrilSignatureSlot{sender}{136bp}{\ra@signatureheight}\par\fi
  \ra@nom\end{minipage}\par}
 \makeatother
 \newcommand{\TitreBordereau}[1]{%

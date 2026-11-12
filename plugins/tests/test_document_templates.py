@@ -50,6 +50,7 @@ class PackagedTemplatesTest(unittest.TestCase):
                             "qpdf",
                             "--json",
                             "--json-key=acroform",
+                            "--json-key=qpdf",
                             root / "main.pdf",
                         ],
                         timeout=30,
@@ -72,6 +73,12 @@ class PackagedTemplatesTest(unittest.TestCase):
                     fields[0]["pageposfrom1"],
                     pages if draft == "courrier" else pages - 1,
                 )
+                widget = pdf["qpdf"][1][
+                    "obj:" + fields[0]["annotation"]["object"]
+                ]
+                left, bottom, right, top = widget["value"]["/Rect"]
+                self.assertAlmostEqual(right - left, 136, places=2)
+                self.assertAlmostEqual(top - bottom, 64, places=2)
 
     def test_pengolo_receives_the_legal_method_and_reference_material(
         self,
