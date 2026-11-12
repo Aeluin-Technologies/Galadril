@@ -141,7 +141,8 @@ function captionCommands(
     const hex = Array.from(line, (char) =>
       char.charCodeAt(0).toString(16).padStart(2, "0"),
     ).join("");
-    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${pad.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
+    const left = (width - font.widthOfTextAtSize(line, size)) / 2;
+    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${left.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
   });
 }
 
