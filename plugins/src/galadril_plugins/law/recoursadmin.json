@@ -18,7 +18,7 @@
     },
     {
       "path": "main.tex",
-      "data": "\\documentclass{recoursadmin}\n\\input{information}\n\\input{draft}\n"
+      "data": "\\documentclass{recoursadmin}\n\\GaladrilEnableSignatureFields\n\\input{information}\n\\input{draft}\n"
     },
     {
       "path": "memoire.tex",

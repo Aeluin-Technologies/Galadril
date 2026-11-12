@@ -41,10 +41,11 @@ certificate.
 
 ## Named fields in LaTeX
 
-With the `recoursadmin` class, add `\GaladrilEnableSignatureFields` to the
-preamble (for the packaged project, between `\documentclass` and its inputs).
-The request and brief put `galadril:claimant` below the closing date and before
-the list of exhibits. The letter puts `galadril:sender` in its closing block.
+The packaged `recoursadmin` project and filings generated from a dossier
+enable signature fields in their preamble. Petitions and briefs put
+`galadril:claimant` below the closing date and before the list of exhibits.
+Letters put `galadril:sender` after the closing salutation. For a custom
+document using the class, add `\GaladrilEnableSignatureFields` to the preamble.
 Use `\GaladrilSignatureSlot{counsel}{136bp}{34bp}` to add another named field.
 Names must be unique, start with a lowercase ASCII letter, and contain only
 lowercase ASCII letters, digits or hyphens. The class rejects duplicate names.
@@ -52,8 +53,12 @@ lowercase ASCII letters, digits or hyphens. The class rejects duplicate names.
 Tectonic's bundle did not provide `eforms.sty`. The class uses XeTeX/dvipdfmx
 specials to emit actual empty AcroForm `/Sig` widgets. This option assumes
 the class owns the AcroForm; combining it with another form package is not
-supported. Ordinary exports keep their prior layout and have no new widgets.
-No field constitutes a consent or a cryptographic signature.
+supported. Remove `\GaladrilEnableSignatureFields` from the preamble to
+export without signature widgets. An empty field is a placement for a future
+signature.
+
+Galadril detects eligible native PDF signature fields by their type and
+widget geometry. Provider-specific text tags and anchors are not interpreted.
 
 ## Native signing and evidence
 
