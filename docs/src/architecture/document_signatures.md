@@ -21,8 +21,9 @@ certificate.
 - **PostgreSQL:** `202611110001_pengolo_signatures.sql` forces row level
   security on both tenant and owner. The store sets both transaction locally;
   the owner limit is enforced under an advisory transaction lock. The trace
-  consists of bounded numeric paths on a normalized grid. Gateway encrypts it
-  using the existing `PENGOLO_DOCUMENT_VAULT_KEY` with AES-256-GCM, a random
+  contains bounded numeric paths on a normalized grid or a bounded PNG.
+  Gateway encrypts it using the existing `PENGOLO_DOCUMENT_VAULT_KEY` with
+  AES-256-GCM, a random
   nonce, and authenticated data bound to tenant, owner and mark ID. Labels
   and creation timestamps are metadata in PostgreSQL. Deleting a mark removes
   its row; ordinary PostgreSQL backup retention still applies. OTLP events
@@ -41,10 +42,13 @@ certificate.
 
 ## Named fields in LaTeX
 
-With the `recoursadmin` class, add `\GaladrilEnableSignatureFields` to the
-preamble (for the packaged project, between `\documentclass` and its inputs).
-The request and brief put `galadril:claimant` below the closing date and before
-the list of exhibits. The letter puts `galadril:sender` in its closing block.
+The packaged `recoursadmin` project and filings generated from a dossier
+enable signature fields in their preamble. Petitions and briefs put
+`galadril:claimant` below the closing date and before the list of exhibits.
+Letters put `galadril:sender` after the closing salutation. For a custom
+document using the class, add `\GaladrilEnableSignatureFields` to the preamble.
+The built-in fields are 136 by 64 PDF points, allowing taller marks while
+keeping the closing block together.
 Use `\GaladrilSignatureSlot{counsel}{136bp}{34bp}` to add another named field.
 Names must be unique, start with a lowercase ASCII letter, and contain only
 lowercase ASCII letters, digits or hyphens. The class rejects duplicate names.
@@ -52,8 +56,12 @@ lowercase ASCII letters, digits or hyphens. The class rejects duplicate names.
 Tectonic's bundle did not provide `eforms.sty`. The class uses XeTeX/dvipdfmx
 specials to emit actual empty AcroForm `/Sig` widgets. This option assumes
 the class owns the AcroForm; combining it with another form package is not
-supported. Ordinary exports keep their prior layout and have no new widgets.
-No field constitutes a consent or a cryptographic signature.
+supported. Remove `\GaladrilEnableSignatureFields` from the preamble to
+export without signature widgets. An empty field is a placement for a future
+signature.
+
+Galadril detects eligible native PDF signature fields by their type and
+widget geometry. Provider-specific text tags and anchors are not interpreted.
 
 ## Native signing and evidence
 
@@ -64,6 +72,14 @@ be signed without a visible mark. Enable the electronic signature note on a
 saved mark in Account settings. The note uses the name from the document
 profile, falls back to the email address, and adds the local signing date in
 English or French.
+
+Draw a mark or drop a PNG or JPEG in the Upload panel in Account settings.
+The browser trims empty margins and stores a bounded PNG through the same
+encrypted mark API.
+Signature appearances fit the ink into the field with a single scale for both
+axes. Older drawings lacked the original pad dimensions and use the same
+2:1 pad proportions as new drawings.
+
 Confirm consent and unlock the key, then download the signed PDF in the final
 step. The original bytes precede the incremental update, and the signature
 covers the appearance and caption.

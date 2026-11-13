@@ -61,6 +61,7 @@ def render_filing(dossier: Dossier, filing_id: str) -> str:
     mode = _REGIMES.get(proceeding.regime, "autre")
     parts = [
         r"\documentclass{recoursadmin}",
+        r"\GaladrilEnableSignatureFields",
         r"\input{information}",
         rf"\DefinirJuridiction{{{court}}}{{{court}}}{{{court_address}}}",
         rf"\DeclarerDossier{{redaction}}{{{number}}}{{{mode}}}",

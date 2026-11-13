@@ -9,6 +9,7 @@ import {
   PdfStream,
   Standard14Font,
 } from "@libpdf/core";
+import { signaturePadAspectRatio, type SignatureInk } from "./signature-ink.ts";
 import { decodeSigningBytes } from "./signing-vault.ts";
 import type { SigningVault } from "./signing-vault.ts";
 
@@ -124,6 +125,7 @@ function captionCommands(
   width: number,
   height: number,
   pad: number,
+  baseline: number,
 ) {
   const font = Standard14Font.of("Helvetica");
   const encoded = lines
@@ -142,42 +144,7 @@ function captionCommands(
       char.charCodeAt(0).toString(16).padStart(2, "0"),
     ).join("");
     const left = (width - font.widthOfTextAtSize(line, size)) / 2;
-    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${left.toFixed(3)} ${(pad + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
-  });
-}
-
-type Point = readonly [number, number];
-
-export function parseSigningTrace(encoded: string): Point[][] {
-  if (encoded.length > 16384) throw new Error("Invalid signing trace");
-  const value: unknown = JSON.parse(encoded);
-  if (!Array.isArray(value) || !value.length || value.length > 32)
-    throw new Error("Invalid signing trace");
-  let count = 0;
-  return value.map((stroke: unknown) => {
-    if (
-      !Array.isArray(stroke) ||
-      stroke.length < 2 ||
-      (count += stroke.length) > 1024
-    )
-      throw new Error("Invalid signing trace");
-    return stroke.map((point: unknown): Point => {
-      if (!Array.isArray(point) || point.length !== 2)
-        throw new Error("Invalid signing point");
-      const [x, y] = point;
-      if (
-        typeof x !== "number" ||
-        typeof y !== "number" ||
-        !Number.isInteger(x) ||
-        !Number.isInteger(y) ||
-        x < 0 ||
-        x > 1000 ||
-        y < 0 ||
-        y > 1000
-      )
-        throw new Error("Invalid signing point");
-      return [x, y];
-    });
+    return `BT /Caption ${size.toFixed(3)} Tf 1 0 0 1 ${left.toFixed(3)} ${(baseline + size * index * 1.15).toFixed(3)} Tm <${hex}> Tj ET`;
   });
 }
 
@@ -185,12 +152,13 @@ export async function signPdf(
   bytes: Uint8Array,
   vault: SigningVault,
   privateKey: CryptoKey,
-  visual: {
-    field: string;
-    trace: readonly (readonly Point[])[];
-    placement?: SigningPlacement;
-    caption?: readonly string[];
-  } | null,
+  visual:
+    | (SignatureInk & {
+        field: string;
+        placement?: SigningPlacement;
+        caption?: readonly string[];
+      })
+    | null,
   signingTime?: Date,
 ): Promise<Uint8Array> {
   const pdf = await loadPdf(bytes);
@@ -222,33 +190,80 @@ export async function signPdf(
       placeWidget(pdf, visual.placement, widget.ref, widget.dict);
     }
     const { width, height } = widget;
-    const pad = Math.min(width, height) * 0.05;
+    const pad = Math.min(3, Math.min(width, height) * 0.05);
     const captionHeight = visual.caption?.length
       ? Math.min(15, height * 0.32)
       : 0;
-    const inkWidth = Math.min(112, width - 2 * pad);
-    const inkHeight = Math.min(27, height - 2 * pad - captionHeight);
-    const inkLeft = (width - inkWidth) / 2;
-    const inkBottom = (height - inkHeight + captionHeight) / 2;
-    const commands = [
-      "q",
-      "0 G",
-      "1 J",
-      "1 j",
-      `${Math.max(0.1, Math.min(0.65, inkHeight * 0.045)).toFixed(3)} w`,
-    ];
-    for (const stroke of visual.trace) {
-      for (const [i, [x, y]] of stroke.entries()) {
-        const px = inkLeft + (x / 1000) * inkWidth;
-        const py = inkBottom + ((1000 - y) / 1000) * inkHeight;
-        commands.push(
-          `${px.toFixed(3)} ${py.toFixed(3)} ${i === 0 ? "m" : "l"}`,
-        );
+    const maxWidth = width - 2 * pad;
+    const maxHeight = height - 2 * pad - captionHeight;
+    const centerX = width / 2;
+    const centerY = (height + captionHeight) / 2;
+    const commands = ["q"];
+    let inkHeight: number;
+    const resources = PdfDict.of({
+      Font: PdfDict.of({
+        Caption: PdfDict.of({
+          Type: PdfName.of("Font"),
+          Subtype: PdfName.of("Type1"),
+          BaseFont: PdfName.of("Helvetica"),
+          Encoding: PdfName.of("WinAnsiEncoding"),
+        }),
+      }),
+    });
+    if ("image" in visual) {
+      const image = pdf.embedImage(visual.image);
+      const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+      const w = image.width * scale;
+      const h = image.height * scale;
+      inkHeight = h;
+      resources.set("XObject", PdfDict.of({ Mark: image.ref }));
+      commands.push(
+        `q ${w.toFixed(3)} 0 0 ${h.toFixed(3)} ${(centerX - w / 2).toFixed(3)} ${(centerY - h / 2).toFixed(3)} cm /Mark Do Q`,
+      );
+    } else {
+      let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity;
+      for (const stroke of visual.trace) {
+        for (const [x, y] of stroke) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
       }
-      commands.push("S");
+      if (!Number.isFinite(minX)) throw new Error("Empty signature trace");
+      const scale = Math.min(
+        maxWidth / Math.max(1, (maxX - minX) * signaturePadAspectRatio),
+        maxHeight / Math.max(1, maxY - minY),
+      );
+      inkHeight = (maxY - minY) * scale;
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+      commands.push(
+        "0 G",
+        "1 J",
+        "1 j",
+        `${Math.max(0.1, Math.min(0.65, maxHeight * 0.045)).toFixed(3)} w`,
+      );
+      for (const stroke of visual.trace) {
+        for (const [i, [x, y]] of stroke.entries()) {
+          const px = centerX + (x - midX) * scale * signaturePadAspectRatio;
+          const py = centerY - (y - midY) * scale;
+          commands.push(
+            `${px.toFixed(3)} ${py.toFixed(3)} ${i === 0 ? "m" : "l"}`,
+          );
+        }
+        commands.push("S");
+      }
     }
-    if (visual.caption?.length)
-      commands.push(...captionCommands(visual.caption, width, height, pad));
+    if (visual.caption?.length) {
+      const baseline = Math.max(pad, centerY - inkHeight / 2 - captionHeight);
+      commands.push(
+        ...captionCommands(visual.caption, width, height, pad, baseline),
+      );
+    }
     commands.push("Q");
     widget.setNormalAppearance(
       PdfStream.fromDict(
@@ -256,16 +271,7 @@ export async function signPdf(
           Type: PdfName.of("XObject"),
           Subtype: PdfName.of("Form"),
           BBox: new PdfArray([0, 0, width, height].map(PdfNumber.of)),
-          Resources: PdfDict.of({
-            Font: PdfDict.of({
-              Caption: PdfDict.of({
-                Type: PdfName.of("Font"),
-                Subtype: PdfName.of("Type1"),
-                BaseFont: PdfName.of("Helvetica"),
-                Encoding: PdfName.of("WinAnsiEncoding"),
-              }),
-            }),
-          }),
+          Resources: resources,
         },
         new TextEncoder().encode(commands.join("\n")),
       ),

@@ -361,12 +361,16 @@ class Packages(unittest.TestCase):
         self.assertIn(r"Faits à 50 \%", rendered)
         self.assertIn("Administration d'exemple", rendered)
         self.assertIn(r"\ParCesMotifs", rendered)
-        self.assertIn(
-            r"\TypeMemoire{replique}", render_filing(parsed, "response")
+        self.assertIn(r"\GaladrilEnableSignatureFields", rendered)
+        brief = render_filing(parsed, "response")
+        self.assertLess(
+            brief.index(r"\GaladrilEnableSignatureFields"),
+            brief.index(r"\begin{document}"),
         )
+        self.assertIn(r"\TypeMemoire{replique}", brief)
         self.assertIn(
             r"\DeclarerPiece{1}{Notification}",
-            render_filing(parsed, "response"),
+            brief,
         )
         for section, replacement in (
             ("proceedings", []),

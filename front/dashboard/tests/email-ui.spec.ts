@@ -862,7 +862,15 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     const { query, variables } = route.request().postDataJSON();
     if (query.includes("createPengoloHandwrittenSignature")) {
       trace = variables.input.trace;
-      expect(JSON.parse(trace ?? "[]")).toHaveLength(1);
+      const ink = JSON.parse(trace ?? "[]");
+      if (variables.input.label === "Imported mark") {
+        expect(ink.png).toMatch(/^[A-Za-z0-9_-]+$/);
+        expect(Buffer.from(ink.png, "base64url").readUInt32BE(12)).toBe(
+          0x49484452,
+        );
+      } else {
+        expect(ink).toHaveLength(1);
+      }
       mark = {
         id,
         label: variables.input.label,
@@ -931,7 +939,7 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     timeout: 60_000,
   });
   const add = page.getByRole("button", { name: "Add signature", exact: true });
-  const drawing = page.getByRole("dialog", { name: "Draw a signature" });
+  const drawing = page.getByRole("dialog", { name: "Add signature" });
   const label = drawing.getByRole("textbox", { name: "Signature label" });
   await expect(
     page.getByRole("textbox", { name: "Signature label" }),
@@ -1002,4 +1010,71 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     .click();
   await page.getByRole("button", { name: "Confirm removal" }).click();
   await expect(page.getByText("No saved signatures.")).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await add.click();
+  await label.fill("Imported mark");
+  await drawing.getByRole("button", { name: "Upload", exact: true }).click();
+  const input = drawing.locator('input[type="file"]');
+  await input.setInputFiles({
+    name: "invalid.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from("<svg/>"),
+  });
+  await expect(drawing.getByRole("alert")).toBeVisible();
+  const sample = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 160;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Missing canvas");
+    ctx.strokeStyle = "#182740";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(70, 117);
+    ctx.bezierCurveTo(100, 10, 180, 15, 127, 103);
+    ctx.bezierCurveTo(145, 96, 158, 64, 175, 88);
+    ctx.quadraticCurveTo(200, 113, 235, 62);
+    ctx.stroke();
+    return canvas.toDataURL("image/png").split(",")[1] ?? "";
+  });
+  const dataTransfer = await page.evaluateHandle((base64) => {
+    const transfer = new DataTransfer();
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    transfer.items.add(
+      new File([bytes], "signature.png", { type: "image/png" }),
+    );
+    return transfer;
+  }, sample);
+  const dropZone = drawing.locator("[data-file-drop]");
+  const dropOverlay = dropZone.getByRole("status", {
+    name: "Drop your signature here",
+  });
+  await dropZone.dispatchEvent("dragenter", { dataTransfer });
+  await dropZone.dispatchEvent("dragover", { dataTransfer });
+  await expect(dropOverlay).toBeVisible();
+  await dropZone.dispatchEvent("drop", { dataTransfer });
+  await dataTransfer.dispose();
+  await expect(dropOverlay).toBeHidden();
+  const preview = drawing.getByRole("img", { name: "Saved signature preview" });
+  await expect(preview).toBeVisible();
+  await expect
+    .poll(() =>
+      preview.evaluate(
+        (image) => image instanceof HTMLImageElement && image.naturalWidth,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await drawing.screenshot({
+    path: testInfo.outputPath("signature-import.png"),
+  });
+  await drawing.getByRole("button", { name: "Save signature" }).click();
+  await expect(drawing).toBeHidden();
+  await page
+    .getByRole("button", { name: "Imported mark", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Imported mark" })
+      .getByRole("img", { name: "Saved signature preview" }),
+  ).toBeVisible();
 });

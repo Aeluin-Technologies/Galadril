@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import {
+  parseSignatureInk,
+  signatureImageUrl,
+  signaturePadAspectRatio,
+} from "~/utils/signature-ink";
+import {
   ArrowRightIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -18,15 +23,14 @@ interface Mark {
   includeCaption: boolean;
 }
 
-type Point = [number, number];
 const { session } = useAccount();
 const { t } = useI18n();
 const drawingForm = useId();
 const drawing = ref(false);
 const marks = shallowRef<Mark[]>();
-const strokes = ref<Point[][]>([]);
+const payload = ref<string>();
 const label = ref("");
-const selected = shallowRef<{ id: string; paths: string[] }>();
+const selected = shallowRef<{ id: string; paths?: string[]; image?: string }>();
 const currentMark = computed(() =>
   marks.value?.find((mark) => mark.id === selected.value?.id),
 );
@@ -42,7 +46,7 @@ function reset(): void {
   pending = undefined;
   marks.value = undefined;
   drawing.value = false;
-  strokes.value = [];
+  payload.value = undefined;
   label.value = "";
   selected.value = undefined;
   confirming.value = false;
@@ -95,7 +99,7 @@ function openDrawing(): void {
 function closeDrawing(): void {
   drawing.value = false;
   label.value = "";
-  strokes.value = [];
+  payload.value = undefined;
   error.value = "";
 }
 
@@ -105,13 +109,13 @@ function save(): Promise<void> | undefined {
     !marks.value ||
     marks.value.length >= 8 ||
     !label.value.trim() ||
-    !strokes.value.length
+    !payload.value
   )
     return;
   return request(async (signal) => {
     const mark = await pengoloMutation<Mark>(
       "createPengoloHandwrittenSignature",
-      { label: label.value.trim(), trace: JSON.stringify(strokes.value) },
+      { label: label.value.trim(), trace: payload.value },
       signal,
     );
     return () => {
@@ -130,13 +134,17 @@ function preview(id: string): Promise<void> {
       signal,
     );
     if (!trace) throw new Error("Signature unavailable");
-    const paths: Point[][] = JSON.parse(trace);
+    const ink = parseSignatureInk(trace);
     return () => {
       selected.value = {
         id,
-        paths: paths.map((stroke) =>
-          stroke.map((point) => point.join(",")).join(" "),
-        ),
+        ...("image" in ink
+          ? { image: signatureImageUrl(ink.image) }
+          : {
+              paths: ink.trace.map((stroke) =>
+                stroke.map((point) => point.join(",")).join(" "),
+              ),
+            }),
       };
       confirming.value = false;
     };
@@ -263,12 +271,20 @@ onBeforeUnmount(() => {
       @close="closePreview"
     >
       <template v-if="selected">
+        <img
+          v-if="selected.image"
+          :src="selected.image"
+          :alt="$t('signatureSettings.preview')"
+          class="mx-auto max-h-32 max-w-full object-contain"
+        />
         <svg
+          v-else
           role="img"
           :aria-label="$t('signatureSettings.preview')"
           viewBox="0 0 1000 1000"
           preserveAspectRatio="none"
-          class="h-32 w-full text-foreground"
+          class="mx-auto block w-full max-w-sm text-foreground"
+          :style="{ aspectRatio: signaturePadAspectRatio }"
         >
           <polyline
             v-for="(path, index) in selected.paths"
@@ -320,7 +336,9 @@ onBeforeUnmount(() => {
     </UiDialog>
     <UiDialog
       :open="drawing"
-      :title="$t('signatureSettings.draw')"
+      :title="$t('signatureSettings.add')"
+      size="wide"
+      class="!max-w-3xl"
       :close-label="$t('actions.close')"
       :dismissible="!busy"
       @close="closeDrawing"
@@ -339,23 +357,7 @@ onBeforeUnmount(() => {
           :disabled="busy"
           autofocus
         />
-        <SettingsSignaturePad v-model="strokes" :disabled="busy" />
-        <div class="flex flex-wrap justify-end gap-2">
-          <UiButton
-            type="button"
-            variant="ghost"
-            :disabled="busy || !strokes.length"
-            @click="strokes = strokes.slice(0, -1)"
-            >{{ $t("signatureSettings.undo") }}</UiButton
-          >
-          <UiButton
-            type="button"
-            variant="secondary"
-            :disabled="busy || !strokes.length"
-            @click="strokes = []"
-            >{{ $t("signatureSettings.clear") }}</UiButton
-          >
-        </div>
+        <SettingsSignatureMarkEditor v-model="payload" :disabled="busy" />
         <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
       </form>
       <template #footer>
@@ -366,7 +368,7 @@ onBeforeUnmount(() => {
           type="submit"
           :form="drawingForm"
           :loading="busy"
-          :disabled="!label.trim() || !strokes.length"
+          :disabled="!label.trim() || !payload"
           >{{ $t("signatureSettings.save") }}</UiButton
         >
       </template>

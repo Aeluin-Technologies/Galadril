@@ -74,6 +74,9 @@ fn validate_trace(trace: &str) -> Result<()> {
         trace.len() <= MAX_TRACE_BYTES,
         "Signature trace is too large"
     );
+    if trace.trim_start().starts_with('{') {
+        return validate_signature_image(trace);
+    }
     let strokes: Vec<Vec<[u16; 2]>> = serde_json::from_str(trace)
         .map_err(|_| anyhow::anyhow!("Invalid signature trace"))?;
     ensure!(
@@ -88,6 +91,36 @@ fn validate_trace(trace: &str) -> Result<()> {
                         .all(|coordinate| *coordinate <= 1000)
             }),
         "Invalid signature trace"
+    );
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignatureImage<'a> {
+    png: &'a str,
+}
+
+fn validate_signature_image(payload: &str) -> Result<()> {
+    let image: SignatureImage<'_> = serde_json::from_str(payload)
+        .map_err(|_| anyhow::anyhow!("Invalid signature image"))?;
+    ensure!(
+        valid_b64(image.png, 44, MAX_TRACE_BYTES),
+        "Invalid signature image"
+    );
+    let png = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(image.png)
+        .map_err(|_| anyhow::anyhow!("Invalid signature image"))?;
+    let dimension = |offset| {
+        let bytes = png.get(offset..offset + 4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(bytes))
+    };
+    ensure!(
+        png.len() >= 33 &&
+            png.starts_with(b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR") &&
+            dimension(16).is_some_and(|n| (1..=640).contains(&n)) &&
+            dimension(20).is_some_and(|n| (1..=640).contains(&n)),
+        "Invalid signature image"
     );
     Ok(())
 }
@@ -315,6 +348,19 @@ mod tests {
             assert!(validate_trace(trace).is_err());
         }
         assert!(validate_trace("[[[0,0],[1000,1000]]]").is_ok());
+    }
+
+    #[test]
+    fn accepts_a_bounded_png_and_rejects_other_image_payloads() {
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8_x8AAwMCAO-jh2sAAAAASUVORK5CYII";
+        assert!(validate_trace(&format!(r#"{{"png":"{png}"}}"#)).is_ok());
+        for payload in [
+            r#"{"png":"PHN2Zy8-"}"#,
+            r#"{"png":"data:image/png;base64,test"}"#,
+            r#"{"png":"iVBORw0KGgoAAAANSUhEUv____8AAAAB"}"#,
+        ] {
+            assert!(validate_trace(payload).is_err());
+        }
     }
 
     #[test]

@@ -9,11 +9,8 @@ import {
   createSigningVault,
   unlockSigningKey,
 } from "../app/utils/signing-vault.ts";
-import {
-  inspectSigningFields,
-  parseSigningTrace,
-  signPdf,
-} from "../app/utils/pdf-signing.ts";
+import { inspectSigningFields, signPdf } from "../app/utils/pdf-signing.ts";
+import { parseSignatureInk } from "../app/utils/signature-ink.ts";
 import {
   assertSignedPdf,
   compileSigningPdf,
@@ -54,6 +51,96 @@ test("password and PRF unlock the same non-exportable signing key", async () => 
   );
 });
 
+test("an imported PNG is included in the signed widget appearance", async () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jh2sAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const pdf = PDF.create();
+  pdf.addPage();
+  const original = await pdf.save();
+  const vault = await createSigningVault(scope, password);
+  const key = await unlockSigningKey(scope, vault, { password });
+  const signed = await signPdf(original, vault, key, {
+    field: "",
+    ...parseSignatureInk(JSON.stringify({ png: png.toString("base64url") })),
+    placement: { page: 0, rect: [30, 30, 166, 64] },
+  });
+  assert.deepEqual(signed.subarray(0, original.length), original);
+  const result = await PDF.load(signed);
+  const field = result.getForm()?.getSignatureFields()[0];
+  const appearance = field?.getWidgets()[0]?.getNormalAppearance();
+  assert.ok(field?.isSigned() && appearance);
+  const commands = new TextDecoder().decode(appearance.getDecodedData());
+  assert.match(commands, /([\d.]+) 0 0 \1 [\d.]+ [\d.]+ cm \/Mark Do/);
+});
+
+test("signature ink keeps its shape and fills the available field", async () => {
+  const pdf = PDF.create();
+  pdf.addPage();
+  const original = await pdf.save();
+  const vault = await createSigningVault(scope, password);
+  const key = await unlockSigningKey(scope, vault, { password });
+  for (const { trace, rect, expectedRatio, minimumSpan } of [
+    {
+      trace: [
+        [
+          [480, 200],
+          [520, 700],
+        ],
+      ],
+      rect: [30, 30, 166, 64],
+      expectedRatio: 0.16,
+      minimumSpan: 18,
+    },
+    {
+      trace: [
+        [
+          [480, 200],
+          [520, 700],
+        ],
+      ],
+      rect: [30, 30, 166, 156],
+      expectedRatio: 0.16,
+      minimumSpan: 95,
+    },
+    {
+      trace: [
+        [
+          [300, 400],
+          [650, 460],
+        ],
+      ],
+      rect: [30, 30, 166, 64],
+      expectedRatio: 700 / 60,
+      minimumSpan: 130,
+    },
+  ] as const) {
+    const signed = await signPdf(original, vault, key, {
+      field: "",
+      trace,
+      placement: { page: 0, rect },
+      caption: ["Electronically signed by Alice", "On 12 November"],
+    });
+    const result = await PDF.load(signed);
+    const appearance = result
+      .getForm()
+      ?.getSignatureFields()[0]
+      ?.getWidgets()[0]
+      ?.getNormalAppearance();
+    assert.ok(appearance);
+    const path = new TextDecoder().decode(appearance.getDecodedData());
+    const start = path.match(/^([\d.]+) ([\d.]+) m$/m);
+    const end = path.match(/^([\d.]+) ([\d.]+) l$/m);
+    assert.ok(start && end);
+    const width = Math.abs(Number(end[1]) - Number(start[1]));
+    const height = Math.abs(Number(end[2]) - Number(start[2]));
+    assert.ok(Math.abs(width / height - expectedRatio) < 0.01, path);
+    assert.ok(Math.max(width, height) >= minimumSpan, path);
+    assert.ok(Number(path.match(/^([\d.]+) w$/m)?.[1]) >= 0.4, path);
+  }
+});
+
 for (const visible of [true, false]) {
   test(
     `Tectonic PDF is signed with ${visible ? "a visible" : "an invisible"} field`,
@@ -77,7 +164,7 @@ for (const visible of [true, false]) {
           visible
             ? {
                 field: "galadril:claimant",
-                trace: parseSigningTrace(JSON.stringify(signingTrace)),
+                ...parseSignatureInk(JSON.stringify(signingTrace)),
               }
             : null,
         );
@@ -90,7 +177,7 @@ for (const visible of [true, false]) {
         } as const;
         const placed = await signPdf(original, vault, key, {
           field: visible ? "galadril:claimant" : "",
-          trace: parseSigningTrace(JSON.stringify(signingTrace)),
+          ...parseSignatureInk(JSON.stringify(signingTrace)),
           placement,
           caption: ["Electronically signed by Alice", "On 12 November"],
         });

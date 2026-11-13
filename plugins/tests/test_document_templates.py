@@ -14,6 +14,72 @@ from galadril_plugins import PluginRegistry
 
 
 class PackagedTemplatesTest(unittest.TestCase):
+    @unittest.skipUnless(
+        shutil.which("tectonic") and shutil.which("qpdf"),
+        "Requires Tectonic and qpdf",
+    )
+    def test_packaged_filings_compile_with_a_native_signature_field(
+        self,
+    ) -> None:
+        sources = Path(galadril_plugins.__file__).parent / "law" / "latex"
+        for draft, field in (
+            ("courrier", "galadril:sender"),
+            ("memoire", "galadril:claimant"),
+            ("requete", "galadril:claimant"),
+        ):
+            with (
+                self.subTest(draft=draft),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                shutil.copytree(sources, root, dirs_exist_ok=True)
+                (root / "information.tex").write_text("", encoding="utf-8")
+                (root / "draft.tex").write_text(
+                    rf"\input{{{draft}}}", encoding="utf-8"
+                )
+                subprocess.run(
+                    ["tectonic", "--only-cached", "--untrusted", "main.tex"],
+                    cwd=root,
+                    capture_output=True,
+                    check=True,
+                    timeout=60,
+                )
+                pdf = json.loads(
+                    subprocess.check_output(
+                        [
+                            "qpdf",
+                            "--json",
+                            "--json-key=acroform",
+                            "--json-key=qpdf",
+                            root / "main.pdf",
+                        ],
+                        timeout=30,
+                    )
+                )
+                fields = pdf["acroform"]["fields"]
+                self.assertEqual(
+                    [
+                        (item["fullname"], item["fieldtype"], item["value"])
+                        for item in fields
+                    ],
+                    [(field, "/Sig", None)],
+                )
+                pages = int(
+                    subprocess.check_output(
+                        ["qpdf", "--show-npages", root / "main.pdf"], timeout=30
+                    )
+                )
+                self.assertEqual(
+                    fields[0]["pageposfrom1"],
+                    pages if draft == "courrier" else pages - 1,
+                )
+                widget = pdf["qpdf"][1][
+                    "obj:" + fields[0]["annotation"]["object"]
+                ]
+                left, bottom, right, top = widget["value"]["/Rect"]
+                self.assertAlmostEqual(right - left, 136, places=2)
+                self.assertAlmostEqual(top - bottom, 64, places=2)
+
     def test_pengolo_receives_the_legal_method_and_reference_material(
         self,
     ) -> None:
