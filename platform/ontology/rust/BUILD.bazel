@@ -55,6 +55,9 @@ rust_test(
 rust_doc_test(
     name = "ontology_doc_test",
     crate = ":ontology",
+    # The referenced rlib selects plugin LTO, but rustdoc links executables.
+    # Keep ThinLTO in rustc rather than passing LLVM bitcode to GCC/BFD.
+    rustdoc_flags = ["-Clinker-plugin-lto=no"],
 )
 
 rust_test(
