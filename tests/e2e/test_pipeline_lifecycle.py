@@ -1202,27 +1202,32 @@ async def _run_gateway_upload_lifecycle() -> None:
                 )
                 head_revision = _string(bound, "bindGolOntology")
 
-            published_data = await gateway.execute(
-                uploader_token,
-                """
-                mutation PublishPipeline(
-                  $pipelineId: String!, $revisionId: String!
-                ) {
-                  publishPipeline(
-                    pipelineId: $pipelineId,
-                    revisionId: $revisionId
-                  ) { pipelineId headRevisionId publishedRevisionId }
-                }
-                """,
-                {"pipelineId": PIPELINE_ID, "revisionId": head_revision},
+            # Binding GOL puts the pipeline under Registry's authoring workflow.
+            for operation in ("approve", "publish", "deploy"):
+                published_data = await gateway.execute(
+                    uploader_token,
+                    """
+                    mutation Author($id:String!,$definition:JSON!,$command:JSON!,$head:String!) {
+                      authorPipeline(pipelineId:$id,name:$id,definition:$definition,
+                        command:$command,expectedHeadRevisionId:$head,
+                        message:"Deploy deterministic GOL pipeline") {
+                        pipelineId headRevisionId publishedRevisionId lifecycle
+                      }
+                    }
+                    """,
+                    {
+                        "id": PIPELINE_ID,
+                        "definition": json.dumps(_pipeline()),
+                        "command": json.dumps({"operation": operation}),
+                        "head": head_revision,
+                    },
+                )
+                published_pipeline = _field(published_data, "authorPipeline")
+                head_revision = _string(published_pipeline, "headRevisionId")
+            assert published_pipeline.get("lifecycle") == "deployed"
+            published_revision = _string(
+                published_pipeline, "publishedRevisionId"
             )
-            published_pipeline = _field(published_data, "publishPipeline")
-            published_revision = head_revision
-            assert (
-                published_pipeline.get("publishedRevisionId")
-                == published_revision
-            )
-            head_revision = _string(published_pipeline, "headRevisionId")
             assert head_revision != published_revision
             runtime_definition = await registry.get_runtime_pipeline(
                 published_revision

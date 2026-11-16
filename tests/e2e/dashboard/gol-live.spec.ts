@@ -58,12 +58,13 @@ function cookies(value: unknown): Parameters<BrowserContext["addCookies"]>[0] {
       throw new Error("Invalid session cookie policy");
     if (
       typeof value.httpOnly !== "boolean" ||
-      typeof value.secure !== "boolean"
+      typeof value.secure !== "boolean" ||
+      typeof value.value !== "string"
     )
       throw new Error("Invalid session cookie flags");
     return {
       name: text(value.name),
-      value: text(value.value),
+      value: value.value,
       url: text(value.url),
       sameSite,
       httpOnly: value.httpOnly,
