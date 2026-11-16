@@ -1,0 +1,16 @@
+--- a/rust/private/rustdoc.bzl
++++ b/rust/private/rustdoc.bzl
+@@ -31,1 +31,1 @@
+-def _strip_crate_info_output(crate_info):
++def _strip_crate_info_output(crate_info, is_test = False):
+@@ -35,1 +35,2 @@
+         crate_info (CrateInfo): A provider
++        is_test (bool): Whether rustdoc will link executable doctests.
+@@ -42,1 +43,3 @@
+-        type = crate_info.type,
++        # Doctests need native objects; rlib-only plugin LTO would hand LLVM
++        # bitcode to the system linker instead of running LTO inside rustc.
++        type = "bin" if is_test else crate_info.type,
+@@ -143,1 +146,1 @@
+-    rustdoc_crate_info = _strip_crate_info_output(crate_info)
++    rustdoc_crate_info = _strip_crate_info_output(crate_info, is_test = is_test)

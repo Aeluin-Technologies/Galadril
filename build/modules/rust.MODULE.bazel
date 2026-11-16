@@ -4,7 +4,10 @@ bazel_dep(name = "rules_rust", version = "0.71.3")
 single_version_override(
     module_name = "rules_rust",
     version = "0.71.3",
-    patches = ["//build/patches:rules_rust_dep_env_producer.patch"],
+    patches = [
+        "//build/patches:rules_rust_dep_env_producer.patch",
+        "//build/patches:rules_rust_doctest_lto.patch",
+    ],
     patch_strip = 1,
 )
 

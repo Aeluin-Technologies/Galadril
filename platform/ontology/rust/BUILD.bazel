@@ -1,6 +1,7 @@
 load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build:rustdoc_lto_test.bzl", "rustdoc_lto_test")
 
 rust_library(
     name = "ontology",
@@ -55,9 +56,11 @@ rust_test(
 rust_doc_test(
     name = "ontology_doc_test",
     crate = ":ontology",
-    # The referenced rlib selects plugin LTO, but rustdoc links executables.
-    # Keep ThinLTO in rustc rather than passing LLVM bitcode to GCC/BFD.
-    rustdoc_flags = ["-Clinker-plugin-lto=no"],
+)
+
+rustdoc_lto_test(
+    name = "rustdoc_lto_test",
+    target_under_test = ":ontology_doc_test",
 )
 
 rust_test(
