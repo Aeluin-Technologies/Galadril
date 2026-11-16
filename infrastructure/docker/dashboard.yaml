@@ -64,7 +64,7 @@ services:
       GOL_ARTIFACT_BUCKET: ontology-artifacts
       GOL_AUTHORITY_CONFIG_PATH: /etc/galadril/gol-authorities.json
       GOL_RUNTIME_CONFIG_PATH: /etc/galadril/gol-runtime.json
-      GOL_EFFECT_KEY_PATH: ${GOL_EFFECT_KEY_PATH:-/run/secrets/gol-effect-key}
+      GOL_EFFECT_KEY_PATH: /run/secrets/gol-effect-key
       UTILS_SERVICE_URL: http://127.0.0.1:8095
       UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       AUTH_LOCAL_LOGIN_ENABLED: ${AUTH_LOCAL_LOGIN_ENABLED:-false}

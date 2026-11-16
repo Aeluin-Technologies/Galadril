@@ -5,6 +5,7 @@
 pub mod authoring;
 mod authoring_service;
 pub mod composition;
+pub mod deployment_file;
 pub mod domain;
 pub mod gol;
 pub mod gol_service;

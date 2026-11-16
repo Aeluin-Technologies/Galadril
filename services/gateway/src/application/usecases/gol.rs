@@ -27,6 +27,7 @@ use galadril_ontology::export::{
 use galadril_ontology::{
     FieldKind, Name, QualifiedName, Reference, SymbolKind, SymbolRef, TypeRef,
 };
+use galadril_registry::deployment_file::DeploymentFile;
 use galadril_registry::gol::{GolAuthorityConfig, registered_json_mappings};
 use galadril_registry::grpc::RegistryClient;
 use serde::{Deserialize, Serialize};
@@ -122,16 +123,18 @@ impl GolService {
         spicedb_endpoint: &str,
         spicedb_token: &str,
     ) -> Result<Self> {
-        let authority = std::env::var("GOL_AUTHORITY_CONFIG_PATH").ok();
-        let profile = std::env::var("GOL_RUNTIME_CONFIG_PATH").ok();
+        let authority = std::env::var_os("GOL_AUTHORITY_CONFIG_PATH");
+        let profile = std::env::var_os("GOL_RUNTIME_CONFIG_PATH");
         let bucket = std::env::var("GOL_ARTIFACT_BUCKET").ok();
         let backend = match (authority, profile, bucket) {
             (None, None, None) => None,
             (Some(authority), Some(profile), Some(bucket)) => {
-                let authority: GolAuthorityConfig =
-                    read_config(Path::new(&authority))?;
+                let authority: GolAuthorityConfig = read_config(
+                    DeploymentFile::Authority,
+                    Path::new(&authority),
+                )?;
                 let profile: RuntimeProfile =
-                    read_config(Path::new(&profile))?;
+                    read_config(DeploymentFile::Runtime, Path::new(&profile))?;
                 ensure!(
                     !profile.issuer.is_empty() && !bucket.is_empty(),
                     "Incomplete GOL runtime configuration"
@@ -170,14 +173,19 @@ impl GolService {
                     client,
                     bucket,
                     raw_bucket: storage.bucket.clone(),
-                    worker_key: deployment_key("GOL_WORKER_KEY_PATH")?.map(
-                        |key| {
-                            ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &key)
-                        },
-                    ),
-                    signer: deployment_key("GOL_EFFECT_KEY_PATH")?
-                        .map(|key| receipts::ReceiptSigner::new(&key))
-                        .transpose()?,
+                    worker_key: deployment_key(
+                        "GOL_WORKER_KEY_PATH",
+                        DeploymentFile::WorkerKey,
+                    )?
+                    .map(|key| {
+                        ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &key)
+                    }),
+                    signer: deployment_key(
+                        "GOL_EFFECT_KEY_PATH",
+                        DeploymentFile::EffectKey,
+                    )?
+                    .map(|key| receipts::ReceiptSigner::new(&key))
+                    .transpose()?,
                     provider,
                     stores: RwLock::new(BTreeMap::new()),
                 })
@@ -593,12 +601,14 @@ impl GolDisclosure for GolService {
     }
 }
 
-fn read_config<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= 1024 * 1024,
-        "GOL configuration exceeds limit"
-    );
-    serde_json::from_slice(&std::fs::read(path)?)
+fn read_config<T: serde::de::DeserializeOwned>(
+    kind: DeploymentFile,
+    path: &Path,
+) -> Result<T> {
+    let bytes = kind
+        .read(path)
+        .context("GOL deployment configuration unavailable")?;
+    serde_json::from_slice(&bytes)
         .context("Invalid GOL deployment configuration")
 }
 
@@ -731,15 +741,12 @@ fn type_name(
 
 /// Read only deployment-owned exact-size keys; missing keys disable worker
 /// authority.
-fn deployment_key(name: &str) -> Result<Option<[u8; 32]>> {
-    match std::env::var(name) {
-        Ok(path) => {
-            galadril_registry::grpc::read_gateway_key(Path::new(&path))
-                .map(Some)
-        },
-        Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(error) => {
-            Err(error).context("Invalid GOL credential configuration")
-        },
-    }
+fn deployment_key(
+    name: &str,
+    kind: DeploymentFile,
+) -> Result<Option<[u8; 32]>> {
+    std::env::var_os(name)
+        .map(|path| kind.read_key(Path::new(&path)))
+        .transpose()
+        .context("GOL deployment credential unavailable")
 }

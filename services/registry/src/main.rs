@@ -202,12 +202,9 @@ async fn main() -> Result<()> {
         let artifact_client = store.artifact_client();
         let mut registry = Registry::new(store);
         if let Some(gol) = config.gol {
-            let bytes = std::fs::read(&gol.authority_path)
+            let bytes = galadril_registry::deployment_file::DeploymentFile::Authority
+                .read(std::path::Path::new(&gol.authority_path))
                 .context("approved GOL authority configuration unavailable")?;
-            ensure!(
-                bytes.len() <= 1024 * 1024,
-                "approved GOL authority configuration exceeds byte budget"
-            );
             let authority: GolAuthorityConfig = serde_json::from_slice(&bytes)
                 .context("approved GOL authority configuration invalid")?;
             let metadata = metadata::SpiceDbMetadata::connect(
@@ -234,9 +231,8 @@ async fn main() -> Result<()> {
             std::env::var_os("REGISTRY_GATEWAY_KEY_PATH")
         {
             service.with_gateway_key(
-                &galadril_registry::grpc::read_gateway_key(
-                    std::path::PathBuf::from(path),
-                )?,
+                &galadril_registry::deployment_file::DeploymentFile::RegistryKey
+                    .read_key(std::path::Path::new(&path))?,
             )?
         } else {
             tracing::warn!(

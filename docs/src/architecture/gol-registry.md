@@ -139,6 +139,11 @@ two deployments. Runtime effect receipts use a separate `gol-effect-key` secret;
 an absent effect key disables effects without granting a read bypass. Do not
 reuse either key as a SpiceDB credential.
 
+The services accept only their documented container mount paths for GOL
+configuration and credentials. Change the host-side mount source to select a
+different file. The mount remains read-only inside the container, including
+for Kubernetes projected volumes that rotate files through symlinks.
+
 Gateway and Vision additionally share a separate 32-byte workload key via
 `GOL_WORKER_KEY_PATH`. Docker uses `GALADRIL_GOL_WORKER_KEY_PATH`; Kubernetes
 expects `gol-worker-key` with a `worker-key` entry. Only Gateway and Vision mount

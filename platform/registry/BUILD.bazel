@@ -2,6 +2,12 @@ load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_test(
+    name = "deployment_file_test",
+    srcs = ["src/deployment_file.rs", "tests/deployment_file.rs"],
+    crate_root = "tests/deployment_file.rs",
+)
+
+rust_test(
     name = "composition_test",
     srcs = ["tests/composition.rs"],
     deps = [":registry"] + all_crate_deps(

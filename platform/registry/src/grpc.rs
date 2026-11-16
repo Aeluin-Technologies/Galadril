@@ -50,25 +50,6 @@ impl tonic::service::Interceptor for GatewayCredential {
     }
 }
 
-/// Reads a fixed-size key without allocating for arbitrary local file
-/// contents.
-pub fn read_gateway_key(
-    path: impl AsRef<std::path::Path>,
-) -> Result<[u8; 32]> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path)
-        .context("Registry Gateway credential unavailable")?;
-    let mut key = [0u8; 32];
-    file.read_exact(&mut key)
-        .context("Registry Gateway credential must contain 32 bytes")?;
-    let mut extra = [0u8; 1];
-    ensure!(
-        file.read(&mut extra)? == 0,
-        "Registry Gateway credential must contain 32 bytes"
-    );
-    Ok(key)
-}
-
 fn encode_gateway_key(key: &[u8]) -> Result<String> {
     use std::fmt::Write;
     ensure!(
@@ -142,7 +123,8 @@ impl RegistryClientConfig {
                 .map(std::path::PathBuf::from)
         });
         if let Some(path) = path {
-            let key = read_gateway_key(path)?;
+            let key = crate::deployment_file::DeploymentFile::RegistryKey
+                .read_key(&path)?;
             client = registry_client_with_key(&self.endpoint, &key)?;
         }
         Ok(client)
