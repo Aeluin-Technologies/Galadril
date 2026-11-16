@@ -1,5 +1,6 @@
 load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 rust_library(
     name = "ontology",
@@ -147,3 +148,9 @@ rust_test(
     deps = [":ontology"] + crate_deps(["cedar-policy", "serde_json", "sha2", "tempfile", "tokio", "tracing"]),
 )
 
+sh_test(
+    name = "ifc_verus_test",
+    srcs = ["tests/verify_ifc.sh"],
+    data = ["proofs/ifc.rs", "src/authorization/kernel.rs"],
+    tags = ["local", "manual", "requires-verus"],
+)

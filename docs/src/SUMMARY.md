@@ -41,6 +41,7 @@
   - [GOL Source Grammar](architecture/gol_grammar.md)
   - [GOL Semantic Analysis](architecture/gol_semantics.md)
   - [GOL Security Contracts](architecture/gol_security.md)
+  - [Contextual IFC and Verus](architecture/gol_ifc.md)
   - [GOLC Local Archives](architecture/gol_archive.md)
   - [Remote GOLC Publication and Reads](architecture/gol_remote.md)
   - [Authorized GOL JSON Contracts](architecture/gol_export.md)
