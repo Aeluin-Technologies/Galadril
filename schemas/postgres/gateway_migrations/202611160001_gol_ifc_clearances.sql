@@ -1,5 +1,5 @@
 -- Explicit ceilings belong to a trusted authority, independently of IAM roles.
-CREATE TABLE iam_ifc_clearances (
+CREATE TABLE IF NOT EXISTS iam_ifc_clearances (
     tenant_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     classification SMALLINT NOT NULL CHECK (classification BETWEEN 0 AND 3),
@@ -16,6 +16,7 @@ CREATE TABLE iam_ifc_clearances (
 
 ALTER TABLE iam_ifc_clearances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE iam_ifc_clearances FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON iam_ifc_clearances;
 CREATE POLICY tenant_isolation ON iam_ifc_clearances
     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), ''));
