@@ -353,7 +353,9 @@ where
             .context("pipeline unavailable")?;
         pipeline.deleted_at_ms = Some(Utc::now().timestamp_millis());
         pipeline.published_revision_id = None;
-        state.bindings.retain(|_,binding|binding.pipeline_id!=pipeline_id);
+        state
+            .bindings
+            .retain(|_, binding| binding.pipeline_id != pipeline_id);
         self.store
             .commit(
                 tenant_id,
