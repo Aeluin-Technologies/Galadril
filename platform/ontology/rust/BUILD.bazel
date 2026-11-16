@@ -1,0 +1,18 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_test")
+
+rust_library(
+    name = "ontology",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/archive.rs", "src/authorization.rs", "src/export.rs"]),
+    compile_data = ["src/syntax/gol.pest"],
+    crate_features = ["parser"],
+    crate_name = "galadril_ontology",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(name = "canonical_test", srcs = ["tests/canonical.rs"], deps = [":ontology"])
+rust_test(name = "syntax_test", srcs = ["tests/syntax.rs"], compile_data = glob(["tests/fixtures/*.gol"]), deps = [":ontology"])
+rust_test(name = "semantic_test", srcs = ["tests/semantic.rs"], compile_data = glob(["tests/fixtures/semantic_*.gol"]), deps = [":ontology"])
+rust_doc_test(name = "ontology_doc_test", crate = ":ontology")

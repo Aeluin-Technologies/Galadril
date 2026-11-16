@@ -1,0 +1,12 @@
+ontology communication.attachment version "1.0.0" {
+    import communication.mail::Message as Parent;
+    entity Attachment {
+        field message: Ref<Parent>;
+        field size: u64;
+    }
+    relation Included {
+        role attachment: Attachment [1..1];
+        role message: Parent [1..1];
+    }
+    invariant ValidSize on Attachment { size >= 0 }
+}

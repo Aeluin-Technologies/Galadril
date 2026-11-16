@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "platform/telemetry",
+    "platform/ontology/rust",
     "platform/registry",
     "platform/document-compiler",
     "services/intake",

@@ -1,0 +1,27 @@
+[package]
+name = "galadril-ontology"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["parser"]
+parser = ["dep:miette", "dep:pest", "dep:pest_derive"]
+archive = ["dep:serde", "semver/serde"]
+
+[dependencies]
+miette = { version = "7", default-features = false, optional = true }
+pest = { version = "2", optional = true }
+pest_derive = { version = "2", optional = true }
+semver = "1"
+serde = { version = "1", features = ["derive", "rc"], optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[[test]]
+name = "syntax"
+required-features = ["parser"]
+
+[[test]]
+name = "semantic"
+required-features = ["parser"]
