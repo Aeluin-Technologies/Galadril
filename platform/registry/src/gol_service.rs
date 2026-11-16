@@ -356,6 +356,10 @@ impl<S: RevisionStore> Registry<S> {
         limit: usize,
     ) -> Result<Vec<GolSummary>> {
         ensure!(crate::storage::valid_tenant(tenant), "invalid tenant ID");
+        // First-time browsing must not create a lakeFS repository.
+        if !self.store.tenant_exists(tenant).await? {
+            return Ok(Vec::new());
+        }
         let snapshot = self.store.load(tenant, None).await?;
         let mut result = Vec::with_capacity(
             snapshot.state.ontologies.len().min(limit).min(100),

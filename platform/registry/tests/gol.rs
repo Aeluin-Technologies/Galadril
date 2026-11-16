@@ -6,6 +6,30 @@ use galadril_ontology::ExternalTypeRegistry;
 use galadril_ontology::semantic::Environment;
 use galadril_registry::gol::{GolFile, analyze_files, validate_files};
 
+#[tokio::test]
+async fn a_new_tenant_has_an_empty_catalog_without_provisioning_storage()
+-> anyhow::Result<()> {
+    use galadril_registry::domain::Registry;
+    use galadril_registry::storage::RevisionStore as _;
+
+    let store = memory::MemoryStore::default();
+    let registry = Registry::new(store.clone());
+    assert!(
+        registry
+            .list_gol_ontologies("tenant_a", 10)
+            .await?
+            .is_empty()
+    );
+    assert!(!store.tenant_exists("tenant_a").await?);
+    assert!(
+        registry
+            .list_gol_ontologies("../invalid", 10)
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
 #[test]
 fn metadata_grants_share_the_canonical_authorization_id_encoding() {
     use galadril_registry::gol::authorization_object_id;
