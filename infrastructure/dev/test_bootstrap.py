@@ -30,6 +30,18 @@ SOURCE = Path(__file__).resolve().parents[2]
 
 
 class BootstrapTest(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_root_volume_is_selected_by_verified_runtime_revision(
+        self,
+    ) -> None:
+        await self.bootstrap.initialize()
+        overlay = yaml.safe_load(
+            (self.bootstrap.state / "compose.yaml").read_text()
+        )
+        name = overlay["volumes"]["document-worker-root"]["name"]
+        self.assertIn("${DOCUMENT_COMPILER_RUNTIME_REVISION:?", name)
+        self.assertIn("${COMPOSE_PROJECT_NAME", name)
+        self.assertNotIn("document-compilation-queue", overlay["volumes"])
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)

@@ -89,11 +89,15 @@ The pinned distribution is Tectonic `tlextras-2022.0r0`. Packages outside that
 distribution must be supplied as authorized template assets. Updating the bundle
 requires a reviewed source checksum and compatibility validation.
 
-Compiler images are resolved to immutable registry digests. When deliberately
-changing worker images or bundles, stop the stack and recreate only its public
-`document-worker-root` volume before startup; the immutable installer rejects
-in-place replacement. This volume contains public runtime resources, not PDFs,
-templates or queue data. Keep persistent storage volumes when upgrading.
+Compiler images are resolved to immutable registry digests. The local CLI selects
+a public runtime volume from the pinned worker digest and verified bundle digest.
+An image or bundle update selects a new volume; an unchanged pair reuses its
+verified files. Older volumes are retained for rollback and can be removed
+explicitly once unused. The immutable installer still rejects in-place changes.
+These volumes contain public runtime resources, not PDFs, templates or queue data.
+Use the CLI `up` command to select the revision before invoking Compose directly.
+Standalone deployments using only the production Compose overlay retain their
+manual public-volume lifecycle. Keep persistent storage volumes when upgrading.
 
 The CLI supervises commands with asyncio, timeouts and cancellation. Application
 telemetry uses the existing OTLP collector. Set `GALADRIL_DEV_OTLP_ENDPOINT` to an

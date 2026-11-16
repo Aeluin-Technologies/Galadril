@@ -540,6 +540,15 @@ class Bootstrap:
             }
 
         overlay = {
+            "volumes": {
+                "document-worker-root": {
+                    "name": (
+                        "${COMPOSE_PROJECT_NAME:-galadril-dev}_document-worker-root-"
+                        "${DOCUMENT_COMPILER_RUNTIME_REVISION:?"
+                        "Run the Galadril dev up command to select a pinned worker runtime}"
+                    )
+                }
+            },
             "services": {
                 "api-proxy": {
                     "volumes": [
@@ -594,7 +603,7 @@ class Bootstrap:
                         ),
                     ],
                 },
-            }
+            },
         }
         services = mapping(overlay["services"])
         for name in (

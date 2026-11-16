@@ -82,6 +82,7 @@ class RuntimeTest(unittest.IsolatedAsyncioTestCase):
         bootstrap.environment.return_value = {
             "GALADRIL_DOCUMENT_COMPILER_IMAGE": "sha256:" + "a" * 64,
             "GALADRIL_DOCUMENT_WORKER_IMAGE": "sha256:" + "b" * 64,
+            "DOCUMENT_COMPILER_BUNDLE_SHA256": "c" * 64,
         }
         with patch(
             "infrastructure.dev.galadril_dev.runtime.run",
@@ -89,6 +90,56 @@ class RuntimeTest(unittest.IsolatedAsyncioTestCase):
         ) as execute:
             await pin_compiler_images(bootstrap, pull=False)
         execute.assert_not_awaited()
+        revision = bootstrap.update_environment.call_args.args[0][
+            "DOCUMENT_COMPILER_RUNTIME_REVISION"
+        ]
+        self.assertRegex(revision, r"^[0-9a-f]{64}$")
+        bootstrap.environment.return_value[
+            "DOCUMENT_COMPILER_RUNTIME_REVISION"
+        ] = revision
+        bootstrap.update_environment.reset_mock()
+        await pin_compiler_images(bootstrap, pull=False)
+        bootstrap.update_environment.assert_not_called()
+
+    async def test_worker_and_bundle_changes_select_separate_public_volumes(
+        self,
+    ) -> None:
+        async def select(worker: str, bundle: str) -> str:
+            bootstrap = unittest.mock.Mock()
+            bootstrap.environment.return_value = {
+                "GALADRIL_DOCUMENT_COMPILER_IMAGE": "sha256:" + "a" * 64,
+                "GALADRIL_DOCUMENT_WORKER_IMAGE": worker,
+                "DOCUMENT_COMPILER_BUNDLE_SHA256": bundle,
+            }
+            await pin_compiler_images(bootstrap, pull=False)
+            return bootstrap.update_environment.call_args.args[0][
+                "DOCUMENT_COMPILER_RUNTIME_REVISION"
+            ]
+
+        original = await select("sha256:" + "b" * 64, "c" * 64)
+        self.assertEqual(original, await select("sha256:" + "b" * 64, "c" * 64))
+        self.assertEqual(
+            original,
+            await select("registry.test/worker@sha256:" + "b" * 64, "c" * 64),
+        )
+        self.assertNotEqual(
+            original, await select("sha256:" + "d" * 64, "c" * 64)
+        )
+        self.assertNotEqual(
+            original, await select("sha256:" + "b" * 64, "d" * 64)
+        )
+
+    async def test_invalid_runtime_provenance_is_not_published(self) -> None:
+        bootstrap = unittest.mock.Mock()
+        bootstrap.environment.return_value = {
+            "GALADRIL_DOCUMENT_COMPILER_IMAGE": "sha256:" + "a" * 64,
+            "GALADRIL_DOCUMENT_WORKER_IMAGE": "registry.test/worker@sha256:invalid",
+            "DOCUMENT_COMPILER_BUNDLE_SHA256": "c" * 64,
+        }
+        from infrastructure.dev.galadril_dev.files import BootstrapError
+
+        with self.assertRaises(BootstrapError):
+            await pin_compiler_images(bootstrap, pull=False)
         bootstrap.update_environment.assert_not_called()
 
     async def test_subprocess_errors_redact_secrets_and_keep_exit_status(

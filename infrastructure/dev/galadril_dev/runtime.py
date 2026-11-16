@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import platform
 import re
@@ -10,6 +11,7 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
+from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .bootstrap import Bootstrap
@@ -177,8 +179,29 @@ async def pin_compiler_images(bootstrap: Bootstrap, *, pull: bool) -> None:
                 "Compiler image has no immutable registry digest; pull its published image first"
             )
         updates[name] = digest
+    worker = updates.get(
+        "GALADRIL_DOCUMENT_WORKER_IMAGE",
+        environment["GALADRIL_DOCUMENT_WORKER_IMAGE"],
+    )
+    revision = _runtime_revision(
+        worker, environment.get("DOCUMENT_COMPILER_BUNDLE_SHA256", "")
+    )
+    if environment.get("DOCUMENT_COMPILER_RUNTIME_REVISION") != revision:
+        updates["DOCUMENT_COMPILER_RUNTIME_REVISION"] = revision
+        trace.get_current_span().add_event("compiler.runtime.selected")
     if updates:
         bootstrap.update_environment(updates)
+
+
+def _runtime_revision(worker: str, bundle: str) -> str:
+    """Keep immutable runtime volumes separate across image or bundle updates."""
+    match = re.fullmatch(r"(?:[^@\s]+@)?sha256:([0-9a-f]{64})", worker)
+    if match is None or re.fullmatch(r"[0-9a-f]{64}", bundle) is None:
+        raise BootstrapError(
+            "A pinned worker and verified bundle digest are required"
+        )
+    material = "worker-rootfs-v1\0" + match.group(1) + "\0" + bundle
+    return hashlib.sha256(material.encode("ascii")).hexdigest()
 
 
 async def validate_host(bootstrap: Bootstrap) -> None:
