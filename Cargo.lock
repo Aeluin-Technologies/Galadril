@@ -2889,6 +2889,7 @@ dependencies = [
  "async-trait",
  "aws-sdk-s3",
  "chrono",
+ "galadril-ontology",
  "moka",
  "prost 0.14.4",
  "reqwest 0.12.28",
@@ -2896,10 +2897,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "subtle",
  "tokio",
  "tonic 0.14.7",
  "tonic-prost",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -6187,15 +6190,19 @@ name = "registry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "aws-sdk-s3",
  "config",
+ "galadril-ontology",
  "galadril-registry",
  "galadril-telemetry",
+ "loth",
  "mimalloc",
  "reqwest 0.12.28",
  "secrecy",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "testcontainers",
  "tokio",
  "tokio-stream",

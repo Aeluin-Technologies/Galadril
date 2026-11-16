@@ -14,6 +14,7 @@ rust_binary(
     visibility = ["//visibility:public"],
     deps = all_crate_deps(normal = True) + [
         "//platform/registry",
+        "//platform/ontology/rust:ontology",
         "//platform/telemetry",
     ],
 )
@@ -27,14 +28,17 @@ rust_test(
 rust_test(
     name = "storage_grpc_test",
     size = "large",
-    srcs = ["tests/storage_grpc.rs"],
+    srcs = ["tests/storage_grpc.rs", "src/metadata.rs"],
+    crate_root = "tests/storage_grpc.rs",
+    compile_data = ["//infrastructure/gol:configuration", "//schemas/spicedb:spicedb_contract"],
+    proc_macro_deps = all_crate_deps(proc_macro = True),
     exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     tags = [
         "integration",
         "no-sandbox",
         "requires-docker",
     ],
-    deps = ["//platform/registry"] + all_crate_deps(
+    deps = ["//platform/registry", "//platform/ontology/rust:ontology"] + all_crate_deps(
         normal = True,
         normal_dev = True,
     ),

@@ -17,13 +17,41 @@ rust_library(
     crate_name = "galadril_registry",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
-    deps = all_crate_deps(normal = True),
+    deps = ["//platform/ontology/rust:ontology"] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "grpc_security_test",
+    srcs = ["tests/grpc_security.rs", "tests/support/memory.rs"],
+    crate_root = "tests/grpc_security.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = [":registry"] + all_crate_deps(normal = True, normal_dev = True),
+)
+
+rust_test(
+    name = "gol_test",
+    srcs = ["tests/gol.rs", "tests/support/memory.rs"],
+    crate_root = "tests/gol.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = [":registry", "//platform/ontology/rust:ontology"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
+    name = "plugins_test",
+    srcs = ["tests/plugins.rs", "tests/support/memory.rs"],
+    crate_root = "tests/plugins.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    compile_data = ["//plugins:ontology_packages", "//infrastructure/gol:configuration", "//schemas/spicedb:spicedb_contract"],
+    deps = [":registry", "//platform/ontology/rust:ontology"] + all_crate_deps(normal = True, normal_dev = True),
 )
 
 rust_test(
     name = "registry_test",
-    compile_data = ["//plugins:ontology_packages"],
     crate = ":registry",
+    compile_data = ["tests/grpc_status.rs"],
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal_dev = True),
 )

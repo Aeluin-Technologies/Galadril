@@ -3,18 +3,11 @@
 use anyhow::{Context, Result, ensure};
 use chrono::Utc;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::semantics::{
-    MergeResult, PipelineBinding, SemanticChange, merge_ontology,
-    semantic_diff, slice_ontology, validate_ontology,
-    validate_ontology_selector, validate_pipeline,
-    validate_pipeline_structure,
+    PipelineBinding, validate_pipeline, validate_pipeline_structure,
 };
-use crate::state::{
-    OntologyBindingRecord, OntologyPublicationRecord, OntologyRecord,
-    PipelineRecord, TenantState,
-};
+use crate::state::{PipelineRecord, TenantState};
 use crate::storage::{
     RevisionStore, Snapshot, TenantPage, valid_revision, valid_tenant,
     validate_discovery_page,
@@ -62,49 +55,11 @@ pub struct PutPipeline<'a> {
     pub create_only: bool,
 }
 
-/// Input for optimistic ontology creation or replacement.
-pub struct PutOntology<'a> {
-    /// Gateway-authorized tenant identity.
-    pub tenant_id: &'a str,
-    /// Stable tenant-local ontology identity.
-    pub ontology_id: &'a str,
-    /// Human-readable ontology name.
-    pub display_name: &'a str,
-    /// Candidate ontology document.
-    pub ontology: Value,
-    /// Gateway-authenticated author identity.
-    pub author: &'a str,
-    /// Author-supplied revision message.
-    pub message: &'a str,
-    /// Required branch head for updates.
-    pub expected_revision_id: Option<&'a str>,
-    /// Whether an existing ontology must make the operation fail.
-    pub create_only: bool,
-}
-
-#[derive(Debug)]
-/// Ontology record paired with its immutable lakeFS revision.
-pub struct OntologyView {
-    /// Immutable revision containing the ontology record.
-    pub revision_id: String,
-    /// Validated ontology projection.
-    pub record: OntologyRecord,
-}
-
-#[derive(Debug)]
-/// Reconstructible block-local ontology view pinned to pipeline state.
-pub struct OntologySliceView {
-    /// Production publication found at the pipeline revision.
-    pub publication: OntologyPublicationRecord,
-    /// Pipeline block binding found at the pipeline revision.
-    pub binding: OntologyBindingRecord,
-    /// Validated ontology dependency closure.
-    pub ontology: Value,
-}
-
 /// Canonical Registry domain operations over a versioned storage backend.
 pub struct Registry<S> {
     pub(crate) store: S,
+    pub(crate) gol: Option<crate::gol_service::GolPublicationConfig>,
+    pub(crate) gol_locks: [tokio::sync::Mutex<()>; 64],
 }
 
 impl<S> Registry<S>
@@ -113,7 +68,11 @@ where
 {
     /// Creates a Registry using the supplied versioned storage boundary.
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store,
+            gol: None,
+            gol_locks: std::array::from_fn(|_| tokio::sync::Mutex::new(())),
+        }
     }
 
     /// Enumerates initialized tenants for authenticated runtime discovery.
@@ -394,6 +353,7 @@ where
             .context("pipeline unavailable")?;
         pipeline.deleted_at_ms = Some(Utc::now().timestamp_millis());
         pipeline.published_revision_id = None;
+        state.bindings.retain(|_,binding|binding.pipeline_id!=pipeline_id);
         self.store
             .commit(
                 tenant_id,
@@ -515,516 +475,6 @@ where
         }
         Ok(result)
     }
-
-    /// Validates the complete ontology graph and commits it atomically.
-    pub async fn put_ontology(
-        &self,
-        input: PutOntology<'_>,
-    ) -> Result<OntologyView> {
-        validate_identity(input.tenant_id, input.ontology_id)?;
-        ensure!(
-            !input.display_name.is_empty(),
-            "ontology display name is required"
-        );
-        ensure!(!input.author.is_empty(), "ontology author is required");
-        ensure!(!input.message.is_empty(), "ontology message is required");
-        validate_ontology(&input.ontology)?;
-        self.store.ensure_tenant(input.tenant_id).await?;
-        let snapshot = self.store.load(input.tenant_id, None).await?;
-        let mut state = snapshot.state;
-        let existing = state.ontologies.remove(input.ontology_id);
-        ensure!(
-            !input.create_only || existing.is_none(),
-            "ontology already exists"
-        );
-        ensure!(
-            input.create_only || existing.is_some(),
-            "ontology unavailable"
-        );
-        if let Some(expected) = input.expected_revision_id {
-            ensure!(snapshot.revision_id == expected, "ontology head changed");
-        } else {
-            ensure!(input.create_only, "expected revision ID is required");
-        }
-        let (mut authoring, publication, created_at_ms) = match existing {
-            Some(value) => {
-                ensure!(
-                    value.authoring.deleted_at_ms.is_none(),
-                    "ontology is deleted"
-                );
-                if let Some(origin) = value.ontology.get("plugin_origin") {
-                    ensure!(
-                        input.ontology.get("plugin_origin") == Some(origin),
-                        "ontology plugin provenance is immutable"
-                    );
-                }
-                (
-                    value.authoring,
-                    value.production_publication,
-                    value.created_at_ms,
-                )
-            },
-            None => (Default::default(), None, Utc::now().timestamp_millis()),
-        };
-        authoring.touch(
-            (!input.create_only).then(|| snapshot.revision_id.clone()),
-            "main",
-            "save_draft",
-            input.author,
-        );
-        let record = OntologyRecord {
-            authoring,
-            ontology_id: input.ontology_id.to_owned(),
-            display_name: input.display_name.to_owned(),
-            ontology: input.ontology,
-            author: input.author.to_owned(),
-            message: input.message.to_owned(),
-            created_at_ms,
-            production_publication: publication,
-        };
-        record.validate_workspace_size()?;
-        state
-            .ontologies
-            .insert(input.ontology_id.to_owned(), record);
-        let revision = self
-            .store
-            .commit(
-                input.tenant_id,
-                &snapshot.revision_id,
-                &state,
-                input.author,
-                input.message,
-            )
-            .await?;
-        let record = state
-            .ontologies
-            .remove(input.ontology_id)
-            .context("committed ontology missing from state")?;
-        Ok(OntologyView {
-            revision_id: revision,
-            record,
-        })
-    }
-
-    /// Reconstructs and revalidates an ontology at an immutable revision.
-    pub async fn ontology_at(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        revision_id: &str,
-    ) -> Result<OntologyView> {
-        validate_identity(tenant_id, ontology_id)?;
-        ensure!(valid_revision(revision_id), "invalid revision ID");
-        let mut snapshot =
-            self.store.load(tenant_id, Some(revision_id)).await?;
-        let record = snapshot
-            .state
-            .ontologies
-            .remove(ontology_id)
-            .context("ontology unavailable at revision")?;
-        validate_ontology(&record.ontology)?;
-        Ok(OntologyView {
-            revision_id: snapshot.revision_id,
-            record,
-        })
-    }
-
-    /// Loads and revalidates one ontology from the current branch head.
-    pub async fn current_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-    ) -> Result<OntologyView> {
-        validate_identity(tenant_id, ontology_id)?;
-        let mut snapshot = self.store.load(tenant_id, None).await?;
-        let record = snapshot
-            .state
-            .ontologies
-            .remove(ontology_id)
-            .context("ontology unavailable")?;
-        ensure!(
-            record.authoring.deleted_at_ms.is_none(),
-            "ontology unavailable"
-        );
-        validate_ontology(&record.ontology)?;
-        Ok(OntologyView {
-            revision_id: snapshot.revision_id,
-            record,
-        })
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "publication provenance is explicit"
-    )]
-    /// Publishes a previously validated immutable ontology revision.
-    pub async fn publish_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        display_name: &str,
-        publication_id: &str,
-        revision_id: &str,
-        metadata: Value,
-        create_only: bool,
-    ) -> Result<OntologyPublicationRecord> {
-        validate_identity(tenant_id, ontology_id)?;
-        ensure!(valid_identity(publication_id), "invalid publication ID");
-        let pinned = self
-            .ontology_at(tenant_id, ontology_id, revision_id)
-            .await?;
-        let current = self.store.load(tenant_id, None).await?;
-        let existing = current
-            .state
-            .ontologies
-            .get(ontology_id)
-            .context("ontology unavailable")?;
-        ensure!(
-            !create_only || existing.production_publication.is_none(),
-            "ontology already published"
-        );
-        let hash = content_hash(&pinned.record.ontology)?;
-        let version = pinned
-            .record
-            .ontology
-            .get("version")
-            .and_then(Value::as_str)
-            .context("ontology version missing")?;
-        let publication = OntologyPublicationRecord {
-            publication_id: publication_id.to_owned(),
-            revision_id: revision_id.to_owned(),
-            lifecycle: "production".to_owned(),
-            metadata,
-            base_version: version.to_owned(),
-            base_hash: hash.clone(),
-            effective_hash: hash,
-            author: pinned.record.author.clone(),
-            message: pinned.record.message.clone(),
-            published_at_ms: Utc::now().timestamp_millis(),
-            retired_at_ms: None,
-        };
-        let mut state = current.state;
-        let record = state
-            .ontologies
-            .get_mut(ontology_id)
-            .context("ontology unavailable")?;
-        ensure!(
-            record.authoring.deleted_at_ms.is_none() &&
-                pinned.record.authoring.deleted_at_ms.is_none(),
-            "ontology is deleted"
-        );
-        record.display_name = display_name.to_owned();
-        record.production_publication = Some(publication);
-        record.message = "Publish ontology".to_owned();
-        record.authoring.touch(
-            Some(current.revision_id.clone()),
-            "main",
-            "publish",
-            "registry",
-        );
-        self.store
-            .commit(
-                tenant_id,
-                &current.revision_id,
-                &state,
-                "registry",
-                "Publish ontology",
-            )
-            .await?;
-        state
-            .ontologies
-            .get_mut(ontology_id)
-            .and_then(|ontology| ontology.production_publication.take())
-            .context("committed ontology publication missing from state")
-    }
-
-    /// Retires the matching production ontology pointer atomically.
-    pub async fn retire_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        publication_id: &str,
-        revision_id: &str,
-    ) -> Result<String> {
-        validate_identity(tenant_id, ontology_id)?;
-        let snapshot = self.store.load(tenant_id, None).await?;
-        let mut state = snapshot.state;
-        let record = state
-            .ontologies
-            .get_mut(ontology_id)
-            .context("ontology unavailable")?;
-        let publication = record
-            .production_publication
-            .as_mut()
-            .context("ontology publication unavailable")?;
-        ensure!(
-            publication.publication_id == publication_id &&
-                publication.revision_id == revision_id &&
-                publication.lifecycle == "production",
-            "ontology publication changed"
-        );
-        publication.lifecycle = "retired".to_owned();
-        publication.retired_at_ms = Some(Utc::now().timestamp_millis());
-        record.message = "Retire ontology".to_owned();
-        record.authoring.touch(
-            Some(snapshot.revision_id.clone()),
-            "main",
-            "retire",
-            "registry",
-        );
-        self.store
-            .commit(
-                tenant_id,
-                &snapshot.revision_id,
-                &state,
-                "registry",
-                "Retire ontology",
-            )
-            .await
-    }
-
-    /// Lists current ontology catalog records without exposing history.
-    pub async fn list_ontologies(
-        &self,
-        tenant_id: &str,
-        limit: usize,
-    ) -> Result<Vec<OntologyRecord>> {
-        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
-        let snapshot = self.store.load(tenant_id, None).await?;
-        Ok(snapshot
-            .state
-            .ontologies
-            .into_values()
-            .filter(|record| record.authoring.deleted_at_ms.is_none())
-            .take(limit.min(100))
-            .collect())
-    }
-
-    /// Validates and commits one pipeline block ontology binding.
-    pub async fn put_binding(
-        &self,
-        tenant_id: &str,
-        expected_revision_id: &str,
-        binding: OntologyBindingRecord,
-    ) -> Result<(OntologyBindingRecord, String)> {
-        validate_identity(tenant_id, &binding.pipeline_id)?;
-        ensure!(valid_identity(&binding.block_id), "invalid block ID");
-        ensure!(valid_identity(&binding.ontology_id), "invalid ontology ID");
-        self.store.ensure_tenant(tenant_id).await?;
-        let snapshot = self.store.load(tenant_id, None).await?;
-        ensure!(
-            snapshot.revision_id == expected_revision_id,
-            "registry revision changed"
-        );
-        let pipeline = snapshot
-            .state
-            .pipelines
-            .get(&binding.pipeline_id)
-            .context("pipeline unavailable")?;
-        let block_exists = pipeline
-            .definition
-            .get("pipeline")
-            .and_then(Value::as_array)
-            .is_some_and(|steps| {
-                steps.iter().any(|step| {
-                    step.get("step").and_then(Value::as_str) ==
-                        Some(&binding.block_id)
-                })
-            });
-        ensure!(block_exists, "pipeline block unavailable");
-        self.validate_published_binding(tenant_id, &snapshot.state, &binding)
-            .await?;
-        let mut state = snapshot.state;
-        let key =
-            TenantState::binding_key(&binding.pipeline_id, &binding.block_id);
-        state.bindings.insert(key.clone(), binding);
-        let revision = self
-            .store
-            .commit(
-                tenant_id,
-                expected_revision_id,
-                &state,
-                "registry",
-                "Update ontology binding",
-            )
-            .await?;
-        let binding = state
-            .bindings
-            .remove(&key)
-            .context("committed binding missing from state")?;
-        Ok((binding, revision))
-    }
-
-    /// Shares production and selector invariants across atomic binding
-    /// commands.
-    pub(crate) async fn validate_published_binding(
-        &self,
-        tenant_id: &str,
-        state: &TenantState,
-        binding: &OntologyBindingRecord,
-    ) -> Result<()> {
-        ensure!(valid_identity(&binding.ontology_id), "invalid ontology ID");
-        let publication = state
-            .ontologies
-            .get(&binding.ontology_id)
-            .and_then(|ontology| ontology.production_publication.as_ref())
-            .filter(|publication| publication.lifecycle == "production")
-            .context("ontology is not published")?;
-        let published = self
-            .ontology_at(
-                tenant_id,
-                &binding.ontology_id,
-                &publication.revision_id,
-            )
-            .await?;
-        validate_ontology_selector(
-            &published.record.ontology,
-            &binding.resource_ids,
-            &binding.resource_kinds,
-        )
-    }
-
-    /// Lists current or revision-pinned ontology bindings.
-    pub async fn list_bindings(
-        &self,
-        tenant_id: &str,
-        pipeline_id: Option<&str>,
-        revision_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<OntologyBindingRecord>> {
-        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
-        if let Some(id) = pipeline_id {
-            ensure!(valid_identity(id), "invalid pipeline ID");
-        }
-        let snapshot = self.store.load(tenant_id, revision_id).await?;
-        Ok(snapshot
-            .state
-            .bindings
-            .into_values()
-            .filter(|binding| {
-                pipeline_id.is_none_or(|id| binding.pipeline_id == id)
-            })
-            .take(limit.min(100))
-            .collect())
-    }
-
-    /// Rebuilds a dependency-closed ontology slice at a pipeline revision.
-    pub async fn ontology_slice(
-        &self,
-        tenant_id: &str,
-        pipeline_id: &str,
-        pipeline_revision_id: &str,
-        block_id: &str,
-    ) -> Result<OntologySliceView> {
-        validate_identity(tenant_id, pipeline_id)?;
-        ensure!(valid_identity(block_id), "invalid block ID");
-        let mut snapshot = self
-            .store
-            .load(tenant_id, Some(pipeline_revision_id))
-            .await?;
-        ensure!(
-            snapshot.state.pipelines.contains_key(pipeline_id),
-            "pipeline unavailable at revision"
-        );
-        let binding = snapshot
-            .state
-            .bindings
-            .remove(&TenantState::binding_key(pipeline_id, block_id))
-            .context("ontology binding unavailable at revision")?;
-        let publication = snapshot
-            .state
-            .ontologies
-            .get_mut(&binding.ontology_id)
-            .and_then(|ontology| ontology.production_publication.take())
-            .filter(|publication| publication.lifecycle == "production")
-            .context("ontology publication unavailable at revision")?;
-        let ontology = self
-            .ontology_at(
-                tenant_id,
-                &binding.ontology_id,
-                &publication.revision_id,
-            )
-            .await?
-            .record
-            .ontology;
-        let sliced = slice_ontology(
-            &ontology,
-            &binding.resource_ids,
-            &binding.resource_kinds,
-            binding.include_dependencies,
-        )?;
-        Ok(OntologySliceView {
-            publication,
-            binding,
-            ontology: sliced,
-        })
-    }
-
-    /// Computes a canonical semantic diff between two immutable revisions.
-    pub async fn diff_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        base_revision_id: &str,
-        target_revision_id: &str,
-    ) -> Result<Vec<SemanticChange>> {
-        let base = self
-            .ontology_at(tenant_id, ontology_id, base_revision_id)
-            .await?;
-        let target = self
-            .ontology_at(tenant_id, ontology_id, target_revision_id)
-            .await?;
-        semantic_diff(&base.record.ontology, &target.record.ontology)
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "three-way merge provenance is explicit"
-    )]
-    /// Commits a conflict-free semantic merge without lakeFS file merging.
-    pub async fn merge_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        base_revision_id: &str,
-        left_revision_id: &str,
-        right_revision_id: &str,
-        expected_revision_id: &str,
-        author: &str,
-        message: &str,
-    ) -> Result<(MergeResult, Option<OntologyView>)> {
-        self.store.ensure_tenant(tenant_id).await?;
-        let base = self
-            .ontology_at(tenant_id, ontology_id, base_revision_id)
-            .await?;
-        let left = self
-            .ontology_at(tenant_id, ontology_id, left_revision_id)
-            .await?;
-        let right = self
-            .ontology_at(tenant_id, ontology_id, right_revision_id)
-            .await?;
-        let result = merge_ontology(
-            &base.record.ontology,
-            &left.record.ontology,
-            &right.record.ontology,
-        )?;
-        let Some(ontology) = result.ontology.as_ref() else {
-            return Ok((result, None));
-        };
-        let view = self
-            .put_ontology(PutOntology {
-                tenant_id,
-                ontology_id,
-                display_name: &left.record.display_name,
-                ontology: ontology.clone(),
-                author,
-                message,
-                expected_revision_id: Some(expected_revision_id),
-                create_only: false,
-            })
-            .await?;
-        Ok((result, Some(view)))
-    }
 }
 
 fn pipeline_from_snapshot(
@@ -1073,35 +523,14 @@ fn validate_pipeline_ontology_dependencies(
         .values()
         .filter(|binding| binding.pipeline_id == pipeline_id)
     {
-        let publication = state
-            .ontologies
-            .get(&binding.ontology_id)
-            .and_then(|ontology| ontology.production_publication.as_ref())
-            .filter(|publication| publication.lifecycle == "production");
-        ensure!(publication.is_some(), "unpublished ontology dependency");
+        ensure!(
+            !binding.generation.is_empty() &&
+                !binding.source_revision.is_empty() &&
+                !binding.symbols.is_empty(),
+            "unpublished GOL ontology dependency"
+        );
     }
     Ok(())
-}
-
-fn content_hash(value: &Value) -> Result<String> {
-    let canonical = canonicalize(value);
-    let payload = serde_json::to_vec(&canonical)?;
-    Ok(format!("{:x}", Sha256::digest(payload)))
-}
-
-fn canonicalize(value: &Value) -> Value {
-    match value {
-        Value::Object(object) => Value::Object(
-            object
-                .iter()
-                .map(|(key, value)| (key.clone(), canonicalize(value)))
-                .collect(),
-        ),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(canonicalize).collect())
-        },
-        _ => value.clone(),
-    }
 }
 
 pub(crate) fn validate_identity(

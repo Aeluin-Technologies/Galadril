@@ -10,7 +10,7 @@ use crate::authoring::{
     validate_draft, validate_executable,
 };
 use crate::domain::{PipelineView, PutPipeline, Registry};
-use crate::state::{OntologyBindingRecord, PipelineRecord, TenantState};
+use crate::state::{GolBindingRecord, PipelineRecord, TenantState};
 use crate::storage::{RevisionStore, valid_tenant};
 
 impl<S: RevisionStore> Registry<S> {
@@ -24,23 +24,16 @@ impl<S: RevisionStore> Registry<S> {
         block: &str,
         ontology: &str,
     ) -> Result<()> {
-        let binding = OntologyBindingRecord {
+        let mut binding = GolBindingRecord {
             pipeline_id: pipeline.pipeline_id.clone(),
             block_id: block.into(),
             ontology_id: ontology.into(),
-            resource_ids: vec![],
-            resource_kinds: vec![
-                "object_type".into(),
-                "event_type".into(),
-                "property".into(),
-                "link_type".into(),
-            ],
-            include_dependencies: true,
-            metadata: serde_json::json!({"source":"explicit_tenant_selection"}),
+            generation: String::new(),
+            source_revision: String::new(),
+            symbols: Vec::new(),
             updated_at_ms: Utc::now().timestamp_millis(),
         };
-        self.validate_published_binding(tenant, state, &binding)
-            .await?;
+        self.capture_gol_binding(tenant, &mut binding).await?;
         let step = pipeline
             .definition
             .get_mut("pipeline")

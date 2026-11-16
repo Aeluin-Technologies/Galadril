@@ -13,6 +13,7 @@ REQUIRED_RESOURCES = frozenset(
         "raw",
         "document",
         "ontology",
+        "gol_resource",
         "pipeline",
         "entity_state",
         "event",

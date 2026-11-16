@@ -24,6 +24,7 @@ from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from galadril_plugins.ontologies import GolPackageManifest
 from galadril_plugins.validation import compile_parameters, validate_parameters
 
 logger = structlog.get_logger(__name__)
@@ -124,14 +125,16 @@ class PluginManifest(BaseModel):
     capabilities: tuple[Capability, ...] = Field(max_length=128)
     bindings: dict[str, Binding] = Field(max_length=128)
     document_templates: tuple[str, ...] = Field(default=(), max_length=32)
-    ontologies: tuple[str, ...] = Field(default=(), max_length=32)
+    ontologies: tuple[GolPackageManifest, ...] = Field(
+        default=(), max_length=32
+    )
     services: dict[str, str | NativeService] = Field(
         default_factory=dict, max_length=16
     )
 
     @model_validator(mode="after")
     def coherent(self) -> PluginManifest:
-        for resource in (*self.document_templates, *self.ontologies):
+        for resource in self.document_templates:
             if (
                 not resource.endswith(".json")
                 or len(resource) > 192
@@ -708,35 +711,43 @@ class PluginRegistry:
 
     def ontology_packages(self) -> list[dict[str, JsonValue]]:
         """Reads bounded package data without importing plugin implementations."""
-        from .ontologies import OntologyPackage, resolve_ontology_packages
+        from .ontologies import GolSource, OntologyPackage
 
         result: list[dict[str, JsonValue]] = []
         identifiers: set[str] = set()
         total = 0
         for manifest in self._manifests.values():
-            packages: list[OntologyPackage] = []
-            for path in manifest.ontologies:
-                data = (
-                    files(f"galadril_plugins.{manifest.id}")
-                    .joinpath(path)
-                    .read_bytes()
-                )
-                total += len(data)
-                if total > 2 * 1024 * 1024 or len(result) >= 32:
-                    raise ValueError("Ontology package inventory exceeds limit")
-                packages.append(OntologyPackage.model_validate_json(data))
-            for view in resolve_ontology_packages(tuple(packages)):
-                if (
-                    len(result) >= 32
-                    or not view.id.startswith(manifest.id + ".")
-                    or view.id in identifiers
-                ):
+            for package in manifest.ontologies:
+                if len(result) >= 32 or package.id in identifiers:
                     raise ValueError("Invalid ontology package identity")
-                if not set(view.contracts).issubset(
+                if not set(package.contracts).issubset(
                     {item.id for item in manifest.capabilities}
                 ):
                     raise ValueError("Unknown ontology capability")
-                identifiers.add(view.id)
+                sources: list[GolSource] = []
+                for path in package.files:
+                    data = (
+                        files(f"galadril_plugins.{manifest.id}")
+                        .joinpath(path)
+                        .read_bytes()
+                    )
+                    total += len(data)
+                    if total > 2 * 1024 * 1024:
+                        raise ValueError(
+                            "Ontology package inventory exceeds limit"
+                        )
+                    sources.append(
+                        GolSource(path=path, text=data.decode("utf-8"))
+                    )
+                view = OntologyPackage(
+                    id=package.id,
+                    name=package.name,
+                    version=package.version,
+                    files=tuple(sources),
+                    contracts=package.contracts,
+                    bindings=package.bindings,
+                )
+                identifiers.add(package.id)
                 result.append(
                     {
                         **view.model_dump(mode="json"),

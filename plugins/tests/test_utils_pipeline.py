@@ -259,6 +259,23 @@ class EmailPipeline(unittest.TestCase):
             "<one@example.org>",
         )
         self.assertEqual(first["data"][0]["roles"], ["sender", "recipient"])
+        self.assertEqual(
+            first["data"][0]["gol_symbol_key"], "communication.people::Person"
+        )
+        self.assertEqual(
+            first["data"][0]["gol_value"], {"name": "alice@example.org"}
+        )
+        self.assertEqual(
+            first["record"]["gol_symbol_key"], "communication.mail::Message"
+        )
+        self.assertEqual(
+            first["record"]["gol_value"],
+            {
+                "subject": "Meeting",
+                "id": "<one@example.org>",
+                "date": "2026-10-26T09:30:00+00:00",
+            },
+        )
         other = asyncio.run(
             email_participants(
                 PluginScope("tenant_b", "mail", "a" * 32), step

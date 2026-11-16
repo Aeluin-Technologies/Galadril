@@ -132,7 +132,11 @@
             "type": "array",
             "title": "Attach selected incoming files",
             "description": "One-based positions in the original message. Delivery with attachments requires human approval.",
-            "items": { "type": "integer", "minimum": 1, "maximum": 32 },
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
             "uniqueItems": true,
             "maxItems": 16,
             "default": []
@@ -334,6 +338,54 @@
     }
   },
   "ontologies": [
-    "mail-ontology.json"
+    {
+      "id": "communication.mail",
+      "name": "Email and documents",
+      "version": "1.0.0",
+      "files": [
+        "mail.gol"
+      ],
+      "contracts": {
+        "utils.input.email": {
+          "mode": "optional",
+          "targets": [
+            "communication.mail::Message"
+          ]
+        },
+        "utils.algorithm.compose_reply": {
+          "mode": "optional",
+          "targets": [
+            "communication.mail::Message"
+          ]
+        },
+        "utils.output.reply": {
+          "mode": "optional",
+          "targets": [
+            "communication.mail::Message"
+          ]
+        }
+      },
+      "bindings": {
+        "communication.mail::MessageSender": {
+          "visibility": "message",
+          "mapping_slot": true
+        },
+        "communication.mail::MessageTo": {
+          "visibility": "message",
+          "mapping_slot": true
+        },
+        "communication.mail::MessageCc": {
+          "visibility": "message",
+          "mapping_slot": true
+        },
+        "communication.mail::MessageBcc": {
+          "visibility": "mailbox_owner",
+          "mapping_slot": true
+        },
+        "communication.mail::MessageAddresses": {
+          "role_property": "role"
+        }
+      }
+    }
   ]
 }

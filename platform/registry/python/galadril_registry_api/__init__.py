@@ -1,7 +1,7 @@
 """Typed Python access to the internal Registry gRPC service."""
 
 from .client import (
-    OntologySliceArtifact,
+    GolBindingArtifact,
     PipelineArtifact,
     RegistryClient,
     RegistryConfig,
@@ -10,7 +10,7 @@ from .client import (
 )
 
 __all__ = [
-    "OntologySliceArtifact",
+    "GolBindingArtifact",
     "PipelineArtifact",
     "RegistryClient",
     "RegistryConfig",

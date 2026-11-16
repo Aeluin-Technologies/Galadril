@@ -56,19 +56,15 @@ class PipelineArtifact:
 
 
 @dataclass(frozen=True, slots=True)
-class OntologySliceArtifact:
-    """Dependency-closed ontology returned for one pinned pipeline block."""
+class GolBindingArtifact:
+    """Immutable backend mapping; it does not authorize ontology disclosure."""
 
+    pipeline_id: str
+    block_id: str
     ontology_id: str
-    publication_id: str
-    revision_id: str
-    ontology_json: bytes
-    publication_metadata_json: bytes
-    binding_metadata_json: bytes
-    published_at_ms: int
-    base_version: str
-    base_hash: str
-    effective_hash: str
+    generation: str
+    source_revision: str
+    symbols: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,17 +93,13 @@ class _PipelineListMessage(Protocol):
     pipelines: Sequence[_PipelineMessage]
 
 
-class _OntologySliceMessage(Protocol):
+class _GolBindingMessage(Protocol):
+    pipeline_id: str
+    block_id: str
     ontology_id: str
-    publication_id: str
-    revision_id: str
-    ontology_json: bytes
-    publication_metadata_json: bytes
-    binding_metadata_json: bytes
-    published_at_ms: int
-    base_version: str
-    base_hash: str
-    effective_hash: str
+    generation: str
+    source_revision: str
+    symbols: Sequence[str]
 
 
 class _TenantMessage(Protocol):
@@ -144,9 +136,9 @@ def _pipeline(data: bytes) -> object:
     return registry_pb2.Pipeline.FromString(data)
 
 
-def _ontology_slice(data: bytes) -> object:
+def _gol_binding(data: bytes) -> object:
     """Decodes a generated ontology response behind a typed wrapper."""
-    return registry_pb2.OntologySlice.FromString(data)
+    return registry_pb2.GolBinding.FromString(data)
 
 
 def _tenant(data: bytes) -> object:
@@ -343,38 +335,34 @@ class RegistryClient:
             definition_json=item.definition_json,
         )
 
-    async def get_ontology_slice(
+    async def get_gol_binding(
         self,
         tenant_id: str,
         pipeline_id: str,
         pipeline_revision_id: str,
         block_id: str,
-    ) -> OntologySliceArtifact:
-        """Loads Registry-derived semantics at an immutable pipeline revision."""
+    ) -> GolBindingArtifact:
+        """Loads server-owned pins; Gateway admits every metadata disclosure."""
         item = cast(
-            _OntologySliceMessage,
+            _GolBindingMessage,
             await self._channel.unary_unary(
-                "/galadril.registry.v1.Registry/GetOntologySlice",
+                "/galadril.registry.v1.Registry/GetGolBinding",
                 request_serializer=_serialize,
-                response_deserializer=_ontology_slice,
+                response_deserializer=_gol_binding,
             )(
-                registry_pb2.GetOntologySliceRequest(
-                    tenant_id=tenant_id,
+                registry_pb2.GetGolBindingRequest(
+                    tenant_id=_validated_tenant(tenant_id),
                     pipeline_id=pipeline_id,
                     pipeline_revision_id=pipeline_revision_id,
                     block_id=block_id,
                 )
             ),
         )
-        return OntologySliceArtifact(
+        return GolBindingArtifact(
+            pipeline_id=item.pipeline_id,
+            block_id=item.block_id,
             ontology_id=item.ontology_id,
-            publication_id=item.publication_id,
-            revision_id=item.revision_id,
-            ontology_json=item.ontology_json,
-            publication_metadata_json=item.publication_metadata_json,
-            binding_metadata_json=item.binding_metadata_json,
-            published_at_ms=item.published_at_ms,
-            base_version=item.base_version,
-            base_hash=item.base_hash,
-            effective_hash=item.effective_hash,
+            generation=item.generation,
+            source_revision=item.source_revision,
+            symbols=tuple(item.symbols),
         )

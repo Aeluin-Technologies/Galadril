@@ -1,0 +1,572 @@
+// Authored GOL contract; security identities remain external.
+
+ontology communication.people version "1.0.0" {
+    security label InternalData {
+        classification: Internal;
+    }
+    entity Person {
+        field name: Option<String> @label(InternalData);
+    }
+    entity Address {
+        field value: Option<String> @label(InternalData);
+    }
+    relation AddressPerson {
+        role source: Address [1..1];
+        role target: Person [0..*];
+    }
+    access Person {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access Address {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access AddressPerson {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}
+
+ontology communication.content version "1.0.0" {
+    security label InternalData {
+        classification: Internal;
+    }
+    entity Content {
+        field text: Option<String> @label(InternalData);
+        field html: Option<String> @label(InternalData);
+    }
+    entity Signature {
+        field text: Option<String> @label(InternalData);
+    }
+    access Content {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access Signature {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}
+
+ontology documents.attachments version "1.0.0" {
+    security label InternalData {
+        classification: Internal;
+    }
+    entity Attachment {
+        field name: Option<String> @label(InternalData);
+        field mime: Option<String> @label(InternalData);
+        field source: Option<String> @label(InternalData);
+    }
+    entity Content {
+    }
+    relation AttachmentContent {
+        role source: Attachment [1..1];
+        role target: Content [0..*];
+    }
+    access Attachment {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access Content {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access AttachmentContent {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}
+
+ontology communication.threads version "1.0.0" {
+    security label InternalData {
+        classification: Internal;
+    }
+    entity Thread {
+        field reference: Option<String> @label(InternalData);
+    }
+    access Thread {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}
+
+ontology communication.mail version "1.0.0" {
+    import communication.content version "1.0.0" as CommunicationContent;
+    import communication.people version "1.0.0" as CommunicationPeople;
+    import communication.threads version "1.0.0" as CommunicationThreads;
+    import documents.attachments version "1.0.0" as DocumentsAttachments;
+    import type gal.time::Instant version "1.0.0";
+    security label InternalData {
+        classification: Internal;
+    }
+    entity Message {
+        field subject: Option<String> @label(InternalData);
+        field id: Option<String> @label(InternalData);
+        field date: Option<gal.time.Instant> @label(InternalData);
+    }
+    relation MessageSender {
+        role source: Message [1..1];
+        role target: communication.people.Person [0..*];
+    }
+    relation MessageTo {
+        role source: Message [1..1];
+        role target: communication.people.Person [0..*];
+    }
+    relation MessageCc {
+        role source: Message [1..1];
+        role target: communication.people.Person [0..*];
+    }
+    relation MessageBcc {
+        role source: Message [1..1];
+        role target: communication.people.Person [0..*];
+    }
+    relation MessageAddresses {
+        role source: Message [1..1];
+        role target: communication.people.Address [0..*];
+    }
+    relation MessageThread {
+        role source: Message [1..1];
+        role target: communication.threads.Thread [0..*];
+    }
+    relation MessageContent {
+        role source: Message [1..1];
+        role target: communication.content.Content [0..*];
+    }
+    relation MessageSignature {
+        role source: Message [1..1];
+        role target: communication.content.Signature [0..*];
+    }
+    relation MessageAttachments {
+        role source: Message [1..1];
+        role target: documents.attachments.Attachment [0..*];
+    }
+    relation MessageInReplyTo {
+        role source: Message [1..1];
+        role target: Message [0..*];
+    }
+    access Message {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageSender {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageTo {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageCc {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageBcc {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "mailbox_owner";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "mailbox_owner";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "mailbox_owner_transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageAddresses {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageThread {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageContent {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageSignature {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageAttachments {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access MessageInReplyTo {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}

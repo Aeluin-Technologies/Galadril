@@ -8,7 +8,7 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 py_library(
     name = "galadril_plugins",
     srcs = glob(["src/**/*.py"]),
-    data = glob(["src/**/*.json", "src/**/*.md", "src/**/*.tex", "src/**/*.cls", "src/**/skills/**/*.yaml"], allow_empty = True),
+    data = glob(["src/**/*.json", "src/**/*.gol", "src/**/*.md", "src/**/*.tex", "src/**/*.cls", "src/**/skills/**/*.yaml"], allow_empty = True),
     imports = ["src"],
     visibility = ["//visibility:public"],
     deps = [
@@ -69,14 +69,7 @@ oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repo
 
 filegroup(
     name = "ontology_packages",
-    srcs = [
-        "src/galadril_plugins/law/contentieux-ontology.json",
-        "src/galadril_plugins/law/socle-ontology.json",
-        "src/galadril_plugins/law/ecritures-ontology.json",
-        "src/galadril_plugins/law/moyens-ontology.json",
-        "src/galadril_plugins/law/preuves-ontology.json",
-        "src/galadril_plugins/utils/mail-ontology.json",
-    ],
+    srcs = glob(["src/**/*.gol"]),
     visibility = ["//visibility:public"],
 )
 

@@ -105,6 +105,26 @@ definition ontology {
   permission manage = parent->manage + (parent->view & (owner + administrator))
 }
 
+// Schema instances use the reserved __schema ID and explicit metadata grants.
+definition gol_resource {
+  relation scope: tenant
+  relation ontology: ontology
+  relation source: raw
+  relation owner: user | service
+  relation readers: user | service | role#member | group#member
+  relation writers: user | service | role#member | group#member
+  relation executors: user | service | role#member | group#member
+  relation metadata_readers: user | service | role#member | group#member
+  relation mailbox_owner_subject: user | role#member | group#member
+  permission read = scope->view & ontology->view & ((source->view & (owner + readers + writers)) + metadata_readers)
+  permission describe = scope->view & ontology->view & metadata_readers
+  permission write = scope->view & ontology->edit & source->view & (owner + writers)
+  permission execute = scope->view & ontology->view & source->view & (owner + executors)
+  permission transfer = scope->view & ontology->view & ((source->view & (owner + readers)) + metadata_readers)
+  permission mailbox_owner = scope->view & ontology->view & mailbox_owner_subject & (metadata_readers + source->view)
+  permission mailbox_owner_transfer = mailbox_owner & transfer
+}
+
 definition pipeline {
   relation parent: tenant
   relation owner: user
