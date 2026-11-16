@@ -1,0 +1,10 @@
+[package]
+name = "golc-wire"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+flatbuffers = "=25.12.19"

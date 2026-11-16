@@ -1,0 +1,5 @@
+ontology invalid.mail version "0.1.0" {
+    entity Message {
+        field subject: String
+    }
+}

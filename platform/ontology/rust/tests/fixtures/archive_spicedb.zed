@@ -1,0 +1,49 @@
+caveat attestation(trusted bool) {
+    trusted
+}
+
+definition user {}
+
+definition service_account {}
+
+definition organization {
+    relation subscriber: user | service_account
+    relation blocked: user
+    permission eligible = subscriber - blocked
+}
+
+definition department {
+    relation parent: organization
+    relation member: user | service_account
+    permission eligible = parent->eligible + member
+}
+
+definition team {
+    relation parent: department
+    relation member: user | service_account
+    permission eligible = parent->eligible + member
+}
+
+definition group {
+    relation team: team
+    relation member: user | service_account | group#member
+    permission eligible = team->eligible + member
+}
+
+definition company_record {
+    relation owner: user | service_account
+    relation reader: user | service_account
+    relation delegate: user | service_account
+    relation cleared: user | service_account
+    relation excluded: user | service_account
+    relation contingent: user with attestation
+    relation viewer_group: group
+    relation body_reader: user | service_account
+    relation exporter: user | service_account
+
+    permission candidate = owner + reader + delegate + viewer_group->eligible + contingent
+    permission view = (candidate & cleared) - excluded
+    permission view_body = (owner + body_reader) & view
+    permission export = (owner + exporter) & view
+    permission edit = owner & view
+}

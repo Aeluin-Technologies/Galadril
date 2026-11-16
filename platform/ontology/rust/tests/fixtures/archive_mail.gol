@@ -1,0 +1,28 @@
+ontology company.mail version "1.0.0" {
+    import company.documents as docs;
+    entity Message {
+        field title: String;
+        field attachment: Ref<docs.Document> @requires(view_attachment);
+    }
+    relation Attached {
+        role message: Message [1..1];
+        role attachment: docs.Document [1..1];
+    }
+    view RestrictedIndex from Attached {
+        project message.title as title;
+        where attachment.body != "";
+    }
+    access Message {
+        resource: "company_record";
+        permission read_message { relation: "view"; cedar: "Domain::Action::\"message\""; }
+        permission view_attachment { relation: "view_body"; cedar: "Domain::Action::\"attachment\""; }
+    }
+    access Attached {
+        resource: "company_record";
+        permission read_link { relation: "view"; cedar: "Domain::Action::\"attached\""; }
+    }
+    access RestrictedIndex {
+        resource: "company_record";
+        permission read_index { relation: "view"; cedar: "Domain::Action::\"index\""; }
+    }
+}

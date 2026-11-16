@@ -1,0 +1,39 @@
+ontology communication.mail version "1.0.0" {
+    entity Message {
+        field subject: String @requires(read_meta);
+        field body: String @label(MailSecret) @requires(read_body);
+        field preview: String @label(Metadata);
+        field envelope: Envelope;
+    }
+    struct Envelope { field sealed: String @label(MailSecret); }
+    derive Preview on Message.preview: String = body;
+    entity Attachment { field name: String; }
+    relation Attached {
+        role message: Message [1..1];
+        role attachment: Attachment [1..1];
+    }
+    view MessageSummary from Attached { project message.subject; where message.body != ""; }
+    security label Metadata { classification: Public; }
+    security label MailSecret {
+        classification: Confidential;
+        compartments: [Mail];
+        destinations: [Internal];
+        purposes: [Review];
+    }
+    access Message {
+        resource: "mail_message";
+        permission read_meta { relation: "view"; cedar: "Mail::Action::\"metadata\""; }
+        permission read_body { relation: "view_body"; cedar: "Mail::Action::\"body\""; }
+        permission export { relation: "export"; cedar: "Mail::Action::\"export\""; }
+    }
+    access MessageSummary {
+        resource: "mail_summary";
+        permission read_summary { relation: "view"; cedar: "Mail::Action::\"summary\""; }
+    }
+    access Attached {
+        resource: "mail_attachment_link";
+        permission read_link { relation: "view"; cedar: "Mail::Action::\"link\""; }
+    }
+    forbid Message.body unless { context.mfa };
+    forbid Message.read_body unless { context.mfa };
+}

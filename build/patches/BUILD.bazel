@@ -1,5 +1,6 @@
 exports_files([
     "rules_rust_dep_env_producer.patch",
+    "rules_rust_doctest_lto.patch",
     "uv-hub-project-namespace.patch",
     "uv-abi3t-wheel-constraint.patch",
     "buildbuddy_bfd_linker.patch",

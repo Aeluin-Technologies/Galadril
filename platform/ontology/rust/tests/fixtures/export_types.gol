@@ -1,0 +1,58 @@
+ontology sample.contracts version "1.0.0" {
+    import type time.api::Instant version "1.0.0";
+    entity Profile {
+        field title: String;
+        field minimum: String;
+        field alias: OptionalName;
+        field count: u8;
+        field signed: i8;
+        field initial: char;
+        field maybe: Option<String>;
+        field labels: List<String>;
+        field status: Status;
+        field details: Details;
+        field peer: Ref<Profile>;
+        field created: Instant;
+        field large: u128;
+        field ratio: f32;
+        field secret: String @requires(read_body);
+    }
+    struct Details {
+        field city: String;
+        field private_note: String @requires(read_body);
+    }
+    enum Status { Active, Paused }
+    type Identifier = u64;
+    type OptionalName = Option<String>;
+    access OptionalName {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"optionalName\""; }
+    }
+    action Validate(title: String, again: Option<bool>, state: Status) -> bool;
+    access Profile {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"profile\""; }
+        permission read_body { relation: "view_body"; cedar: "Domain::Action::\"secret\""; }
+        permission export_meta { relation: "export"; cedar: "Domain::Action::\"exportProfile\""; }
+        permission write_profile { relation: "edit"; cedar: "Domain::Action::\"writeProfile\""; }
+    }
+    access Details {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"details\""; }
+        permission read_body { relation: "view_body"; cedar: "Domain::Action::\"note\""; }
+    }
+    access Status {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"status\""; }
+    }
+    access Identifier {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"identifier\""; }
+    }
+    access Validate {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"validate\""; }
+    }
+    invariant NotEmpty on Profile { title != "" }
+    forbid Profile.secret unless { context.mfa };
+}

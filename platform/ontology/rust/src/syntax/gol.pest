@@ -1,0 +1,244 @@
+// Lexical rules are atomic where spacing or UTF-8 token boundaries matter.
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "//" ~ (!("\r" | "\n") ~ ANY)* | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+file = { SOI ~ ontology_decl+ ~ EOI }
+ontology_decl = { k_ontology ~ path ~ version_clause ~ "{" ~ declaration* ~ "}" }
+version_clause = { k_version ~ string }
+
+declaration = _{
+    import_decl | entity_decl | relation_decl | attribute_decl | alias_decl |
+    struct_decl | enum_decl | invariant_decl | derive_decl | view_decl |
+    action_decl | access_decl | label_decl | policy_decl
+}
+
+import_decl = { k_import ~ external_marker? ~ path ~ import_selection? ~ version_clause? ~ import_alias? ~ ";" }
+import_alias = { k_as ~ ident }
+external_marker = { k_type }
+import_selection = { "::" ~ ( "{" ~ ident ~ ("," ~ ident)* ~ ","? ~ "}" | ident ) }
+
+entity_decl = { k_entity ~ ident ~ "{" ~ entity_member* ~ "}" }
+entity_member = _{ field_decl | key_decl | owns_decl }
+relation_decl = { k_relation ~ ident ~ "{" ~ (role_decl | entity_member)* ~ "}" }
+struct_decl = { k_struct ~ ident ~ "{" ~ field_decl* ~ "}" }
+field_decl = { k_field ~ ident ~ ":" ~ ty ~ annotation* ~ ";" }
+key_decl = { k_key ~ ident ~ ":" ~ ty ~ annotation* ~ ";" }
+owns_decl = { k_owns ~ path ~ cardinality ~ ";" }
+role_decl = { k_role ~ ident ~ ":" ~ path ~ cardinality ~ ";" }
+cardinality = { "[" ~ digits ~ ".." ~ (digits | unbounded) ~ "]" }
+unbounded = { "*" }
+enum_decl = { k_enum ~ ident ~ "{" ~ enum_variant ~ ("," ~ enum_variant)* ~ ","? ~ "}" }
+enum_variant = { ident }
+attribute_decl = { k_attribute ~ ident ~ ":" ~ ty ~ ";" }
+alias_decl = { k_type ~ ident ~ "=" ~ ty ~ ";" }
+
+annotation = _{ label_annotation | requires_annotation }
+label_annotation = { "@" ~ k_label ~ "(" ~ path ~ ")" }
+requires_annotation = { "@" ~ k_requires ~ "(" ~ path ~ ")" }
+ty = _{ option_type | list_type | ref_type | primitive | path }
+option_type = { option_word ~ "<" ~ ty ~ ">" }
+list_type = { list_word ~ "<" ~ ty ~ ">" }
+ref_type = { ref_word ~ "<" ~ path ~ ">" }
+primitive = @{ primitive_word ~ !ident_continue }
+primitive_word = _{
+    "String" | "Unit" | "bool" | "char" |
+    "i128" | "i64" | "i32" | "i16" | "i8" |
+    "u128" | "u64" | "u32" | "u16" | "u8" | "f32" | "f64"
+}
+
+invariant_decl = { k_invariant ~ ident ~ k_on ~ path ~ condition }
+derive_decl = { k_derive ~ ident ~ k_on ~ path ~ ":" ~ ty ~ "=" ~ expression ~ ";" }
+view_decl = { k_view ~ ident ~ k_from ~ path ~ "{" ~ projection+ ~ view_filter? ~ "}" }
+projection = { k_project ~ expression ~ (k_as ~ ident)? ~ ";" }
+view_filter = { k_where ~ expression ~ ";" }
+
+action_decl = { k_action ~ ident ~ "(" ~ parameters ~ ")" ~ action_result? ~ action_clause* ~ ";" }
+parameters = { (parameter ~ ("," ~ parameter)* ~ ","?)? }
+parameter = { ident ~ ":" ~ ty }
+action_result = { "->" ~ ty }
+action_clause = _{ requires_clause | ensures_clause | effects_clause | retry_clause }
+requires_clause = { k_requires ~ condition }
+ensures_clause = { k_ensures ~ condition }
+effects_clause = { k_effects ~ "{" ~ (effect ~ ("," ~ effect)* ~ ","?)? ~ "}" }
+effect = _{ read_effect | write_effect | emit_effect }
+read_effect = { k_read ~ "(" ~ path ~ ")" }
+write_effect = { k_write ~ "(" ~ path ~ ")" }
+emit_effect = { k_emit ~ "(" ~ path ~ ")" }
+retry_clause = { k_retry ~ "{" ~ (idempotent | non_idempotent | deduplicated) ~ "}" }
+idempotent = { k_idempotent }
+non_idempotent = { k_non_idempotent }
+deduplicated = { k_deduplicated ~ "(" ~ ident ~ ")" }
+
+access_decl = { k_access ~ path ~ "{" ~ access_member* ~ "}" }
+access_member = _{ resource | permission | field_guard }
+resource = { k_resource ~ ":" ~ string ~ ";" }
+permission = { k_permission ~ ident ~ "{" ~ (spicedb_binding | cedar_binding)+ ~ "}" }
+spicedb_binding = { k_relation ~ ":" ~ string ~ ";" }
+cedar_binding = { k_cedar ~ ":" ~ string ~ ";" }
+field_guard = { k_field ~ path ~ k_requires ~ path ~ ";" }
+policy_decl = { (permit | forbid) ~ path ~ when_clause? ~ unless_clause? ~ ";" }
+permit = { k_permit }
+forbid = { k_forbid }
+when_clause = { k_when ~ condition }
+unless_clause = { k_unless ~ condition }
+
+label_decl = { k_security ~ k_label ~ ident ~ "{" ~ label_member* ~ "}" }
+label_member = _{ classification_clause | compartments | integrity | destinations | purposes }
+classification_clause = { k_classification ~ ":" ~ classification ~ ";" }
+classification = @{ ("Public" | "Internal" | "Confidential" | "Restricted") ~ !ident_continue }
+compartments = { k_compartments ~ ":" ~ path_list ~ ";" }
+integrity = { k_integrity ~ ":" ~ path ~ ";" }
+destinations = { k_destinations ~ ":" ~ path_list ~ ";" }
+purposes = { k_purposes ~ ":" ~ path_list ~ ";" }
+path_list = { "[" ~ (path ~ ("," ~ path)* ~ ","?)? ~ "]" }
+
+condition = _{ "{" ~ expression ~ "}" }
+expression = _{ disjunction }
+disjunction = { conjunction ~ (or_op ~ conjunction)* }
+conjunction = { equality ~ (and_op ~ equality)* }
+equality = { comparison ~ (equality_op ~ comparison)? }
+comparison = { sum ~ (comparison_op ~ sum)? }
+sum = { product ~ (sum_op ~ product)* }
+product = { unary ~ (product_op ~ unary)* }
+unary = { unary_op* ~ postfix }
+postfix = { atom ~ ("." ~ ident)* }
+atom = _{ grouped | boolean | float | digits | string | character | symbol }
+grouped = { "(" ~ expression ~ ")" }
+symbol = { ident ~ ("::" ~ ident)* }
+
+or_op = { "||" }
+and_op = { "&&" }
+equality_op = { "==" | "!=" }
+comparison_op = { "<=" | ">=" | "<" | ">" }
+sum_op = { "+" | "-" }
+product_op = { "*" | "/" | "%" }
+unary_op = { "!" | "-" }
+
+path = { ident ~ ("." ~ ident)* }
+ident = @{ !reserved ~ (ASCII_ALPHA | "_") ~ ident_continue* }
+ident_continue = _{ ASCII_ALPHANUMERIC | "_" }
+digits = @{ ASCII_DIGIT+ ~ !ident_continue }
+float = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+ ~ exponent? | exponent) ~ !ident_continue }
+exponent = _{ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+boolean = @{ ("true" | "false") ~ !ident_continue }
+string = @{ "\"" ~ (escape | !("\"" | "\\" | CONTROL) ~ ANY)* ~ "\"" }
+character = @{ "'" ~ (escape | !("'" | "\\" | CONTROL) ~ ANY) ~ "'" }
+escape = _{ "\\" ~ ("\"" | "'" | "\\" | "n" | "r" | "t" | "0" | ("u{" ~ ASCII_HEX_DIGIT{1,6} ~ "}")) }
+
+option_word = _{ &w_option ~ "Option" }
+list_word = _{ &w_list ~ "List" }
+ref_word = _{ &w_ref ~ "Ref" }
+w_option = @{ "Option" ~ !ident_continue }
+w_list = @{ "List" ~ !ident_continue }
+w_ref = @{ "Ref" ~ !ident_continue }
+unsupported_rust_word = @{ ("usize" | "isize" | "unsafe" | "fn" | "loop" | "while" | "for" | "let" | "mut") ~ !ident_continue }
+
+// Keyword lookahead keeps word boundaries exact while emitting only semantic pairs.
+k_ontology = _{ &w_ontology ~ "ontology" }
+w_ontology = @{ "ontology" ~ !ident_continue }
+k_version = _{ &w_version ~ "version" }
+w_version = @{ "version" ~ !ident_continue }
+k_import = _{ &w_import ~ "import" }
+w_import = @{ "import" ~ !ident_continue }
+k_type = _{ &w_type ~ "type" }
+w_type = @{ "type" ~ !ident_continue }
+k_entity = _{ &w_entity ~ "entity" }
+w_entity = @{ "entity" ~ !ident_continue }
+k_relation = _{ &w_relation ~ "relation" }
+w_relation = @{ "relation" ~ !ident_continue }
+k_attribute = _{ &w_attribute ~ "attribute" }
+w_attribute = @{ "attribute" ~ !ident_continue }
+k_struct = _{ &w_struct ~ "struct" }
+w_struct = @{ "struct" ~ !ident_continue }
+k_enum = _{ &w_enum ~ "enum" }
+w_enum = @{ "enum" ~ !ident_continue }
+k_key = _{ &w_key ~ "key" }
+w_key = @{ "key" ~ !ident_continue }
+k_field = _{ &w_field ~ "field" }
+w_field = @{ "field" ~ !ident_continue }
+k_owns = _{ &w_owns ~ "owns" }
+w_owns = @{ "owns" ~ !ident_continue }
+k_role = _{ &w_role ~ "role" }
+w_role = @{ "role" ~ !ident_continue }
+k_invariant = _{ &w_invariant ~ "invariant" }
+w_invariant = @{ "invariant" ~ !ident_continue }
+k_on = _{ &w_on ~ "on" }
+w_on = @{ "on" ~ !ident_continue }
+k_derive = _{ &w_derive ~ "derive" }
+w_derive = @{ "derive" ~ !ident_continue }
+k_view = _{ &w_view ~ "view" }
+w_view = @{ "view" ~ !ident_continue }
+k_from = _{ &w_from ~ "from" }
+w_from = @{ "from" ~ !ident_continue }
+k_project = _{ &w_project ~ "project" }
+w_project = @{ "project" ~ !ident_continue }
+k_as = _{ &w_as ~ "as" }
+w_as = @{ "as" ~ !ident_continue }
+k_where = _{ &w_where ~ "where" }
+w_where = @{ "where" ~ !ident_continue }
+k_action = _{ &w_action ~ "action" }
+w_action = @{ "action" ~ !ident_continue }
+k_requires = _{ &w_requires ~ "requires" }
+w_requires = @{ "requires" ~ !ident_continue }
+k_ensures = _{ &w_ensures ~ "ensures" }
+w_ensures = @{ "ensures" ~ !ident_continue }
+k_effects = _{ &w_effects ~ "effects" }
+w_effects = @{ "effects" ~ !ident_continue }
+k_read = _{ &w_read ~ "read" }
+w_read = @{ "read" ~ !ident_continue }
+k_write = _{ &w_write ~ "write" }
+w_write = @{ "write" ~ !ident_continue }
+k_emit = _{ &w_emit ~ "emit" }
+w_emit = @{ "emit" ~ !ident_continue }
+k_retry = _{ &w_retry ~ "retry" }
+w_retry = @{ "retry" ~ !ident_continue }
+k_idempotent = _{ &w_idempotent ~ "idempotent" }
+w_idempotent = @{ "idempotent" ~ !ident_continue }
+k_non_idempotent = _{ &w_non_idempotent ~ "non_idempotent" }
+w_non_idempotent = @{ "non_idempotent" ~ !ident_continue }
+k_deduplicated = _{ &w_deduplicated ~ "deduplicated" }
+w_deduplicated = @{ "deduplicated" ~ !ident_continue }
+k_security = _{ &w_security ~ "security" }
+w_security = @{ "security" ~ !ident_continue }
+k_label = _{ &w_label ~ "label" }
+w_label = @{ "label" ~ !ident_continue }
+k_classification = _{ &w_classification ~ "classification" }
+w_classification = @{ "classification" ~ !ident_continue }
+k_compartments = _{ &w_compartments ~ "compartments" }
+w_compartments = @{ "compartments" ~ !ident_continue }
+k_integrity = _{ &w_integrity ~ "integrity" }
+w_integrity = @{ "integrity" ~ !ident_continue }
+k_destinations = _{ &w_destinations ~ "destinations" }
+w_destinations = @{ "destinations" ~ !ident_continue }
+k_purposes = _{ &w_purposes ~ "purposes" }
+w_purposes = @{ "purposes" ~ !ident_continue }
+k_access = _{ &w_access ~ "access" }
+w_access = @{ "access" ~ !ident_continue }
+k_resource = _{ &w_resource ~ "resource" }
+w_resource = @{ "resource" ~ !ident_continue }
+k_permission = _{ &w_permission ~ "permission" }
+w_permission = @{ "permission" ~ !ident_continue }
+k_cedar = _{ &w_cedar ~ "cedar" }
+w_cedar = @{ "cedar" ~ !ident_continue }
+k_permit = _{ &w_permit ~ "permit" }
+w_permit = @{ "permit" ~ !ident_continue }
+k_forbid = _{ &w_forbid ~ "forbid" }
+w_forbid = @{ "forbid" ~ !ident_continue }
+k_when = _{ &w_when ~ "when" }
+w_when = @{ "when" ~ !ident_continue }
+k_unless = _{ &w_unless ~ "unless" }
+w_unless = @{ "unless" ~ !ident_continue }
+
+reserved = _{
+    primitive | boolean | w_option | w_list | w_ref | unsupported_rust_word |
+    w_ontology | w_version | w_import | w_type | w_entity |
+    w_relation | w_attribute | w_struct | w_enum | w_key |
+    w_field | w_owns | w_role | w_invariant | w_on |
+    w_derive | w_view | w_from | w_project | w_as |
+    w_where | w_action | w_requires | w_ensures | w_effects |
+    w_read | w_write | w_emit | w_retry | w_idempotent |
+    w_non_idempotent | w_deduplicated | w_security | w_label | w_classification |
+    w_compartments | w_integrity | w_destinations | w_purposes | w_access |
+    w_resource | w_permission | w_cedar | w_permit | w_forbid |
+    w_when | w_unless
+}

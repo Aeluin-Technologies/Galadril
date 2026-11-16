@@ -4,7 +4,10 @@ bazel_dep(name = "rules_rust", version = "0.71.3")
 single_version_override(
     module_name = "rules_rust",
     version = "0.71.3",
-    patches = ["//build/patches:rules_rust_dep_env_producer.patch"],
+    patches = [
+        "//build/patches:rules_rust_dep_env_producer.patch",
+        "//build/patches:rules_rust_doctest_lto.patch",
+    ],
     patch_strip = 1,
 )
 
@@ -27,6 +30,10 @@ crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = ["//:Cargo.toml"],
 )
+# Optional runtime features are selected by their Bazel consumers, so their
+# direct dependencies must remain visible outside Cargo's default graph.
+crate.spec(package = "jsonschema", default_features = False, version = "=0.61.2")
+crate.spec(package = "outlines-core", default_features = False, version = "=0.2.14")
 use_repo(crate, "crates")
 
 native_sysroot = use_repo_rule("//build/document_compiler:repositories.bzl", "native_sysroot")

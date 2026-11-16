@@ -1,0 +1,79 @@
+[package]
+name = "galadril-ontology"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["parser", "authorization", "archive"]
+parser = ["dep:miette", "dep:pest", "dep:pest_derive"]
+authorization = ["dep:cedar-policy", "dep:tokio"]
+archive = ["authorization", "dep:golc-wire", "dep:serde", "dep:serde_json", "dep:sha2", "semver/serde"]
+remote = ["archive", "dep:aws-sdk-s3", "dep:futures", "dep:tempfile", "dep:tokio", "dep:uuid"]
+export = ["archive", "dep:jsonschema"]
+outlines-compat = ["export", "dep:outlines-core"]
+
+[dependencies]
+aws-sdk-s3 = { version = "1.144", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"], optional = true }
+cedar-policy = { version = "4.14", default-features = false, optional = true }
+futures = { version = "0.3", optional = true }
+golc-wire = { path = "wire", optional = true }
+jsonschema = { version = "=0.61.2", default-features = false, optional = true }
+miette = { version = "7", default-features = false, optional = true }
+pest = { version = "2", optional = true }
+pest_derive = { version = "2", optional = true }
+outlines-core = { version = "=0.2.14", default-features = false, optional = true }
+semver = "1"
+serde = { version = "1", features = ["derive", "rc"], optional = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+tempfile = { version = "3", optional = true }
+tokio = { version = "1", features = ["rt", "sync", "time"], optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+
+[dev-dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+tempfile = "3"
+testcontainers = "0.27"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "syntax"
+required-features = ["parser"]
+
+[[test]]
+name = "semantic"
+required-features = ["parser"]
+
+[[test]]
+name = "security"
+required-features = ["parser", "authorization"]
+
+[[test]]
+name = "archive"
+required-features = ["parser", "archive"]
+
+[[test]]
+name = "archive_spicedb"
+required-features = ["parser", "archive"]
+
+[[test]]
+name = "remote"
+required-features = ["parser", "remote"]
+
+[[test]]
+name = "export"
+required-features = ["parser", "export"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
+
+[[test]]
+name = "ifc"
+required-features = ["authorization"]
+
+[[test]]
+name = "ifc_security"
+required-features = ["parser", "export"]

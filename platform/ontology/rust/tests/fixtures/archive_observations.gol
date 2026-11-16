@@ -1,0 +1,11 @@
+ontology company.observations version "1.0.0" {
+    import company.mail as mail;
+    entity Observation {
+        field summary: String;
+        field message: Ref<mail.Message>;
+    }
+    access Observation {
+        resource: "company_record";
+        permission read_observation { relation: "view"; cedar: "Domain::Action::\"observation\""; }
+    }
+}

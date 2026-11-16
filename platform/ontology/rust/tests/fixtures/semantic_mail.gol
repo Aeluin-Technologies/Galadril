@@ -1,0 +1,42 @@
+ontology communication.mail version "1.0.0" {
+    import communication.attachment as files;
+    import type gal.time::Instant version "1.0.0";
+    permit Archive when { context.mfa };
+    entity Message {
+        key id: u64;
+        field body: String @label(MailSecret) @requires(read_body);
+        field received_at: Instant;
+        field status: Status;
+        field mailbox: Ref<Mailbox>;
+        field attachments: Option<List<Ref<files.Attachment>>>;
+    }
+    entity Mailbox { field latest: Ref<Message>; }
+    enum Status { Received, Archived }
+    struct Headers { field subject: String; }
+    relation Delivery {
+        role message: Message [1..1];
+        role sender: Mailbox [1..1];
+        role recipient: Mailbox [1..1];
+    }
+    invariant KnownStatus on Message { status == Status::Received || status == Status::Archived }
+    view MessageSummary from Message { project mailbox.latest.status as state; }
+    action Archive(message: Ref<Message>) -> Unit
+        requires { message.status == Status::Received }
+        ensures { message.status == Status::Archived }
+        effects { read(message.body), write(message.status) }
+        retry { deduplicated(message) };
+    security label MailSecret {
+        classification: Confidential;
+        destinations: [Internal];
+        purposes: [Review];
+    }
+    access Message {
+        resource: "mail_message";
+        permission read_body {
+            relation: "view";
+            cedar: "Mail::Action::\"readBody\"";
+        }
+        field body requires read_body;
+    }
+    forbid Message.body unless { context.mfa };
+}

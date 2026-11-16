@@ -1,0 +1,13 @@
+ontology invalid.alpha version "1.0.0" {
+    entity A { field value: u64; }
+    entity A {}
+}
+ontology invalid.beta version "1.0.0" {
+    import invalid.missing;
+}
+ontology invalid.gamma version "1.0.0" {
+    struct Recursive { field value: Option<Recursive>; }
+    relation Broken { role bad: Recursive [1..2]; }
+    relation Contradiction { role item: Item [4..2]; }
+    entity Item { field unknown: Undefined; }
+}

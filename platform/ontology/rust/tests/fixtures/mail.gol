@@ -1,0 +1,64 @@
+// References are intentionally forward or resolved by a later compiler pass.
+ontology communication.mail version "0.3.0" {
+    entity Message {
+        key id: Id;
+        field received_at: Instant;
+        field status: Status;
+        field body: String @label(MailSecret) @requires(read_body);
+        field attachments: Option<List<Ref<communication.mail.Attachment>>>;
+        owns Subject [0..1];
+    }
+
+    relation MessageAttachment {
+        role message: Message [1..1];
+        role attachment: Attachment [1..*];
+        role original: Message [0..1];
+        field inline: bool;
+    }
+
+    action archive(message: Ref<Message>) -> Unit
+        requires { message.status == Status::Received }
+        ensures { message.status == Status::Archived }
+        effects { read(message.body), write(message.status), emit(mail.archived) }
+        retry { deduplicated(message) };
+
+    permit archive when { context.mfa && (context.assurance >= 2) }
+        unless { message.status == Status::Archived };
+    forbid Message.read_body when { context.revoked };
+
+    import type gal.time::{Instant, Span} version "1.4.0";
+    import type gal.id::Uuid;
+    import company.common;
+
+    enum Status { Received, Archived, }
+    struct Header { field subject: String; }
+    type FileSize = u64;
+    attribute Subject: String;
+    entity Attachment {
+        key id: Uuid;
+        field message: Ref<Message>;
+        field size: FileSize;
+    }
+
+    security label MailSecret {
+        classification: Confidential;
+        compartments: [communication.mail];
+        destinations: [Internal];
+        purposes: [Review];
+    }
+    access Message {
+        resource: "mail_message";
+        permission read_body {
+            relation: "view";
+            cedar: "Mail::Action::\"readBody\"";
+        }
+        field body requires read_body;
+    }
+    invariant PositiveSize on Attachment { (size + 2 * 3) >= 0 }
+    derive HasBody on Message.has_body: bool = body != "";
+    view MailSubject from Message {
+        project subject;
+        project received_at as timestamp;
+        where status != Status::Archived;
+    }
+}
