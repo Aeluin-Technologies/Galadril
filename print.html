@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-b2431a01.js";
+            window.path_to_searchindex_js = "searchindex-e2fd6958.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8980d4a1.js"></script>
+        <script src="toc-cfe238fb.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4341,6 +4341,1054 @@ ontologies, pipelines, publications, and bindings are authored afresh through
 Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
 prototype migration is removed; Gateway migrations contain only audit/access
 and unrelated application tables.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-canonical-model"><a class="header" href="#gol-canonical-model">GOL canonical model</a></h1>
+<p><code>galadril-ontology</code> is the Cargo library for the Galadril Ontology Language
+(GOL). It lives in <code>platform/ontology/rust</code> alongside the Python ontology
+client and builds under <code>//platform/ontology/rust:ontology</code>. The public Rust API is
+re-exported from <code>galadril_ontology</code>. It uses portable metadata and the
+workspace’s existing <code>semver</code> and <code>tracing</code> dependencies.</p>
+<h2 id="api-and-dependency-direction"><a class="header" href="#api-and-dependency-direction">API and dependency direction</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Internal modules</th><th>Public model</th></tr>
+</thead>
+<tbody>
+<tr><td><code>identity</code>, <code>named</code>, <code>ontology</code></td><td><code>Ontology</code>, <code>ModuleVersion</code>, <code>OntologyId</code>, <code>OntologyVersion</code>, <code>Name</code>, <code>QualifiedName</code>, <code>SymbolKey</code>, <code>SymbolRef</code>, <code>SymbolId</code>, <code>SymbolKind</code>, <code>Named&lt;T&gt;</code>, <code>Import</code>, <code>ImportSelection</code></td></tr>
+<tr><td><code>declaration</code>, <code>value_type</code></td><td><code>Declaration</code>, <code>Entity</code>, <code>Relation</code>, <code>Role</code>, <code>Field</code>, <code>FieldKind</code>, <code>Attribute</code>, <code>Cardinality</code>, <code>Primitive</code>, <code>TypeRef</code>, <code>TypeAlias</code>, <code>StructType</code>, <code>EnumType</code></td></tr>
+<tr><td><code>external_type</code></td><td><code>ExternalTypeId</code>, <code>ExternalTypeRegistry</code>, <code>ExternalTypeDescriptor</code>, <code>ExternalSchema</code>, <code>TypeCapability</code>, <code>AdapterContract</code></td></tr>
+<tr><td><code>expression</code></td><td><code>Reference</code>, <code>FieldRef</code>, <code>Expression</code>, <code>TypedExpression</code>, <code>Predicate</code>, <code>Invariant</code>, <code>Derivation</code>, <code>View</code>, <code>Action</code>, <code>Effect</code>, <code>Idempotence</code></td></tr>
+<tr><td><code>security</code></td><td><code>SecurityContract</code>, <code>AccessBinding</code>, <code>RelationshipPermission</code>, <code>ContextPolicy</code>, <code>IfcLabel</code>, <code>Classification</code>, <code>FlowContract</code>, <code>TransferConstraint</code></td></tr>
+<tr><td><code>error</code></td><td><code>ModelError</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Compiler, security validation, artifact format and storage components will
+consume the canonical model. The model’s references point to declarations or
+external contracts by logical identity. The default Cargo feature
+<code>parser</code> enables the separate <a href="#gol-source-grammar">source grammar</a>.
+Consumers of the canonical model can disable default features.</p>
+<h2 id="identity-and-composition"><a class="header" href="#identity-and-composition">Identity and composition</a></h2>
+<ul>
+<li><code>SymbolKey</code> combines the logical ontology ID and the local declaration name.
+It is stable across reorderings and versions. Renaming or moving a declaration
+changes the key. The compiler will decide how to diagnose replacement by an
+incompatible declaration under the same key.</li>
+<li><code>SymbolRef</code> pairs that key with an exact semantic version. The version pin
+includes prerelease and build metadata. <code>resolve_local</code> checks the ontology
+and version before looking up the declaration. Consumers can inspect the
+declaration’s <code>SymbolKind</code> to check suitability for the reference site.</li>
+<li><code>SymbolId</code> is a dense index scoped to a future compilation table. Declarations
+use logical keys and version pins. Hashing, ID allocation, and physical
+locator formats remain open.</li>
+<li>Canonical names currently use case-sensitive ASCII identifier segments with
+dots for qualification. Phase 2 owns source spelling, Unicode and escape
+rules. The module has one namespace across declaration kinds. Within a
+relation, roles and fields have separate named scopes.</li>
+<li>An import pins one exact version per target ontology and records the selected
+names. A future linker can consolidate source imports, check the selection,
+and resolve references against a pinned module universe. The source of any
+lock and its representation remain open.</li>
+</ul>
+<p>Maps and sets order independent declarations, imports, named members, and
+contract sets by their keys. Two otherwise equal models compare equal across
+input permutations. Stable byte encoding is a separate format decision.
+<code>Named&lt;T&gt;</code>, import assembly and external registration reject duplicate keys
+without replacing entries. Constructors check simple names, qualified names
+and cardinality bounds. The model can describe forward and cyclic business
+references. Validation of target kinds, field legality, and recursive value
+types belongs to semantic analysis.</p>
+<p>Registry still owns tenant context, immutable revisions, and publication.
+An <code>OntologyVersion</code> is the version declared by GOL, while Registry and ESKG
+pin server-owned immutable revisions in the existing tenant-scoped contract.
+A future integration must map these explicitly. See <a href="#ontology-and-pipeline-registry">Registry</a>
+and the <a href="#eskg-graph-contract-v1">ESKG contract</a>.</p>
+<h2 id="external-types-and-security"><a class="header" href="#external-types-and-security">External types and security</a></h2>
+<p>The host explicitly registers an <code>ExternalTypeDescriptor</code> keyed by an exact
+<code>ExternalTypeId</code>. A descriptor can carry a schema and fingerprint, a canonical
+value encoding, size and depth limits, and an adapter implementation identity
+and version with a host ABI requirement. Capabilities start empty. Validation,
+projection, equality, ordering, and indexing are explicit and independent
+declarations. Schema metadata and codec support confer none of them.
+The core stores these values and checks registry uniqueness. Adapter trust,
+compatibility checking, encoding and resource limits require later host
+integration. Chrono, chrono-tz and Jiff can be supplied through future adapters.</p>
+<p>A type or field can retain a versioned <code>SecurityContract</code>. Each protected
+operation binds a relationship permission and a contextual policy action.
+The relationship contract pins the schema and resource bridge. The contextual
+contract pins the policy bundle. An IFC label reference and sink/purpose
+restrictions can be attached independently. A field’s requirements and its
+type’s requirements are both retained. A future validator checks that all
+required obligations are present, and the runtime needs to enforce them
+together. An absent contract and a public IFC classification carry no grant.</p>
+<p>IAM supplies authenticated subjects, accounts and groups. SpiceDB owns
+relationship tuples and grants. Cedar evaluates predicates over resource
+attributes and trusted request context. IFC governs classification and flows,
+including release after a successful read. A business <code>Person</code> is a domain
+type. A GOL <code>Ref&lt;Person&gt;</code> refers to that domain type and provides no way to
+construct a principal, grant or authorization decision. The core performs no
+policy linking or evaluation, label propagation, or transfer enforcement.</p>
+<p>The library reports local construction rejections as bounded reason codes in
+the host’s <code>tracing</code> subscriber. Galadril binaries can export them through the
+existing OTLP bridge. The library does not install a subscriber or initiate
+network I/O. Logs contain no input name, schema text or policy details.</p>
+<h2 id="handoff-to-parsing-and-semantic-analysis"><a class="header" href="#handoff-to-parsing-and-semantic-analysis">Handoff to parsing and semantic analysis</a></h2>
+<p><code>Expression</code> carries a definition identity and declared data and control
+dependencies. <code>TypedExpression</code> and <code>Predicate</code> specify the expected result
+type. They carry no expression body. An action describes parameters, result,
+preconditions, postconditions, effects and retry guarantees. These are
+declarations the host must validate. The model has no evaluator, callback,
+adapter loader, or way to execute an action.</p>
+<p>The parser produces an ordered AST with source spans. <a href="#gol-semantic-analysis">Semantic analysis</a>
+collects symbols, resolves imports and checks types before lowering declarations
+into this model. The checked project retains expression bodies and local
+security linkage alongside the canonical modules. Source locations stay in the
+diagnostics. Validation against external authorities belongs to the next phase.</p>
+<p>For publication, the mission specifies source history in lakeFS and active
+<code>.golc</code> artifacts and operational manifests in RustFS. Older compiled
+generations can coexist temporarily for reader consistency during publication.
+The future container will use indexed, independent FlatBuffers blocks.
+Block placement, dependency indexes and range locations belong to the format
+and storage components.</p>
+<p>Run the library tests and executable Rustdoc example with
+<code>cargo test -p galadril-ontology</code> or
+<code>bazel test //platform/ontology/rust:all</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-source-grammar"><a class="header" href="#gol-source-grammar">GOL source grammar</a></h1>
+<p><a href="../../platform/ontology/rust/src/syntax/gol.pest">gol.pest</a> is the grammar
+used by the embedded Rust parser. The syntax follows the declaration shapes
+in GOL v0.3 and specifies the lexical and expression rules left open by the
+draft. A <code>.gol</code> source contains one or more <code>ontology</code> blocks. Each block
+declares a module with a qualified name, a quoted version and declarations in
+any order. The AST retains that order and leaves version validity, symbol
+uniqueness, visibility and reference resolution to semantic analysis.</p>
+<h2 id="lexical-rules"><a class="header" href="#lexical-rules">Lexical rules</a></h2>
+<p>Identifiers use case-sensitive ASCII letters and underscores followed by ASCII
+letters, digits or underscores. This matches the canonical model’s name
+segments. A dot separates segments of an ontology, type, target or import
+path. In expressions, <code>::</code> qualifies a symbol such as <code>Status::Archived</code>
+and a dot selects a property such as <code>message.status</code>. Both forms preserve
+their segments and positions.</p>
+<p>Spaces, tabs, CR and LF separate tokens. Comments use <code>//</code> through the end
+of a line or a non-nested <code>/* … */</code> block. These may appear between
+tokens. Strings use double quotes, and characters use single quotes and
+contain one Unicode scalar. Both support UTF-8 and the escapes
+<code>\"</code>, <code>\'</code>, <code>\\</code>, <code>\n</code>, <code>\r</code>, <code>\t</code>, <code>\0</code> and
+<code>\u{H…}</code> with one to six hexadecimal digits. Raw control characters
+require escaping. Surrogate values and values above U+10FFFF are rejected.
+Decimal literals preserve their spelling. A float has digits after the
+decimal point, a signed or unsigned exponent, or both. A leading minus is
+a prefix operator.</p>
+<h3 id="reserved-words"><a class="header" href="#reserved-words">Reserved words</a></h3>
+<pre><code class="language-text">ontology version import type entity relation attribute struct enum
+key field owns role invariant on derive view from project as where
+action requires ensures effects read write emit retry idempotent
+non_idempotent deduplicated security label classification compartments
+integrity destinations purposes access resource permission cedar permit
+forbid when unless
+true false Option List Ref Unit bool char String
+i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
+usize isize unsafe fn loop while for let mut
+</code></pre>
+<p>The last line reserves unsupported Rust forms. IFC classification spellings
+<code>Public</code>, <code>Internal</code>, <code>Confidential</code> and <code>Restricted</code> are contextual
+and can also be used as ordinary identifiers, for example in an enum.</p>
+<h2 id="declarations-and-types"><a class="header" href="#declarations-and-types">Declarations and types</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Form</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>Module header</td><td><code>ontology industry.assets version "1.0.0" { … }</code></td></tr>
+<tr><td>Module import</td><td><code>import industry.assets version "1.0.0";</code></td></tr>
+<tr><td>Selected symbols</td><td><code>import industry.assets::{Machine, Inspection};</code></td></tr>
+<tr><td>Registered external type import</td><td><code>import type gal.time::Instant;</code></td></tr>
+<tr><td>Entity</td><td><code>entity Machine { key id: Id; field status: Status; owns Serial [0..1]; }</code></td></tr>
+<tr><td>Relation</td><td><code>relation Inspected { role asset: Machine [1..1]; role report: Inspection [1..*]; }</code></td></tr>
+<tr><td>Attribute domain</td><td><code>attribute Serial: String;</code></td></tr>
+<tr><td>Type alias</td><td><code>type InspectionHistory = List&lt;Ref&lt;industry.assets.Inspection&gt;&gt;;</code></td></tr>
+<tr><td>Structured type</td><td><code>struct AssetSummary { field status: Status; }</code></td></tr>
+<tr><td>Enumeration</td><td><code>enum Status { Active, Retired, }</code></td></tr>
+<tr><td>Invariant</td><td><code>invariant SerialPresent on Machine { serial != "" }</code></td></tr>
+<tr><td>Derivation</td><td><code>derive IsRetired on Machine.retired: bool = status == Status::Retired;</code></td></tr>
+<tr><td>View</td><td><code>view AssetStatus from Machine { project status; where retired == false; }</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Imports may select a single symbol with <code>::Name</code> or a list with
+<code>::{Name, Other}</code>. The optional quoted version follows the selection.
+Unpinned syntax represents an import to be resolved through a later lock.
+The type modifier marks an external registry lookup. A trailing <code>as Alias</code>
+after the optional version aliases the namespace or a single selected symbol.
+The analyzer rejects an alias on a group of multiple symbols. Enum payloads
+are deferred. The AST gives each variant its own range.</p>
+<p><code>Option&lt;T&gt;</code> and <code>List&lt;T&gt;</code> can nest. <code>Ref&lt;T&gt;</code> takes a named target.
+A named type may denote a local definition, a cross-module type or a
+registered external type. Numeric width and cardinality checks, reference
+kinds and collection bounds belong to later semantic analysis.</p>
+<h3 id="expressions"><a class="header" href="#expressions">Expressions</a></h3>
+<p>From highest to lowest precedence:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Form</th><th>Associativity</th></tr>
+</thead>
+<tbody>
+<tr><td>Property access <code>.</code></td><td>Left to right</td></tr>
+<tr><td>Prefix <code>!</code>, <code>-</code></td><td>Right to left</td></tr>
+<tr><td><code>*</code>, <code>/</code>, <code>%</code></td><td>Left to right</td></tr>
+<tr><td><code>+</code>, <code>-</code></td><td>Left to right</td></tr>
+<tr><td><code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></td><td>One comparison per level</td></tr>
+<tr><td><code>==</code>, <code>!=</code></td><td>One equality operator per level</td></tr>
+<tr><td><code>&amp;&amp;</code></td><td>Left to right</td></tr>
+<tr><td>`</td><td></td></tr>
+</tbody>
+</table>
+</div>
+<p>Parentheses preserve an explicit group. Terminal expressions are literals or
+symbol paths. Same-precedence infix operators, prefixes and property chains
+are stored as sequences to bound the depth of long, flat expressions.
+Invariants and derivations spell their target with <code>on</code>. Views specify one
+source with <code>from</code>, one or more <code>project</code> statements with an optional
+<code>as</code> name, then an optional <code>where</code>. These forms and operator rules
+are Phase 2 decisions for the areas left open by v0.3.</p>
+<h3 id="actions-and-security"><a class="header" href="#actions-and-security">Actions and security</a></h3>
+<p>An action declares named, typed parameters, an optional result and
+<code>requires</code>, <code>ensures</code>, <code>effects</code> or <code>retry</code> clauses. The semicolon
+ends the contract. Effects have a named target and use <code>read</code>, <code>write</code>
+or <code>emit</code>. Retry declarations use <code>idempotent</code>, <code>non_idempotent</code> or
+<code>deduplicated(parameter)</code>. Clause multiplicity and validity remain semantic
+checks.</p>
+<p>An <code>access Target</code> block can name an external resource, define local
+permissions and map fields with <code>field name requires Permission;</code>.
+Permission bodies use <code>relation: "…";</code> for SpiceDB and <code>cedar: "…";</code>
+for a Cedar action reference. The latter is a quoted external name. Policies
+use <code>permit Target</code> or <code>forbid Target</code>, followed by optional
+<code>when { expression }</code> and <code>unless { expression }</code> in that order, then
+<code>;</code>. Targets are explicit GOL paths. The expressions are GOL syntax.
+Native Cedar bodies and external schema and bundle linking are deferred.</p>
+<p><code>security label Name { … }</code> accepts a confidentiality <code>classification</code>,
+optional <code>integrity</code> and lists of <code>compartments</code>, <code>destinations</code>
+and <code>purposes</code>. Fields can attach <code>@label(Name)</code> and
+<code>@requires(Permission)</code>. The protection annotation and the path-based policy
+scope are Phase 2 spelling choices. The AST carries every written binding and
+label declaration for later validation. Policy decisions, IFC propagation and
+runtime effects belong to later components.</p>
+<p>The <a href="../../platform/ontology/rust/tests/fixtures/mail.gol">mail fixture</a>
+combines these forms. Its <code>Message</code> refers forward to its <code>Attachment</code>
+and status types, imports a temporal type and binds a permission to SpiceDB
+and Cedar. A scoped policy supplies a GOL condition and the action describes
+its contract.</p>
+<h2 id="parser-api-and-diagnostics"><a class="header" href="#parser-api-and-diagnostics">Parser API and diagnostics</a></h2>
+<p>The default Cargo feature <code>parser</code> exposes
+<code>galadril_ontology::syntax::parse_source(name, text)</code>. The caller reads or
+owns the UTF-8 source. The AST borrows names, numeric lexemes and unescaped
+string text. Only escaped literals are decoded into owned strings. Nodes
+carry half-open byte ranges relative to their <code>SyntaxTree::source</code>.
+<code>parse_sources</code> yields one result per input in input order, on demand.
+Compilation can use those trees in a later symbol collection and resolution
+pass. Import paths and external references remain data in the AST.</p>
+<p>Malformed input returns the first detected <code>ParseError</code> with a stable
+<code>gol::</code> code, source name, byte range and an expected construct where
+available. Attach the original text using <code>with_source</code> for miette
+presentation. The library traces only the rejection code through the host.
+A lexical pass bounds each source at 1 MiB, 32 nested delimiters including
+generic brackets, and 32,768 lexical units. The work budget counts words
+or digit runs, literals and individual punctuation bytes. Whitespace and
+comments contribute to the byte budget. These are parser limits independent
+of future compiler or execution budgets.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-semantic-analysis"><a class="header" href="#gol-semantic-analysis">GOL semantic analysis</a></h1>
+<p><code>galadril_ontology::semantic::analyze_project</code> accepts the existing
+<code>SyntaxTree</code> values and an <code>Environment</code>. The environment carries a
+local external type registry, the types of trusted context properties and the
+default list bound. The compiler consumes these inputs synchronously. It
+returns a <code>Project</code> on success or a set of located, stable diagnostics.
+The Cargo feature <code>parser</code> enables parsing and semantic analysis together.</p>
+<h2 id="passes"><a class="header" href="#passes">Passes</a></h2>
+<ol>
+<li><strong>Collect modules and declarations.</strong> A compilation accepts one exact
+SemVer version per ontology ID. Each module has a namespace shared by its
+top-level declaration kinds. Access blocks and policies are keyed by
+their resolved targets in a later pass. Every named declaration in the
+current syntax is exported.</li>
+<li><strong>Build import scopes.</strong> The analyzer binds absolute paths, selected exports
+and aliases against the collected modules and the host registry. Each
+scope indexes visible spellings by hash lookup. Source and module order
+have no effect on name resolution.</li>
+<li><strong>Resolve signatures.</strong> Resolve field and action parameter types,
+relation roles, aliases and cardinalities across all modules. An
+iterative depth-first traversal rejects cycles in by-value definitions.</li>
+<li><strong>Check bodies.</strong> Resolve property paths and enum values and check
+constraints, projections and action clauses against the complete
+signature table. Reject cycles among derived fields.</li>
+<li><strong>Bind security targets.</strong> Collect access permissions first, then resolve
+guards, labels and policies. Check GOL policy conditions in the target
+scope and validate their types against the host-provided context shape.</li>
+<li><strong>Assemble the project.</strong> Emit the Phase 1 <code>Ontology</code> values and
+source-independent metadata. Dense <code>SymbolId</code> values follow the sorted
+<code>SymbolRef</code> order and are scoped to this compilation. Logical
+<code>SymbolKey</code> values remain stable across source and version changes.</li>
+</ol>
+<p>Each pass gathers independent errors before it stops the pipeline. A later
+pass requires valid inputs from the earlier passes, which avoids cascades
+from missing modules or types. Diagnostics sort by source ID, byte range and
+stable code. Duplicate module declarations and conflicting import spellings
+include a secondary location when available. The diagnostics implement
+miette and may be presented with caller-supplied source text. Rejection
+telemetry contains only the stable error code.</p>
+<h2 id="imports-and-names"><a class="header" href="#imports-and-names">Imports and names</a></h2>
+<p><code>import lib;</code> admits both <code>Item</code> and <code>lib.Item</code>.
+<code>import lib::{Item};</code> admits only the selected symbol.
+<code>import lib as items;</code> exposes <code>items.Item</code> and <code>lib.Item</code>.
+<code>import lib::Item as Entry;</code> exposes <code>Entry</code> and <code>lib.Item</code>.
+Ambiguous spellings and reused module qualifiers are diagnosed. Multiple
+imports of the same module normalize to one pinned dependency with the union
+of the selected names. An omitted module version uses the single version
+supplied in the project. An explicit version must match exactly.</p>
+<p>External imports use <code>import type</code>. They resolve the namespace and type
+name in the registry and select an exact descriptor version. An unpinned
+external name must have exactly one candidate. Backend adapter linkage remains
+pending. A plain external qualified path is visible only through an import.</p>
+<h2 id="type-rules"><a class="header" href="#type-rules">Type rules</a></h2>
+<ul>
+<li><code>Ref&lt;Entity&gt;</code> carries an exact entity reference. Cyclic module imports
+and cycles through such identity references are valid. Structural cycles
+through aliases, structs, <code>Option</code> or <code>List</code> are rejected under the
+current value-type rules.</li>
+<li>Relations have one or more uniquely named roles with entity participants.
+Different roles may use the same entity type. Cardinalities are unsigned
+<code>u32</code> bounds with an inclusive upper bound or an unbounded marker.
+An explicit lower bound above the upper bound is rejected.</li>
+<li>Type aliases are transparent for compatibility. Structs and enums are
+nominal. An enum variant resolves through a qualified enum name or the
+expected enum type where the expression supplies one.</li>
+<li>Integer and float literals take a compatible expected numeric type from the
+declaration or an operand. The defaults are <code>i64</code> and <code>f64</code>. The
+analyzer checks literal ranges, including signed minima, and rejects
+non-finite float literals. Typed values keep their declared widths.</li>
+<li>Arithmetic requires matching numeric types and remainder requires integers.
+Boolean operators and predicates require <code>bool</code>. Equality is supported
+for scalar values other than <code>Unit</code>, enum values and compatible
+entity references. Ordering is supported for integers, strings and chars.
+Float ordering awaits an explicit policy. External equality and ordering
+require the corresponding descriptor capability.</li>
+<li>Property paths resolve every hop against an entity or structured value.
+Scoped relation expressions can traverse singleton roles. Optional and
+collection values need an explicit future access operation. External
+schema projection awaits a contract that supplies checked member types.</li>
+<li>A view projects a record and can filter it with a Boolean expression.
+Computed outputs require explicit names. A derivation supplies the value
+of a declared field at that field’s type. An action checks Boolean
+preconditions and postconditions, effect paths rooted in declared
+parameters and the name of any deduplication parameter. The action result
+is visible in postconditions. Keys and derived fields cannot be written.</li>
+</ul>
+<p>These rules deliberately limit Phase 3 to locally checkable contracts. View
+composition, recursive value semantics, projected external schemas and
+collection traversal remain open. Runtime arithmetic, idempotence and
+instance cardinality enforcement belong to later components.</p>
+<h2 id="canonical-result-and-handoff"><a class="header" href="#canonical-result-and-handoff">Canonical result and handoff</a></h2>
+<p>The canonical modules use the Phase 1 <code>Ontology</code>, <code>Declaration</code>,
+<code>TypeRef</code> and <code>SymbolRef</code> types. The project also owns checked
+expression bodies keyed by the canonical <code>Expression::definition</code>,
+resolved effect paths, IFC transfer declarations and security metadata.
+Field paths are stored flat. Effects retain their action parameter roots,
+even when two parameters have the same type and the same canonical field
+target. Checked expressions contain resolved types and symbols without
+retaining the AST.</p>
+<p>Module dependencies are available in each canonical module’s pinned imports
+and the project’s exact external imports. The declaration dependency set
+distinguishes value types, business references, expression and effect inputs,
+and security obligations. These edges can support forward and reverse
+indexes in a later format.</p>
+<p>Security metadata retains the target, declared SpiceDB permission and Cedar
+action names, checked contextual predicates, resolved field guards and IFC
+labels. A local contract can be valid while external linkage is
+<code>PendingExternal</code>. Invalid contracts produce diagnostics. The
+<code>Project::validation</code> accessor also reports pending adapters and named
+host effects. The <a href="#gol-security-contracts">security compiler</a> consumes both the
+modules and this metadata to link against pinned external schemas and approved
+adapters. Publication authorization remains with its owning service.</p>
+<p>The <a href="../../platform/ontology/rust/tests/fixtures/semantic_mail.gol">mail example</a>
+and its <a href="../../platform/ontology/rust/tests/fixtures/semantic_attachments.gol">attachment module</a>
+exercise mutually importing ontologies, named and external types, typed
+constraints, an action and pending security bindings.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-security-contracts"><a class="header" href="#gol-security-contracts">GOL security contracts</a></h1>
+<p><code>galadril_ontology::authorization::compile</code> accepts a checked GOL
+<code>Project</code> and a trusted <code>SecurityEnvironment</code>. It indexes security
+descriptors by <code>Route</code>, the pair of a version-pinned logical target and
+an operation. The resulting <code>Contract</code> holds the bindings, linked Cedar
+schema and policy sets, effective flow labels, projected Cedar inputs,
+prerequisite routes and static pins. These are the inputs to the future
+security index for <code>.golc</code>.</p>
+<p>An invalid compilation returns target-associated diagnostics. Missing
+authority inputs, unresolved Cedar declarations, missing routes or adapters,
+and emitted effects without a checked transfer contract remain
+<code>PendingExternalValidation</code>. Only a <code>Validated</code> result yields a
+contract through <code>Compilation::publishable()</code>. This is eligibility under
+the static profile. Registry still owns publication, and a runtime still has
+to check each access.</p>
+<h2 id="static-authorities-and-bindings"><a class="header" href="#static-authorities-and-bindings">Static authorities and bindings</a></h2>
+<p>The host supplies approved, immutable revisions of the route configuration,
+SpiceDB schema and ID bridge, and Cedar policy bundle. An <code>AuthorityRevision</code>
+pins each version to the SHA-256 digest of its approved artifact or manifest.
+The authority verifies the artifact before passing its metadata to GOL. The
+runtime compares both versions and fingerprints with the compiled pins.
+A relationship snapshot links each exact GOL resource type to an external
+object type and the permissions defined on it. The compiler verifies the
+shape and membership of each referenced permission. Authenticated subjects
+and dynamic relationship assignments remain with IAM and SpiceDB.</p>
+<p>The object bridge encodes four delimited components as hexadecimal bytes.
+The components are tenant, ontology identity, local declaration name and
+logical instance ID. The instance’s schema version is checked separately,
+which keeps compatible revisions on the same relationship object. An empty
+component or an encoding longer than 1,024 bytes prevents a permission check.
+Tuple writers and readers must use the same approved bridge revision.
+<a href="https://authzed.com/docs/spicedb/concepts/zanzibar/#identifiers">SpiceDB identifier rules</a></p>
+<p>The host approves each Cedar resource projection and applicable action UID.
+The compiler generates Cedar resource and action definitions with required
+resource attributes, context types and the external principal declaration.
+Supported projected values are <code>bool</code>, <code>String</code> and <code>i64</code>,
+including transparent aliases. IAM fragments provide concrete principal
+definitions. The official SDK performs complete schema linking and strict
+policy validation. An invalid action application also blocks publication
+when Cedar reports it as a warning. A declared binding must match its
+generated action, principal and resource profile.
+<a href="https://docs.cedarpolicy.com/schema/schema-linking.html">Cedar schema linking</a></p>
+<p>GOL <code>when</code> and <code>unless</code> predicates lower to Cedar for direct
+projected fields, typed context keys, scalar literals, Boolean operations and
+comparisons supported by both type systems. Unrepresentable types, arithmetic
+and paths outside the approved projection produce diagnostics. A 256-node
+lowering budget bounds generated policy expressions. The native policy bundle
+and each applicable GOL policy layer must independently allow the request.
+Within a layer, Cedar combines its permits and forbids. A forbid-only GOL
+layer restricts the native grant. It has an internal baseline permit that
+cannot satisfy the native bundle.</p>
+<h2 id="route-composition-and-ifc"><a class="header" href="#route-composition-and-ifc">Route composition and IFC</a></h2>
+<p>Phase 7 adds explicit <code>Describe</code> and <code>DescribeTransfer</code> routes for schema
+metadata. A read route does not imply them. The metadata exporter checks each
+selected field and named type, preserving the same binding, Cedar, dependency
+and IFC obligations. <code>DescribeTransfer</code> requires Describe and distinct external
+transfer bindings. Enums, type aliases and scalar attributes can now carry
+resource-level access contracts. See <a href="#authorized-json-contracts">authorized JSON contracts</a>
+for projection rules and the conservative nested-write boundary.</p>
+<ul>
+<li>Deployment configuration assigns one or more named permissions to each
+exposed operation. A field inherits its owner’s permissions for the same
+operation and adds its declared guards. Generic and permission-scoped Cedar
+conditions are each retained. A missing mandatory mapping blocks static
+publication, and an unconfigured runtime route is denied.</li>
+<li>Authorizing a resource symbol covers that route’s resource-level operation.
+The host checks the field routes for the fields it releases or modifies.
+Whole structured values are rejected as field releases until child-level
+enforcement can be represented. Entity references may cross the boundary
+as opaque identities under their field route. Loading a referenced
+resource requires its own instance and authorization.</li>
+<li>A transfer requires the read permissions and a distinct SpiceDB permission
+and Cedar action. Transfers of derived values also depend on read and
+transfer checks for the statically known source fields and control inputs.
+An external sink always requires a transfer route.</li>
+<li>The host supplies an explicit IFC floor, optionally augmented per ontology.
+Entity, field and runtime instance restrictions can strengthen that floor.
+The confidentiality join takes the higher of Public, Internal, Confidential
+and Restricted and unions compartments. Purpose and destination allowlists
+intersect. An omitted list adds no restriction, and an explicit empty list
+denies all. Every release also needs an approved sink, its clearance and
+compartments, and an approved purpose.</li>
+<li>The compiler propagates restrictions through derived fields and views.
+A view inherits its projections and filter inputs, including filters that
+only affect whether a result appears. Prerequisite routes are transitive
+and require evidence for concrete, separately authorized instances. The
+worklist also accounts for declared action inputs and writes. Integrity
+labels require a future integrity policy. Explicit declassification is
+outside this profile.</li>
+</ul>
+<h2 id="runtime-boundary-and-freshness"><a class="header" href="#runtime-boundary-and-freshness">Runtime boundary and freshness</a></h2>
+<p><code>authorize</code> is the decision entry point. The trusted runtime authenticates
+the IAM principal and supplies the exact instance revisions, approved
+destination and purpose, active static contract pins, typed context and
+complete instance evidence for the route’s prerequisites. An access intent
+contains no trusted authentication or contextual claims. The runtime binds
+its evidence to the actual request and must use issuer- and tenant-qualified
+subject identities. The gate checks tenant equality for every instance and
+uses only the requested target’s indexed obligations.</p>
+<p>The <code>PermissionProvider</code> checks the exact subject, resource and permission
+with either fully consistent reads or a required minimum ZedToken. A grant
+must attest to the requested consistency. Opaque ZedTokens are not ordered
+locally. A denial, unresolved caveat, unavailable provider or insufficient
+freshness denies the request. Every decision performs current checks.
+<a href="https://authzed.com/docs/spicedb/concepts/consistency">SpiceDB consistency</a></p>
+<p>Cedar validates the request and loaded entities against the linked schema.
+The gate inspects the diagnostics for each required result. An evaluation
+error denies the request even if Cedar also returned an allow from another
+policy. The gate conjoins runtime validity, relationship checks, all Cedar
+layers, and IFC sink checks. OTLP-compatible rejection events contain only
+the bounded failure category.</p>
+<p>The production adapters still need to connect Gateway, IAM, SpiceDB and the
+trusted entity loader to this interface. They must bind the same tenant and
+runtime snapshot across all proofs, enforce revisions at use, and retain the
+instance IFC restrictions when a value is stored, cached or passed to another
+component. Exports, logs, caches, derived results and action effects need
+their own mandatory release hooks. This phase implements a static compiler
+and an embeddable gate, and its tests use deterministic authorities. It
+provides neither cross-system atomicity nor general non-interference.</p>
+<p>The Cargo feature <code>authorization</code> enables the gate without the GOL parser
+when default features are disabled. Compiling a <code>Project</code> into the
+contract additionally needs the <code>parser</code> feature. The static contract is
+kept in memory by the security compiler. For an authenticated local artifact,
+see <a href="#golc-local-archives">GOLC Local Archives</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="contextual-ifc-and-executable-verification"><a class="header" href="#contextual-ifc-and-executable-verification">Contextual IFC and executable verification</a></h1>
+<p>The existing GOL authorization gate now tracks information actually used by
+each calculation. SpiceDB and every Cedar policy layer remain mandatory. IFC
+adds obligations; it grants no additional access.</p>
+<h2 id="state-and-effects"><a class="header" href="#state-and-effects">State and effects</a></h2>
+<p><code>Clearance</code> is an admission ceiling, not a source label. A <code>Computation</code>
+starts with complete, trusted input provenance. Reads require
+<code>current_label join data_label &lt;= max_clearance</code>, then raise <code>current_label</code>.
+Writes require <code>current_label &lt;= destination_label</code>. High-clearance users can
+write public data when their calculation has only public inputs. Reading
+confidential data prevents a subsequent dependent public write.</p>
+<p>The join takes the higher of Public, Internal, Confidential and Restricted,
+unions compartments and intersects purpose and destination allowlists.
+<code>None</code> adds no restriction; an explicit empty allowlist denies all releases.
+Writes preserve these restrictions as well as level and compartments. There
+is no reset, general declassification or privileged expurgation API.</p>
+<p><code>ExecutionContext</code> binds state to the authenticated issuer, tenant, subject
+type and subject ID. Dependent tasks share it or use <code>fork</code>, which inherits
+all restrictions and cannot erase failure. Failed observations poison the
+calculation: neither effects nor label snapshots can turn their existence
+into lower output. <code>Evidence.max_clearance</code> supplies the current IAM ceiling
+at each check, so a cached admission cannot override a clearance revocation.</p>
+<p>Construction performs accounting, not isolation. The trusted dispatcher must
+include values, captured state, control dependencies, caches, errors and
+absence results. A new request, task ID or caller assertion does not prove
+independence. Unknown dependencies need conservative restrictions. Arbitrary
+host Rust or Python is not sandboxed by this API.</p>
+<p>Approved Cedar resource attributes contribute <code>Descriptor::control_flow</code>
+before evaluation, including denied and erroneous outcomes. Instance floors
+strengthen these inputs. <code>Evidence.context_flow</code> covers trusted time,
+location, MFA and other context; these inputs are not automatically public.
+Approval to load policy attributes is a TCB decision, not an end-user read
+permission. A sink unable to receive the control label is rejected before
+evaluation. Metadata filtering can reject a statically out-of-clearance
+candidate without consulting its value or policy, preserving the same public
+schema as an unknown candidate.</p>
+<p>Action propagation follows preconditions, postconditions, read effects and
+intermediate reference hops of write paths. It no longer raises a write
+destination’s classification from action inputs or turns blind writes into
+reads. Every write is rechecked after all read prerequisites, regardless of
+route ordering. A sensitive source cannot silently reclassify a public
+destination to conceal a prohibited copy.</p>
+<p><code>perform</code> holds the calculation through the actual trusted host effect. The
+local and remote archive readers use the same gate with archived routes and
+need no parser. Whole-symbol and compound field writes are rejected: a
+parent grant cannot replace child checks. Callbacks must be bound to the
+checked resource and destination, use accurate effect declarations, and use
+transactional storage where required. Nested admission on the same context
+is forbidden while its effect is held. Revocation is checked at admission;
+there is no distributed transaction with IAM or SpiceDB.</p>
+<p>An opaque <code>EffectReceipt&lt;T&gt;</code> retains the destination restrictions on success,
+payloads and storage errors. Inspection requires fresh permissions, the
+originating calculation, current clearance and a suitable sink. Field
+mutation results require the corresponding read route. Remote expiry blocks
+admission but does not cancel an already admitted backend mutation, whose
+outcome must remain labelled. Hosts still own cancellation and crash recovery.
+OTLP-compatible tracing emits bounded categories without values, labels,
+subjects, context or backend error text.</p>
+<h2 id="verus-boundary"><a class="header" href="#verus-boundary">Verus boundary</a></h2>
+<p>Production and <code>proofs/ifc.rs</code> import the same executable
+<code>src/authorization/kernel.rs</code>. Official Verus syntax attributes disappear in
+normal Rust builds. The pinned verifier is <code>0.2026.10.04.426d8b0</code>, using Rust
+1.98.1. <code>//platform/ontology/rust:ifc_verus_test</code> runs
+<code>--no-cheating --compile</code>; a missing or different verifier fails. Set
+<code>VERUS_BIN</code> for installations outside PATH. No <code>assume</code>, <code>admit</code>,
+<code>external_body</code> or replacement implementation bypasses verification.</p>
+<p>The proofs cover numeric join bounds and lattice laws, read clearance,
+monotonic state, sticky failure, numeric no-write-down, and conjunctive
+obligations. A public calculation remains writable independently of high
+maximum clearance. These are universally quantified properties of executable
+functions. Dynamic <code>BTreeSet</code> compartments and allowlists, async locks,
+runtime evidence, dependency collection, storage and policy engines are
+outside the proof. Their dimensions enter the numeric kernel through a
+predicate checked by ordinary Rust. Generated tests cover all 262,144 pairs
+in a 512-label fixture lattice and deterministic triples.</p>
+<p>This does not prove application-wide non-interference or process isolation,
+or verify SpiceDB, Cedar or FlatBuffers. The design follows the distinction
+between clearance and current labels in <a href="https://arxiv.org/abs/1207.1457">LIO</a>
+and uses <a href="https://verus-lang.github.io/verus/guide/">official executable Verus specifications</a>.</p>
+<h2 id="production-integration-audit"><a class="header" href="#production-integration-audit">Production integration audit</a></h2>
+<p>The audited checkout has no authoritative binding between published GOLC
+contracts, deployed business properties and authenticated IAM clearances.
+These effect paths remain <strong>outside contextual GOL IFC enforcement</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Entry point</th><th>Existing boundary</th><th>Missing IFC contract</th></tr>
+</thead>
+<tbody>
+<tr><td>Gateway <code>application/usecases/authorization.rs</code></td><td>Loth and tenant Cedar checks</td><td>Clearance, calculation admission and labelled outputs</td></tr>
+<tr><td>Gateway graph <code>explore.rs</code>, <code>relations_age.rs</code></td><td>Tenant and relationship filtering</td><td>Property labels, view/control provenance and release hooks</td></tr>
+<tr><td>Registry <code>domain.rs</code></td><td>Immutable revisions, publication and binding CAS</td><td>Authoritative GOLC-to-property mapping and label revision</td></tr>
+<tr><td>Vision <code>compute/tasks.py::sink_to_db_batch</code></td><td>Tenant batch, transaction and outbox</td><td>Labelled inputs/control and destination checks before writes/publication</td></tr>
+<tr><td>Vision PostgreSQL <code>graph.py::ensure_vertex_on_connection</code></td><td>Tenant, structural kind, immutable ontology reference</td><td>Field destination labels and labelled write results</td></tr>
+<tr><td>Gateway <code>chat_tools.rs</code>, plugins <code>utils/tools.py</code></td><td>Tool leases and delegation</td><td>Transfer labels for model/tool inputs, errors and results</td></tr>
+<tr><td>Ray tasks and model/retrieval caches</td><td>Service-specific isolation</td><td>Complete shared-state/value/control provenance</td></tr>
+</tbody>
+</table>
+</div>
+<p>ESKG business-type classification and workflow privacy booleans are not
+confidentiality labels. This change does not reinterpret them, invent IAM
+clearance or classify unlabelled resources as Public. Until the authoritative
+mapping and isolated dispatcher are specified and connected, <strong>Phase 9 is
+incomplete at application level</strong>. Required inputs are the clearance and
+compartment authority, Registry property-to-route mapping, and durable
+provenance across Python/Ray/Kafka/cache boundaries. Storage must enforce the
+same label revision and destination at commit that were checked at admission.</p>
+<h2 id="compatibility-and-validation"><a class="header" href="#compatibility-and-validation">Compatibility and validation</a></h2>
+<p>IFC semantics are version <strong>2.0.0</strong>. Archived route records require
+<code>control_flow</code> and <code>compound</code>; older records fail closed. Recompile and
+republish old artifacts through the existing atomic publication protocol.
+The binary container framing version is unchanged.</p>
+<p>FlatBuffers unsafe code stays confined to <code>golc-wire</code>, with only the checked
+root helper exported. Handwritten code forbids unsafe Rust. Generated code
+and the FlatBuffers verifier remain trusted dependencies.</p>
+<p>The Docker fixture uses pinned RustFS and SpiceDB, official Cedar and this
+IFC gate. It checks actual stored contents, denied public copies, successful
+protected writes, action ordering, clearance failure, cached context changes,
+ZedToken revocation, receipts and forbidden LLM/unregistered Kafka sinks. A
+separate process admitted before sensitive observations receives fixed public
+inputs and no parent values or control messages. This demonstrates one
+bounded independent calculation, not arbitrary dispatcher isolation.
+No Kafka broker or production Gateway/Vision IFC adapter is exercised.
+The <a href="architecture/gol_ifc_validation.html">validation record</a> lists commands actually run and
+their results.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="golc-local-archives"><a class="header" href="#golc-local-archives">GOLC local archives</a></h1>
+<p>The <code>galadril-ontology</code> crate feature <code>archive</code> enables a permission-checked
+local reader. Add <code>parser</code> to produce artifacts with
+<code>archive::compile_archive(&amp;project, &amp;environment)</code>. The writer compiles
+security for the same checked project that it serializes. It rejects invalid
+or pending security compilation before writing any artifact.</p>
+<h2 id="container-format-v1"><a class="header" href="#container-format-v1">Container format v1</a></h2>
+<p>The 64-byte little-endian header contains the <code>GOLC</code> magic, format revision
+(<code>u32</code>), archive length (<code>u64</code>), root offset (<code>u64</code>), root length (<code>u32</code>),
+reserved zero word, and SHA-256 of the root. The publisher supplies the SHA-256
+of this header independently of the bytes to open. A caller that computes an
+<code>ArchivePin</code> solely from an untrusted file has established no provenance.</p>
+<p>The root is the last block. Every independent FlatBuffer has the <code>GOLB</code> file
+identifier and the schema in <code>platform/ontology/rust/wire/block.fbs</code>. Directory
+pages use up to 32 sorted entries with inclusive upper keys and absolute
+child ranges. Each entry carries the child’s digest. Leaves match exact keys.
+A child must end at or before its parent offset, so references cannot form
+cycles. Readers accept at most eight directory levels and 8 MiB per block.
+All fetched ranges are validated against their trusted digest and verified by
+FlatBuffers before access to a record. Verification is demand driven. Damage to
+an unread range is detected when it is requested.</p>
+<p>Typed symbol projection blocks store a declaration kind and, when applicable,
+a built-in scalar type. Private definition blocks retain the complete canonical
+declarations, expression bodies, effects, import pins, and annotated
+requirements. The v1 payloads for those structured records use canonical GOL
+JSON inside the typed FlatBuffer blocks. Policy payloads use Cedar’s JSON EST
+and the archive preserves the exact schema fragments needed for complete
+linking. Security block keys index the resolved obligations per target and
+operation. Local and external semantic dependencies remain in private records.
+The forward and inverse disclosure indexes use exact endpoint keys.</p>
+<p>The checked-in Rust bindings are regenerated using official <code>flatc</code> 25.12.19:</p>
+<pre><code class="language-sh">flatc --rust -o platform/ontology/rust/wire/src platform/ontology/rust/wire/block.fbs
+</code></pre>
+<h2 id="local-reader-boundary"><a class="header" href="#local-reader-boundary">Local reader boundary</a></h2>
+<p>A trusted host opens <code>ArchiveReader::open(LocalFile::open(path)?, pin)</code>, using
+the immutable pin selected for its deployment. <code>RangeReader</code> also allows an
+instrumented source. Opening reads the manifest, directory path to the
+authority block, and linked Cedar state once. A point query loads the exact
+route and its required security descriptors, calls the phase-four gate, and
+then reads the targeted symbol projection. Index pages have a bounded cache.
+Decisions and symbol payloads are checked on every consultation.</p>
+<ul>
+<li><code>read</code> returns one requested symbol or member. Its result contains no
+dense symbol IDs, neighboring records, security metadata, or full
+declaration bytes.</li>
+<li><code>project</code> releases an entire requested projection only after every
+requested member is allowed.</li>
+<li><code>discover</code> only considers the supplied candidates and emits the visible
+ones. The caller receives no count or list from the underlying directory.</li>
+<li><code>links</code> checks the anchor and each candidate. A link from a field is indexed
+by that field, including on reverse lookup. Granting read access on its
+containing symbol does not disclose the member’s link. Dependencies exposed
+through the reader are the explicit member links, view inputs, and derived
+inputs for which the gate has the pertinent controls.</li>
+</ul>
+<p>Missing, denied, or unreadable point requests produce the same empty result.
+No query returns a raw archive offset, a block, or an error containing private
+record metadata. The file, publication pin, permission adapter and runtime
+identity provider are host capabilities. Keep the file and range source
+inside the trusted deployment boundary. Raw disk access is outside the
+disclosure API. The format provides integrity and authenticated sparse reads
+when the publication pin is trusted. It provides no encryption or
+timing-oblivious access.</p>
+<p>This interface releases ontology metadata. Instance values and the binding
+of actual dependency instances to a request remain the responsibility of the
+trusted runtime described in <a href="#gol-security-contracts">GOL Security Contracts</a>.
+A permit covers this request and its supplied evidence. Independent requests
+may observe different relationship revisions. No production Gateway route or
+service binding is installed by this phase. The same format is available
+through <a href="#remote-golc-publication-and-reads">Remote GOLC Publication and Reads</a>.</p>
+<h2 id="tests"><a class="header" href="#tests">Tests</a></h2>
+<p>The local suite uses an instrumented file backed by a temporary directory.
+It compares sparse reads with the in-memory gate, checks byte-for-byte
+determinism, and records byte counts, offsets and range counts before and
+after the index cache warms. Run it with:</p>
+<pre><code class="language-sh">cargo test --locked -p galadril-ontology --test archive -- --nocapture
+</code></pre>
+<p>The Docker suite uses Testcontainers with SpiceDB <code>v1.56.2</code> and
+<code>serve-testing</code>, isolated in-memory state, and a loopback-only HTTP port.
+It writes a schema and relationships through the real SpiceDB API. Cedar
+runs through the official Rust SDK; the IFC checks come from the compiled
+contract. Clock, MFA, location, resources, and session are fixture evidence
+issued at the trusted runtime boundary. Run the Docker suite explicitly:</p>
+<pre><code class="language-sh">cargo test --locked -p galadril-ontology --test archive_spicedb -- --ignored
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="remote-golc-publication-and-reads"><a class="header" href="#remote-golc-publication-and-reads">Remote GOLC publication and reads</a></h1>
+<p>Enable the <code>remote</code> Cargo feature for RustFS/S3. The adapter uses the same
+AWS S3 SDK already pinned in the Galadril workspace. It needs a trusted S3
+client and a private, dedicated, unversioned bucket. The backend owns the
+tenant and project namespace under <code>gol/v1/&lt;tenant&gt;/&lt;project&gt;/</code>. End users
+receive checked symbols and links. Storage credentials, object paths, the
+manifest and the range source stay at the backend boundary.</p>
+<p>The existing GOLC v1 bytes are unchanged. The compiler still checks the GOL
+project, links security, and emits independently verified FlatBuffer blocks.
+Source revision history remains the responsibility of the lakeFS source
+workflow.</p>
+<h2 id="activation-and-cleanup"><a class="header" href="#activation-and-cleanup">Activation and cleanup</a></h2>
+<ol>
+<li><code>RemoteStore::connect</code> checks bucket versioning. Its isolated probe tests
+create-only writes, rejection of stale ETags, rejection of one of two
+concurrent updates using the same ETag, and the result read back from the
+store. Unsupported configurations fail closed.</li>
+<li><code>stage</code> compare-and-swaps an entry into the operational manifest, uploads
+the unique artifact key with a create-only request, and streams it back
+under its ETag to verify its complete SHA-256 and length. The prior active
+artifact remains usable during staging.</li>
+<li><code>Staged::activate</code> uses the current manifest ETag to activate the staged
+artifact and record temporary retirement for the previous ID in the same
+write. The expected previous active generation is compared on each retry.
+A failed or abandoned stage is reclaimable by the same cleanup protocol.</li>
+<li>A backend maintenance loop holds the result of <code>observe_cleanup</code> and
+invokes <code>sweep</code> once the relevant interval has elapsed. It may retry
+earlier and receives <code>Retained</code> while candidates are still protected.
+The reaper first fences the candidate through a manifest CAS, then
+deletes its immutable object, then removes the retirement entry. A
+restarted reaper can resume fenced deletions. It can also pick up an
+orphaned upload that finished after its publication timed out.</li>
+</ol>
+<p>There is one operational manifest per stream. Its pending entries store IDs
+and lifecycle states, and disappear once cleanup completes. Reject buckets
+with enabled or suspended versioning. Use a private backend IAM role and
+keep administrative bucket/lifecycle mutations out of the read and
+publication path. Runtime CAS conflicts are normal. After an ambiguous
+transport outcome during activation, resolve the active generation before
+reporting final publication status.</p>
+<p>Reader and publisher bounds are recorded in the manifest and must agree
+across processes. A reader starts its window before fetching the manifest.
+Every remote read and every final disclosure, including cache hits, is
+fenced by that window. The reaper observes retired generations for twice the
+reader window, and interrupted publications for twice the publisher window.
+The reaper measures local elapsed time from a linearizable manifest
+observation. Reader expiration uses both a monotonic deadline and a wall-time
+backstop for system suspend. Deploy this profile against strongly consistent
+manifest reads and clocks that track elapsed time. Opening a fresh snapshot
+is required when the existing window expires. There is no automatic cleanup
+worker in the library. The backend holding the namespace must schedule the
+observer and sweeper.</p>
+<h2 id="sparse-access"><a class="header" href="#sparse-access">Sparse access</a></h2>
+<p>The adapter sends an exact HTTP range and <code>If-Match</code> pinned to the manifest
+artifact ETag. It validates the response ETag, <code>Content-Range</code>, declared
+length and streamed byte count. It rejects a full response to a ranged
+request. The reader authenticates each touched fragment against the root
+from the manifest. A lost range, timeout, or invalid fragment produces the
+same unavailable query result as an access refusal.</p>
+<p>The RAM and optional SSD caches have byte and entry limits. Keys include the
+generation and expected content hashes, and entries contain only
+authenticated fragments. SSD entries use anonymous temporary files and do
+not persist across process restart. Cache hits still pass through the
+phase-four live SpiceDB, Cedar and IFC gate. The reader enforces tenant scope
+before the gate. Raw data and verified storage metadata stay within backend
+code, including range metrics.</p>
+<p>The optional batched strategy overlaps independent dependency index paths
+and merges exactly adjacent authenticated ranges. The batch width is at
+most eight. The reader waits to fetch any projected symbol until current
+permissions have passed. Phase-five disclosure rules for links, discovery
+and projections apply equally to the remote reader.</p>
+<h2 id="reproduction"><a class="header" href="#reproduction">Reproduction</a></h2>
+<pre><code class="language-sh">cargo test --locked -p galadril-ontology --features remote --test remote -- --ignored
+cargo test --locked -p galadril-ontology --features remote --test archive_spicedb docker_rustfs_spicedb -- --ignored
+cargo test --locked -p galadril-ontology --features remote --lib http_incomplete_or_non_range -- --ignored
+cargo test --locked -p galadril-ontology --features remote --test archive_spicedb docker_rustfs_benchmark -- --ignored --nocapture
+bazel test //platform/ontology/rust:all
+bazel test //platform/ontology/rust:remote_security_test
+</code></pre>
+<p>The Docker tests use RustFS 1.0.1 pinned to the digest already deployed by
+Galadril and SpiceDB v1.56.2. The benchmark compares whole download, uncached
+ranges, warm RAM cache and grouped/parallel uncached ranges, with 24 samples
+per size and strategy. It reports p50/p95/p99 for open, a derived-view lookup
+and a reference lookup. S3 counts include manifest GETs and response payload
+bytes. SDK retries are disabled in the fixture. CPU and RSS are sampled on
+the client process. The separately timed in-memory authority gate includes
+SpiceDB, Cedar and IFC.</p>
+<h2 id="local-rustfs-benchmark"><a class="header" href="#local-rustfs-benchmark">Local RustFS benchmark</a></h2>
+<p>The following run used loopback on macOS arm64 with a Docker VM and the
+unoptimized Cargo test profile. Each row represents 24 open, view and
+link queries. Timing triplets are p50/p95/p99 in milliseconds. Counts and
+bytes are totals. RSS readings include retained allocations from earlier
+rows in the same process and do not estimate isolated peak memory.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: right">Entities</th><th>Strategy</th><th style="text-align: right">Open ms</th><th style="text-align: right">View ms</th><th style="text-align: right">Links ms</th><th style="text-align: right">S3 GETs</th><th style="text-align: right">Response bytes</th><th style="text-align: right">Client CPU ms</th><th style="text-align: right">Client RSS KiB before → after</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: right">640</td><td>Full archive</td><td style="text-align: right">16.76/27.43/27.64</td><td style="text-align: right">9.40/13.32/14.39</td><td style="text-align: right">3.63/9.41/15.73</td><td style="text-align: right">48</td><td style="text-align: right">16,139,712</td><td style="text-align: right">500</td><td style="text-align: right">48,176 → 50,096</td></tr>
+<tr><td style="text-align: right">640</td><td>Uncached ranges</td><td style="text-align: right">41.75/66.75/114.56</td><td style="text-align: right">84.92/121.09/122.69</td><td style="text-align: right">86.97/132.98/135.04</td><td style="text-align: right">1,104</td><td style="text-align: right">2,287,872</td><td style="text-align: right">2,410</td><td style="text-align: right">50,096 → 50,240</td></tr>
+<tr><td style="text-align: right">640</td><td>RAM cache</td><td style="text-align: right">13.89/23.07/27.51</td><td style="text-align: right">13.90/23.21/28.11</td><td style="text-align: right">4.96/9.37/11.18</td><td style="text-align: right">40</td><td style="text-align: right">33,976</td><td style="text-align: right">490</td><td style="text-align: right">50,624 → 50,640</td></tr>
+<tr><td style="text-align: right">640</td><td>Grouped/parallel ranges</td><td style="text-align: right">43.37/68.64/71.72</td><td style="text-align: right">55.85/78.33/84.26</td><td style="text-align: right">67.24/110.15/143.09</td><td style="text-align: right">1,104</td><td style="text-align: right">2,287,872</td><td style="text-align: right">1,930</td><td style="text-align: right">50,656 → 50,640</td></tr>
+<tr><td style="text-align: right">3,200</td><td>Full archive</td><td style="text-align: right">22.96/30.31/34.40</td><td style="text-align: right">11.30/24.01/24.47</td><td style="text-align: right">3.54/6.10/9.77</td><td style="text-align: right">48</td><td style="text-align: right">75,240,648</td><td style="text-align: right">570</td><td style="text-align: right">79,072 → 83,424</td></tr>
+<tr><td style="text-align: right">3,200</td><td>Uncached ranges</td><td style="text-align: right">50.15/68.80/69.66</td><td style="text-align: right">87.68/120.94/122.10</td><td style="text-align: right">98.38/137.03/137.39</td><td style="text-align: right">1,104</td><td style="text-align: right">2,571,336</td><td style="text-align: right">2,600</td><td style="text-align: right">83,424 → 80,368</td></tr>
+<tr><td style="text-align: right">3,200</td><td>RAM cache</td><td style="text-align: right">13.60/18.80/22.90</td><td style="text-align: right">13.78/26.21/27.06</td><td style="text-align: right">5.81/9.10/10.32</td><td style="text-align: right">41</td><td style="text-align: right">39,784</td><td style="text-align: right">480</td><td style="text-align: right">80,368 → 80,368</td></tr>
+<tr><td style="text-align: right">3,200</td><td>Grouped/parallel ranges</td><td style="text-align: right">40.12/47.41/60.45</td><td style="text-align: right">54.16/74.25/77.88</td><td style="text-align: right">69.47/99.42/107.57</td><td style="text-align: right">1,104</td><td style="text-align: right">2,571,336</td><td style="text-align: right">1,890</td><td style="text-align: right">80,368 → 80,384</td></tr>
+</tbody>
+</table>
+</div>
+<p>Archive sizes were 672,132 and 3,134,620 bytes. The phase-five local point
+lookup on the first archive read 20,776 bytes including the initial open
+and 804 bytes when warm. The remote benchmark used a derived view and an
+additional intermodule link lookup, so their byte counts have different
+query scopes.</p>
+<p>The combined authority gate measured 6.81/14.55/21.83 ms and
+5.21/13.22/14.98 ms. A burst of four simultaneous view queries on the
+3,200-entity archive completed in 60.30 ms for sequential ranges,
+22.08 ms for warm RAM, and 67.61 ms for parallel ranges. RAM hit rates
+were 98.5% and 98.4%. The adjacent-range verifier has a dedicated test.
+The selected view did not offer mergeable ranges. Overlap reduced
+individual uncached view latency while the HTTP counts stayed constant.
+Sequential sparse reads with a bounded RAM cache are the default.
+Parallelism and SSD are configurable. These loopback results do not
+establish WAN latency or production throughput.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="authorized-json-contracts"><a class="header" href="#authorized-json-contracts">Authorized JSON contracts</a></h1>
+<p>Enable <code>galadril-ontology/export</code> to project validated GOL metadata. It is
+optional and does not add an inference engine. <code>ProjectExporter</code> compiles the
+security environment against the same validated <code>semantic::Project</code> it reads.
+<code>ArchiveReader::export_schema</code> uses authenticated definition blocks already
+present in GOLC v1. <code>RemoteArchive::export_schema</code> adds the existing RustFS
+snapshot deadline and tenant fence. Neither archive path requires <code>.gol</code>
+sources, the parser, nor the semantic compiler. The binary format is unchanged.</p>
+<h2 id="api-and-explicit-selections"><a class="header" href="#api-and-explicit-selections">API and explicit selections</a></h2>
+<p><code>ExportRequest</code> borrows a <code>Projection</code>, <code>ExportOptions</code>, and an
+<code>ExternalMappings</code> registry. A root <code>Selection</code> contains an actual instance
+access intent and a sorted whitelist of candidate fields. Empty means no
+fields, never all fields. Named value types and <code>Ref&lt;T&gt;</code> targets need separate
+<code>Projection::definitions</code> selections with their own verified instance context.
+Unknown and denied fields are omitted identically. If a nonempty root selection
+has no visible field, export returns <code>Unavailable</code>.</p>
+<pre><code class="language-rust ignore">let options = ExportOptions {
+    profile: SchemaProfile::OpenAiStrict,
+    ..ExportOptions::default()
+};
+let request = ExportRequest {
+    projection: &amp;projection,
+    part: SchemaPart::Value,
+    options: &amp;options,
+    mappings: &amp;mappings,
+};
+let contract = archive.export_schema(&amp;request, &amp;runtime, &amp;spicedb).await?;
+contract.validate_json(&amp;candidate)?;</code></pre>
+<p>The same engine serves API contracts and MCP action schemas. Select an action
+and use <code>SchemaPart::ActionInput</code> for <code>inputSchema</code>, then
+<code>SchemaPart::ActionOutput</code> for <code>outputSchema</code>. The result has an object envelope
+with a required <code>result</code> property, including scalar or unit results. Required
+action parameters cannot be silently excluded. No action is executed and no
+execute permission is granted.</p>
+<h2 id="security-boundary"><a class="header" href="#security-boundary">Security boundary</a></h2>
+<p><code>Operation::Describe</code> is a distinct metadata permission, selected explicitly by
+the trusted deployment in <code>SecurityEnvironment::routes</code>. Existing read routes
+do not automatically grant it. Its descriptor inherits the root and field’s
+SpiceDB bindings, Cedar conditions, IFC floor and dependency obligations.
+<code>DescribeTransfer</code> additionally inherits Describe and requires its own transfer
+bindings, actual sink and purpose. Read permission alone never permits export
+to an external LLM. No new authorization engine or decision cache is introduced.</p>
+<p>The root, each candidate property, and each used named definition are checked
+through the phase 4 gate before disclosure. A denied type suppresses its
+property. Its name and <code>$defs</code> entry are not emitted. <code>Ref&lt;T&gt;</code> emits a closed
+<code>{type, id}</code> object containing an approved versioned logical identity and an
+opaque nonempty ID. It never traverses the target graph. External relations,
+derivations and views keep the existing conservative dependency obligations.
+Relation and view definitions themselves are not JSON records in this profile.
+Descriptions, source locations, annotations and policy bodies are deliberately
+not copied into public contracts. Error categories contain no hidden names.</p>
+<p>Schemas are request-scoped results. Re-export always repeats SpiceDB, Cedar
+and IFC decisions, even when all binary fragments are cached. No schema cache
+exists, so neither principal nor context can reuse another decision. The host
+must re-export before subsequent disclosure and must not treat a previously
+returned schema as a permission lease. Context, identity, clock, location,
+resource state, ZedToken consistency and export destination come from the
+existing trusted runtime. <code>tracing</code> emits bounded <code>gol.export.unavailable</code>
+events without field names or candidate contents into the host OTLP pipeline.</p>
+<h2 id="representations-and-precision"><a class="header" href="#representations-and-precision">Representations and precision</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>GOL value</th><th>JSON representation</th></tr>
+</thead>
+<tbody>
+<tr><td>Entity / struct</td><td>Closed object, independently selected fields</td></tr>
+<tr><td>Simple enum</td><td>String <code>enum</code>, sorted variants</td></tr>
+<tr><td><code>bool</code>, <code>String</code>, unit</td><td>Boolean, string, null</td></tr>
+<tr><td><code>char</code></td><td>One Unicode scalar, standard profile</td></tr>
+<tr><td><code>i8</code> through <code>i32</code>, <code>u8</code> through <code>u32</code></td><td>Integer with exact bounds</td></tr>
+<tr><td>All signed/unsigned Rust integers through 128 bits</td><td>Explicit <code>DecimalStrings</code>, exact canonical decimal range regex</td></tr>
+<tr><td><code>i64</code>, <code>u64</code>, <code>i128</code>, <code>u128</code> as numbers</td><td>Rejected because the full domain exceeds exact binary64 integers</td></tr>
+<tr><td><code>f32</code>, <code>f64</code></td><td>Finite bounded JSON number only with <code>allow_float_rounding</code></td></tr>
+<tr><td><code>Option&lt;T&gt;</code></td><td>Nullable <code>anyOf</code>, optional property in standard profile</td></tr>
+<tr><td>Bounded <code>List&lt;T&gt;</code></td><td>Array with <code>items</code> and canonical <code>maxItems</code></td></tr>
+<tr><td>Alias / nominal scalar attribute</td><td>Authorized <code>$defs</code> / <code>$ref</code>; optional aliases retain optionality</td></tr>
+<tr><td>Registered external scalar</td><td>Explicit host-approved, versioned JSON mapping</td></tr>
+<tr><td><code>Ref&lt;T&gt;</code></td><td>Typed opaque ID, without recursive entity expansion</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>DecimalStrings</code> applies consistently to every integer in the projection. It
+rejects leading zeros, negative zero, exponent notation and out-of-range
+magnitudes. The default never guesses an encoding or narrows a Rust domain.</p>
+<p>An <code>ExternalMapping</code> is registered against an exact <code>ExternalTypeId</code>. Its
+<code>VersionedName</code> identifies the adapter contract; duplicate registrations fail.
+The supported mapping vocabulary is bounded scalar JSON Schema (<code>type</code>,
+<code>enum</code>, numeric bounds, string length/pattern, and known date/time/UUID formats).
+Remote <code>$ref</code>, arbitrary schema keywords and unknown formats fail registration.
+Integer mappings require safe numeric bounds. The host attests that its actual
+serializer preserves the claimed semantic domain. The constructor validates
+the schema and its format vocabulary, not arbitrary Rust adapter code. A
+<code>Rounded</code> mapping additionally requires explicit precision acceptance.
+<code>chrono</code> and <code>jiff</code> are not discovered or imported. The fixture registers an
+RFC 3339 timestamp with fractional seconds; a date, time, timezone or
+nanosecond instant needs its own exact mapping and serializer contract.</p>
+<h2 id="concrete-profiles"><a class="header" href="#concrete-profiles">Concrete profiles</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Profile</th><th>Required and nullable fields</th><th>Explicit restrictions</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Standard</code></td><td>Non-Option fields required; Option may be absent or null</td><td>JSON Schema Draft 2020-12</td></tr>
+<tr><td><code>OpenAiStrict</code></td><td>Every selected property required; Option accepts null</td><td>Object root, closed objects, conservative eight-level expansion cap; string length keywords rejected</td></tr>
+<tr><td><code>Outlines</code></td><td>Standard optionality and nullability</td><td>Tested against outlines-core <strong>0.2.14</strong>; numeric bounds rejected, so bounded integers require explicit decimal strings; competing string pattern/format/length and enum constraints rejected</td></tr>
+</tbody>
+</table>
+</div>
+<p>Profiles preserve <code>$defs</code>, local <code>$ref</code>, exact ranges and list limits. A
+mandatory constraint is never removed to obtain compatibility. The OpenAI
+profile is a conservative subset of the <a href="https://developers.openai.com/api/docs/guides/structured-outputs">provider’s documented structured
+output schema</a>.
+It does not assert acceptance by other providers, fine-tuned models, or a live
+API. Outlines compatibility uses its official
+<a href="https://docs.rs/outlines-core/0.2.14/outlines_core/json_schema/fn.regex_from_value.html"><code>json_schema::regex_from_value</code></a>
+entry point, without loading a model or generating tokens. Its optional
+<code>outlines-compat</code> feature is needed only for compatibility tests; the upstream
+crate still has tokenizer dependencies even with default features disabled.</p>
+<p>Defaults limit expansion to 12, counted properties/enum values to 256 and
+serialized schema/candidate size to 128 KiB. Hard ceilings are 32, 1024 and
+1 MiB. Definitions are normalized by logical identity; keys use unambiguous
+<code>module::Name@version</code> identities. Object keys, selections and required arrays
+are sorted. Results do not depend on declaration order. JSON validation uses
+<code>jsonschema</code> 0.61.2 with format assertions enabled and an explicit deny-all
+retriever; it cannot fetch a schema URL or open a referenced file.</p>
+<h2 id="structural-validation-and-ingestion"><a class="header" href="#structural-validation-and-ingestion">Structural validation and ingestion</a></h2>
+<p><code>SchemaDocument::validate_json</code> validates only the visible JSON structure.
+An object may pass it and still violate GOL invariants, referential integrity,
+action preconditions, or write permissions. It is not an ingestion grant.</p>
+<p><code>validate_proposal</code> rebuilds the schema with current authorization, checks the
+entity and every supplied field through the ordinary phase 4 <strong>Write</strong> gate,
+then invokes a mandatory trusted <code>GolValidator</code>. This host interface must
+validate the candidate together with current state, omitted protected fields,
+references and all applicable GOL obligations. <code>Rejected</code> includes unavailable
+checks. There is no permissive default implementation. The library never
+persists the object. A host must keep final validation and mutation consistent
+in its own transaction; this API does not eliminate that write-time race.
+The E2E fixture’s validator checks its declared nonempty-title obligation. It
+is not a general-purpose evaluator of arbitrary GOL expressions.</p>
+<p>Whole nested struct assignments are denied at the submission gate, including
+through aliases, Option and List. Phase 4 cannot yet bind writes to those
+individual members, so a parent field grant cannot authorize their replacement.
+Their JSON structure remains exportable and locally validatable. Scalar,
+enum, external scalar and opaque reference assignments can proceed to the
+host’s mandatory validator after their write checks.</p>
+<h2 id="unsupported-conversions-and-avro"><a class="header" href="#unsupported-conversions-and-avro">Unsupported conversions and Avro</a></h2>
+<p>Owned-attribute multiplicities require an explicit value/array mapping and are
+currently rejected. Unbounded lists, recursive value schemas, relation records,
+views, general invariant-to-JSON translation, reference resolution, automatic
+adapters and arbitrary provider dialects are not inferred. Missing permissions,
+contracts or adapter mappings fail closed. JSON Schema does not replace GOL
+business validation.</p>
+<p>Avro is deferred because the same mappings are not lossless automatically.
+A future adapter needs these explicit contracts before exposing events.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>GOL / JSON concept</th><th>Required Avro decision</th></tr>
+</thead>
+<tbody>
+<tr><td>Struct / enum</td><td>Stable Avro full names, enum symbol names and evolution rules</td></tr>
+<tr><td>Option</td><td>Ordered null union, explicit defaults and absence semantics</td></tr>
+<tr><td><code>i64</code>, <code>u64</code>, 128-bit integer</td><td><code>long</code> only when safe; otherwise fixed/bytes decimal logical type with declared precision/scale</td></tr>
+<tr><td>Temporal external types</td><td>Separate date, time and timestamp logical units; timezone and precision contracts</td></tr>
+<tr><td>Typed <code>Ref&lt;T&gt;</code></td><td>A named ID record with preserved ontology/type/version identity</td></tr>
+<tr><td>Partial authorized record</td><td>Security-context-specific contract identity, avoiding a shared schema that reveals hidden fields</td></tr>
+<tr><td>Action / entity</td><td>Explicit event model and lifecycle; neither automatically denotes an event</td></tr>
+</tbody>
+</table>
+</div>
+<p>No Kafka or Schema Registry component is added.</p>
+<h2 id="verification-4"><a class="header" href="#verification-4">Verification</a></h2>
+<p><code>tests/export.rs</code> covers IR/archive equality, deterministic output, protected
+and unknown metadata, aliases, nested records, enums, nullable lists/references,
+external timestamps, precise integer domains, mapping rejection, profile
+limits, action input/output and actual Outlines conversion. Integer tests
+exhaust the i8 and u8 boundaries in both encodings. Existing archive tests keep
+checking deterministic GOLC bytes and selective access.</p>
+<p><code>export_matrix::docker_export_from_rustfs_preserves_all_security_layers</code> in the
+existing <code>archive_spicedb</code> suite runs the source-to-RustFS-to-JSON chain with
+pinned RustFS and SpiceDB Testcontainers, official Cedar and phase 4 IFC. It
+checks root/field denials, cross-ontology protected references, hidden derived
+metadata, MFA, location, absent context, Cedar error, export prohibition,
+ZedToken grant/revocation at warm cache, local/remote equality, external and
+nested values, strict nullability, write denial, mandatory business rejection,
+and unavailable SpiceDB. Containers are isolated from production data.</p>
+<pre><code class="language-sh">bazel test //platform/ontology/rust:export_test
+bazel test //platform/ontology/rust:export_outlines_test
+bazel test //platform/ontology/rust:remote_security_test
+</code></pre>
+<p>The Docker target is explicitly <code>manual</code>, <code>local</code>, and <code>requires-docker</code> and
+runs the ignored Docker tests. Outlines is a manual compatibility target.
+Runtime-only Cargo builds can use <code>--no-default-features --features export</code>
+or <code>--no-default-features --features remote,export</code>. Keep the workspace Bazel
+gate separate from targeted results when platform toolchains prevent analysis.</p>
+<p>On 2026-11-15 the 11 scoped Bazel targets passed, including all four real
+Docker scenarios and the Outlines compatibility target. The measured export
+read 21,932 bytes in 13 archive GETs from a 90,632-byte artifact (24.2%).
+After grant/revocation, the warm projection needed zero additional archive
+GETs while authorization was rechecked. These counters exclude manifest
+traffic, HTTP headers, SDK retries and security-engine requests. They describe
+this fixture, not a general latency or throughput guarantee.</p>
+<p>The workspace <code>bazel test //...</code> gate stopped during document-compiler
+toolchain analysis because no matching C++ toolchain was available. Scoped
+Rust formatting, strict all-target/all-feature Clippy, Cargo regression tests
+and parser-free export builds passed. Workspace nightly formatting reports
+pre-existing differences in the Gateway IAM/directory files.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pipeline-and-ontology-workspaces"><a class="header" href="#pipeline-and-ontology-workspaces">Pipeline and ontology workspaces</a></h1>
 <p>The application shell owns the viewport. Workspaces constrain their flex/grid
