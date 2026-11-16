@@ -1,18 +1,149 @@
-load("@crates//:defs.bzl", "all_crate_deps")
+load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_test")
 
 rust_library(
     name = "ontology",
-    srcs = glob(["src/**/*.rs"], exclude = ["src/archive.rs", "src/authorization.rs", "src/export.rs"]),
+    srcs = glob(["src/**/*.rs"]),
     compile_data = ["src/syntax/gol.pest"],
-    crate_features = ["parser"],
+    crate_features = ["archive", "authorization", "export", "parser", "remote"],
     crate_name = "galadril_ontology",
     proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = [
+        "--check-cfg=cfg(verus_keep_ghost)",
+        "--check-cfg=cfg(test)",
+        '--check-cfg=cfg(feature,values("archive","authorization","export","outlines-compat","parser","remote"))',
+    ],
     visibility = ["//visibility:public"],
-    deps = all_crate_deps(normal = True),
+    deps = [
+        "//platform/ontology/rust/wire:golc_wire",
+        "@crates//:aws-sdk-s3",
+        "@crates//:futures",
+        "@crates//:jsonschema",
+        "@crates//:uuid",
+    ] + all_crate_deps(normal = True) + crate_deps([
+        "tempfile",
+    ]),
 )
 
-rust_test(name = "canonical_test", srcs = ["tests/canonical.rs"], deps = [":ontology"])
-rust_test(name = "syntax_test", srcs = ["tests/syntax.rs"], compile_data = glob(["tests/fixtures/*.gol"]), deps = [":ontology"])
-rust_test(name = "semantic_test", srcs = ["tests/semantic.rs"], compile_data = glob(["tests/fixtures/semantic_*.gol"]), deps = [":ontology"])
-rust_doc_test(name = "ontology_doc_test", crate = ":ontology")
+rust_test(
+    name = "canonical_test",
+    srcs = ["tests/canonical.rs"],
+    deps = [":ontology"],
+)
+
+rust_test(
+    name = "syntax_test",
+    srcs = ["tests/syntax.rs"],
+    compile_data = glob(["tests/fixtures/*.gol"]),
+    deps = [":ontology"],
+)
+
+rust_test(
+    name = "syntax_unit_test",
+    crate = ":ontology",
+    crate_features = ["archive", "authorization", "export", "parser", "remote"],
+)
+
+rust_test(
+    name = "semantic_test",
+    srcs = ["tests/semantic.rs"],
+    compile_data = glob(["tests/fixtures/semantic_*.gol"]),
+    deps = [":ontology"],
+)
+
+rust_doc_test(
+    name = "ontology_doc_test",
+    crate = ":ontology",
+)
+
+rust_test(
+    name = "security_test",
+    srcs = ["tests/security.rs"],
+    compile_data = glob(["tests/fixtures/security_*.gol"]),
+    deps = [":ontology"] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "archive_test",
+    srcs = ["tests/archive.rs", "tests/support/archive_fixture.rs"],
+    compile_data = glob(["tests/fixtures/archive_*"]),
+    crate_root = "tests/archive.rs",
+    deps = [":ontology"] + crate_deps(["cedar-policy", "serde_json", "sha2", "tempfile", "tokio", "tracing"]),
+)
+
+rust_test(
+    name = "remote_test",
+    srcs = ["tests/remote.rs", "tests/support/rustfs.rs"],
+    crate_root = "tests/remote.rs",
+    deps = [":ontology", "@crates//:aws-sdk-s3"] + crate_deps([
+        "reqwest",
+        "testcontainers",
+        "tokio",
+    ]),
+)
+
+rust_test(
+    name = "export_test",
+    srcs = ["tests/export.rs", "tests/support/archive_fixture.rs", "tests/support/export_fixture.rs"],
+    compile_data = glob(["tests/fixtures/archive_*", "tests/fixtures/export_*"]),
+    crate_root = "tests/export.rs",
+    deps = [":ontology"] + crate_deps(["cedar-policy", "serde_json", "sha2", "tempfile", "tokio", "tracing"]),
+)
+
+rust_test(
+    name = "export_outlines_test",
+    srcs = ["tests/export.rs", "tests/support/archive_fixture.rs", "tests/support/export_fixture.rs"],
+    compile_data = glob(["tests/fixtures/archive_*", "tests/fixtures/export_*"]),
+    crate_features = ["export", "outlines-compat", "parser"],
+    crate_root = "tests/export.rs",
+    tags = ["manual"],
+    deps = [":ontology", "@crates//:outlines-core"] + crate_deps(["cedar-policy", "serde_json", "sha2", "tempfile", "tokio", "tracing"]),
+)
+
+rust_test(
+    name = "remote_security_test",
+    srcs = [
+        "tests/archive_spicedb.rs",
+        "tests/support/archive_fixture.rs",
+        "tests/support/export_fixture.rs",
+        "tests/support/export_matrix.rs",
+        "tests/support/ifc_fixture.rs",
+        "tests/support/ifc_matrix.rs",
+        "tests/support/remote_matrix.rs",
+        "tests/support/rustfs.rs",
+    ],
+    args = ["--ignored"],
+    compile_data = glob(["tests/fixtures/archive_*", "tests/fixtures/export_*", "tests/fixtures/ifc.gol"]),
+    crate_features = ["archive", "export", "parser", "remote"],
+    crate_root = "tests/archive_spicedb.rs",
+    tags = ["local", "manual", "requires-docker"],
+    deps = [
+        ":ontology",
+        "@crates//:aws-sdk-s3",
+        "@crates//:futures",
+    ] + crate_deps([
+        "cedar-policy",
+        "reqwest",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "testcontainers",
+        "tokio",
+        "tracing",
+    ]),
+)
+
+rust_test(
+    name = "ifc_test",
+    srcs = ["tests/ifc.rs"],
+    deps = [":ontology"],
+)
+
+rust_test(
+    name = "ifc_security_test",
+    srcs = ["tests/ifc_security.rs", "tests/support/archive_fixture.rs", "tests/support/export_fixture.rs", "tests/support/ifc_fixture.rs"],
+    compile_data = glob(["tests/fixtures/archive_*", "tests/fixtures/export_*", "tests/fixtures/ifc.gol"]),
+    crate_root = "tests/ifc_security.rs",
+    deps = [":ontology"] + crate_deps(["cedar-policy", "serde_json", "sha2", "tempfile", "tokio", "tracing"]),
+)
+

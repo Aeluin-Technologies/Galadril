@@ -1,0 +1,26 @@
+ontology company.documents version "1.0.0" {
+    import company.organization as org;
+    entity Document {
+        field title: String;
+        field visibility: String;
+        field body: String @label(SecretDoc) @requires(read_body);
+        field sealed: String @label(RestrictedDoc) @requires(read_body);
+        field organization: Ref<org.Organization>;
+        field excerpt: String;
+    }
+    derive Excerpt on Document.excerpt: String = body;
+    security label SecretDoc {
+        classification: Confidential;
+        compartments: [Legal];
+        destinations: [Internal, LowClearance, NoCompartment];
+        purposes: [Review];
+    }
+    security label RestrictedDoc { classification: Restricted; compartments: [Audit]; }
+    access Document {
+        resource: "company_record";
+        permission read_doc { relation: "view"; cedar: "Domain::Action::\"document\""; }
+        permission read_body { relation: "view_body"; cedar: "Domain::Action::\"body\""; }
+        permission send_doc { relation: "export"; cedar: "Domain::Action::\"export\""; }
+    }
+    forbid Document.body unless { context.mfa };
+}

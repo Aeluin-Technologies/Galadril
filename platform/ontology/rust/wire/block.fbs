@@ -1,0 +1,33 @@
+// Each block stands alone. A directory authenticates the byte ranges of its
+// children, which are separate FlatBuffers rather than nested tables.
+enum Kind : ubyte {
+  Directory, Symbol, Definition, Direct, Inverse, Dependency, Route, Authority, Module
+}
+
+enum DeclarationTag : ubyte {
+  Unset, Entity, Relation, Attribute, TypeAlias, Struct, Enum, Invariant, Derive, View, Action, IfcLabel
+}
+
+enum ScalarTag : ubyte {
+  Unset, Unit, Bool, Char, String, I8, I16, I32, I64, I128, U8, U16, U32, U64, U128, F32, F64
+}
+
+table Entry {
+  key:string (required);
+  offset:ulong;
+  length:uint;
+  sha256:[ubyte] (required);
+}
+
+table Block {
+  kind:Kind;
+  level:ubyte;
+  key:string;
+  payload:[ubyte];
+  entries:[Entry];
+  declaration:DeclarationTag;
+  scalar:ScalarTag;
+}
+
+root_type Block;
+file_identifier "GOLB";

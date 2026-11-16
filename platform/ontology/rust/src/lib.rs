@@ -40,6 +40,15 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+#[cfg(feature = "archive")]
+pub mod archive;
+
+#[cfg(feature = "authorization")]
+pub mod authorization;
+
+#[cfg(feature = "export")]
+pub mod export;
+
 mod declaration;
 mod error;
 mod expression;

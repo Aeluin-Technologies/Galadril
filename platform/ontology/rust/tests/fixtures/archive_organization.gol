@@ -1,0 +1,8 @@
+ontology company.organization version "1.0.0" {
+    entity Organization { field name: String @label(PrivateOrg); }
+    security label PrivateOrg { classification: Internal; }
+    access Organization {
+        resource: "company_record";
+        permission view_organization { relation: "view"; cedar: "Domain::Action::\"organization\""; }
+    }
+}

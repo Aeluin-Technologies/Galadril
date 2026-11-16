@@ -1,0 +1,32 @@
+ontology sample.ifc version "1.0.0" {
+    entity Profile {
+        field a_public: String;
+        field z_secret: String @label(Secret) @requires(read_body);
+        field restricted: String @label(TopSecret) @requires(read_body);
+    }
+    security label Secret {
+        classification: Confidential;
+        compartments: [Legal];
+        destinations: [Internal];
+        purposes: [Review];
+    }
+    security label TopSecret {
+        classification: Restricted;
+        compartments: [Legal];
+        destinations: [Internal];
+        purposes: [Review];
+    }
+    action Validate(record: Ref<Profile>) -> Unit
+        effects { read(record.z_secret), write(record.a_public) };
+    access Profile {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"profile\""; }
+        permission read_body { relation: "view_body"; cedar: "Domain::Action::\"secret\""; }
+        permission export_meta { relation: "export"; cedar: "Domain::Action::\"exportProfile\""; }
+        permission write_profile { relation: "edit"; cedar: "Domain::Action::\"writeProfile\""; }
+    }
+    access Validate {
+        resource: "company_record";
+        permission read_meta { relation: "view"; cedar: "Domain::Action::\"validate\""; }
+    }
+}
