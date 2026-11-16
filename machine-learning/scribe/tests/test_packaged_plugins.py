@@ -27,6 +27,7 @@ import asyncio
 import sys
 from uuid import uuid4
 import httpx
+from galadril_ontology import GolLease, GolRequest, GolRuntimeManager
 from galadril_plugins import PluginRegistry, PluginScope
 from galadril_plugins.worker import serve
 from galadril_pipeline.config import PipelineStep
@@ -34,7 +35,21 @@ from galadril_pipeline.events import PipelineCommand
 from galadril_scribe.contracts import Settings
 from galadril_scribe.runtime import Runtime, create_app
 from galadril_vision.actors.processor import VisionCommandProcessor
+from galadril_vision.application.errors import CommandProcessingError
 from galadril_vision.common.config import VisionConfig
+
+class FixtureGateway:
+    async def open(self, request: GolRequest, admission: str) -> GolLease:
+        assert admission == "bundle-admission"
+        assert (request.tenant_id, request.pipeline_id, request.pipeline_revision_id,
+                request.block_id, request.source_object_id) == (
+            "tenant", "pipeline", "r" * 32, "count", "raw:tenant/source/object"
+        )
+        return GolLease(
+            tenant_id=request.tenant_id, ontology_id="fixture",
+            ontology_version="1.0.0", source_revision="fixture-source",
+            generation_id="fixture-generation", context_id="fixture-context",
+        )
 
 async def main():
     registry = PluginRegistry.discover()
@@ -67,8 +82,18 @@ async def main():
       "postgres":{"database":"test","host":"localhost:5432","user":"test","password":"test"},
       "spicedb":{"endpoint":"localhost:50051","token":"test"}},
       "sources":[{"id":"input","topic":"raw","schema_path":"text.avsc","match_pattern":".*","capability_id":"fixture.input.text","capability_version":"1.0.0"}],"pipeline":[step.model_dump(mode="json")]})
-    processor = VisionCommandProcessor(config)
-    assert await processor.process(command) == {"count":2,"tenant":"tenant"}
+    processor = VisionCommandProcessor(config, ontology_runtime=GolRuntimeManager(FixtureGateway()))
+    scoped = command.model_copy(update={
+        "payload": {"record": {"storage_path": "s3://raw/tenant/source/object"}},
+    })
+    try:
+        await processor.process(scoped)
+    except CommandProcessingError:
+        pass
+    else:
+        raise AssertionError("A packaged plugin ran without GOL admission")
+    admitted = scoped.model_copy(update={"admission": "bundle-admission"})
+    assert await processor.process(admitted) == {"count":2,"tenant":"tenant"}
     async with httpx.AsyncClient() as http:
         runtime = Runtime(Settings(gateway_tools_url="http://gateway/internal/chat/tools",default_model="fixture.model.text"),http)
         assert not runtime.plugins.unavailable, runtime.plugins.unavailable
