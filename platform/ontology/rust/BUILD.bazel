@@ -2,6 +2,7 @@ load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build:rustdoc_lto_test.bzl", "rustdoc_lto_test")
+load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES")
 
 rust_library(
     name = "ontology",
@@ -22,9 +23,40 @@ rust_library(
         "@crates//:futures",
         "@crates//:jsonschema",
         "@crates//:uuid",
-    ] + all_crate_deps(normal = True) + crate_deps([
-        "tempfile",
-    ]),
+    ] + all_crate_deps(normal = True),
+)
+
+rust_library(
+    name = "ontology_runtime",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = ["archive", "authorization", "export", "remote"],
+    crate_name = "galadril_ontology",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_flags = [
+        "--check-cfg=cfg(verus_keep_ghost)",
+        "--check-cfg=cfg(test)",
+        '--check-cfg=cfg(feature,values("archive","authorization","export","outlines-compat","parser","remote"))',
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/ontology/rust/wire:golc_wire",
+        "@crates//:aws-sdk-s3",
+        "@crates//:futures",
+        "@crates//:jsonschema",
+        "@crates//:uuid",
+    ] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "validation_test",
+    srcs = ["tests/validation.rs"],
+    deps = [":ontology"] + crate_deps(["serde", "serde_json"]),
+)
+
+rust_test(
+    name = "validation_runtime_test",
+    srcs = ["tests/validation.rs"],
+    deps = [":ontology_runtime"] + crate_deps(["serde", "serde_json"]),
 )
 
 rust_test(
@@ -123,7 +155,8 @@ rust_test(
     compile_data = glob(["tests/fixtures/archive_*", "tests/fixtures/export_*", "tests/fixtures/ifc.gol"]),
     crate_features = ["archive", "export", "parser", "remote"],
     crate_root = "tests/archive_spicedb.rs",
-    tags = ["local", "manual", "requires-docker"],
+    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
+    tags = ["manual", "requires-docker"],
     deps = [
         ":ontology",
         "@crates//:aws-sdk-s3",

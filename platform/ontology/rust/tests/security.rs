@@ -217,6 +217,40 @@ fn require_contract(
 }
 
 #[test]
+fn approved_target_floors_preserve_property_granularity_and_reject_unknown_targets()
+-> TestResult {
+    let project = project()?;
+    let message = symbol(&project, "Message")?;
+    let subject =
+        Reference::Field(FieldRef::new(message.clone(), "subject".parse()?));
+    let mut environment = setup(&project, PERMIT)?;
+    let mut floor = Flow::new(Classification::Restricted);
+    let compartment = "Mailbox".parse::<galadril_ontology::QualifiedName>()?;
+    floor.compartments.insert(compartment.clone());
+    environment
+        .target_floors
+        .insert(subject.clone(), floor.clone());
+    let compiled = compile(&project, &environment);
+    let contract = require_contract(&compiled)?;
+    assert!(
+        contract
+            .flow(&subject)
+            .is_some_and(|flow| flow.dominates(&floor))
+    );
+    assert!(
+        contract
+            .flow(&Reference::Symbol(message.clone()))
+            .is_some_and(|flow| !flow.compartments.contains(&compartment))
+    );
+    let unknown = Reference::Field(FieldRef::new(message, "missing".parse()?));
+    environment.target_floors.insert(unknown, floor);
+    assert!(
+        matches!(compile(&project,&environment),Compilation::Invalid(issues) if issues.iter().any(|issue|issue.kind()==IssueKind::InvalidTarget))
+    );
+    Ok(())
+}
+
+#[test]
 fn validates_binding_targets_and_linked_native_schemas() -> TestResult {
     let project = project()?;
     let environment = setup(&project, PERMIT)?;

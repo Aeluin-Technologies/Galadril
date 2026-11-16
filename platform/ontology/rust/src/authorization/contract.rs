@@ -226,4 +226,9 @@ impl Contract {
     pub fn flow(&self, target: &Reference) -> Option<&Flow> {
         self.flows.get(target)
     }
+
+    /// Includes unexposed outputs when bounding source and diagnostic access.
+    pub fn flows(&self) -> impl ExactSizeIterator<Item = (&Reference, &Flow)> {
+        self.flows.iter()
+    }
 }

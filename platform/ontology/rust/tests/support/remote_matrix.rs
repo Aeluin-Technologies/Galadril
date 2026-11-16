@@ -23,6 +23,79 @@ use super::{
 const TENANT: &str = "tenant_a";
 const STREAM: &str = "remote.fixture";
 
+#[tokio::test]
+#[ignore = "runs pinned RustFS to verify atomic publication provenance"]
+async fn docker_atomic_provenance_and_logical_tenant_namespaces() -> TestResult
+{
+    use std::collections::BTreeMap;
+
+    use galadril_ontology::archive::remote::PublicationProvenance;
+    let storage = rustfs::start().await?;
+    let project = project(0, false)?;
+    let artifact = compile_archive(&project, &environment(&project)?)?;
+    let store = RemoteStore::connect_namespace(
+        storage.client.clone(),
+        rustfs::BUCKET,
+        "123e4567-e89b-12d3-a456-426614174000",
+        "tenant_namespace".parse()?,
+        "example.ontology".parse()?,
+        RemoteOptions::default(),
+    )
+    .await?;
+    let provenance = PublicationProvenance {
+        source_revision: "lakefs_revision_a".into(),
+        dependencies: BTreeMap::new(),
+        candidates: project.symbols().keys().cloned().collect(),
+        modules: artifact.versions().ontologies.clone(),
+    };
+    let first = store
+        .publish_with_provenance(&artifact, None, provenance.clone())
+        .await?;
+    let snapshot = store.open_generation(first).await?;
+    assert_eq!(snapshot.provenance(), Some(&provenance));
+    let second_provenance = PublicationProvenance {
+        source_revision: "lakefs_revision_b".into(),
+        ..provenance.clone()
+    };
+    let second = store
+        .publish_with_provenance(
+            &artifact,
+            Some(first),
+            second_provenance.clone(),
+        )
+        .await?;
+    assert!(store.open_generation(first).await.is_err());
+    assert_eq!(snapshot.generation(), first);
+    assert_eq!(snapshot.provenance(), Some(&provenance));
+    assert_eq!(
+        store.open_generation(second).await?.provenance(),
+        Some(&second_provenance)
+    );
+    assert!(store.retire(first).await.is_err());
+    assert_eq!(store.active().await?, Some(second));
+    let stale = store
+        .stage_with_provenance(
+            &artifact,
+            Some(second),
+            second_provenance.clone(),
+        )
+        .await?;
+    store.retire(second).await?;
+    assert!(matches!(stale.activate().await, Err(RemoteError::Conflict)));
+    assert_eq!(store.active().await?, None);
+    let stale_initial = store
+        .stage_with_provenance(&artifact, None, second_provenance)
+        .await?;
+    store.deactivate(None).await?;
+    assert!(matches!(
+        stale_initial.activate().await,
+        Err(RemoteError::Conflict)
+    ));
+    assert_eq!(store.active().await?, None);
+    assert!(store.open().await.is_err());
+    Ok(())
+}
+
 fn artifact_key(generation: Generation) -> String {
     format!("gol/v1/{TENANT}/{STREAM}/artifacts/{generation}.golc")
 }

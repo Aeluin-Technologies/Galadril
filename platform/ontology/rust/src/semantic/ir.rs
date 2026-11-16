@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 
-use crate::syntax::{BinaryOp, PolicyKind, UnaryOp};
+pub use crate::checked::{Checked, Literal, Value};
+use crate::syntax::PolicyKind;
 use crate::{
-    ExternalTypeId, ExternalTypeRegistry, FieldRef, Name, Named, Ontology,
-    OntologyId, Primitive, QualifiedName, Reference, SymbolId, SymbolRef,
-    TypeRef,
+    ExternalTypeId, ExternalTypeRegistry, Name, Named, Ontology, OntologyId,
+    Primitive, QualifiedName, Reference, SymbolId, SymbolRef,
 };
 
 /// Inputs supplied by the host for one isolated compilation.
@@ -160,70 +160,6 @@ pub struct Dependency {
     pub kind: DependencyKind,
     /// The resolved target or explicitly external requirement.
     pub target: DependencyTarget,
-}
-
-/// A checked expression with a resolved result type.
-#[cfg_attr(feature = "archive", derive(serde::Serialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Checked {
-    /// The type of the expression after type and capability checks.
-    pub ty: TypeRef,
-    /// The source-independent expression structure.
-    pub value: Value,
-}
-
-/// A normalized, typed literal payload.
-#[cfg_attr(feature = "archive", derive(serde::Serialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum Literal {
-    /// A Boolean value.
-    Bool(bool),
-    /// An integer magnitude, typed by its containing node.
-    Integer(u128),
-    /// A negative integer's magnitude, including the signed minimum.
-    NegativeInteger(u128),
-    /// IEEE bits, with binary32 occupying the low 32 bits.
-    Float(u64),
-    /// Decoded text.
-    String(Box<str>),
-    /// A Unicode scalar.
-    Char(char),
-}
-
-/// The checked structure of a declarative expression.
-#[cfg_attr(feature = "archive", derive(serde::Serialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum Value {
-    /// A typed literal.
-    Literal(Literal),
-    /// A parameter of the action containing the expression.
-    Parameter(Name),
-    /// The result of the action containing the expression.
-    Result,
-    /// A trusted context property supplied by the host.
-    Context(Name),
-    /// An explicitly resolved enum value.
-    Variant(SymbolRef, Name),
-    /// A field reached from a scope or a typed base.
-    Field {
-        /// The instance expression, when written explicitly.
-        base: Option<Box<Checked>>,
-        /// Resolved members in access order, including intermediate owners.
-        path: Vec<FieldRef>,
-    },
-    /// A singleton participant reached in a relation's scope.
-    Role {
-        /// The defining relation.
-        relation: SymbolRef,
-        /// The declared role.
-        role: Name,
-    },
-    /// Prefix operators in source order and their typed operand.
-    Unary(Vec<UnaryOp>, Box<Checked>),
-    /// A typed first operand and its same-precedence continuations.
-    Binary(Box<Checked>, Vec<(BinaryOp, Checked)>),
 }
 
 /// An effect with its resolved action-relative instance path.

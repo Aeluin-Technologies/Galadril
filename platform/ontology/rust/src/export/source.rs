@@ -32,18 +32,18 @@ impl Selection {
     }
 }
 
-pub(super) trait Source {
+pub(super) trait Source: Sync {
     fn permitted(
         &self,
         access: &Access,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
-    ) -> impl Future<Output = Result<bool, ExportError>>;
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+    ) -> impl Future<Output = Result<bool, ExportError>> + Send;
 
     fn definition(
         &self,
         owner: &SymbolRef,
-    ) -> impl Future<Output = Result<Definition, ExportError>>;
+    ) -> impl Future<Output = Result<Definition, ExportError>> + Send;
 }
 
 /// An exporter whose security contract was compiled from the same project.
@@ -83,8 +83,8 @@ impl Source for ProjectExporter<'_> {
     async fn permitted(
         &self,
         access: &Access,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
     ) -> Result<bool, ExportError> {
         Ok(crate::authorization::authorize(
             &self.contract,
@@ -114,14 +114,14 @@ impl Source for ProjectExporter<'_> {
     }
 }
 
-impl<R: crate::archive::RangeReader> Source
+impl<R: crate::archive::RangeReader + Sync> Source
     for crate::archive::ArchiveReader<R>
 {
     async fn permitted(
         &self,
         access: &Access,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
     ) -> Result<bool, ExportError> {
         self.permitted(access, runtime, provider)
             .await

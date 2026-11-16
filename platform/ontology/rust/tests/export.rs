@@ -32,6 +32,58 @@ use serde_json::json;
 
 struct Rebac(AtomicBool);
 
+fn send_future<T: Send>(future: T) -> T {
+    future
+}
+
+#[tokio::test]
+async fn archived_descriptions_hide_denied_property_names()
+-> fixture::base::TestResult {
+    let project = fixture::project()?;
+    let environment = fixture::environment(&project)?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let exporter = ProjectExporter::new(&project, &environment)?;
+    let runtime = fixture::base::runtime(exporter.contract());
+    let provider = Rebac(AtomicBool::new(false));
+    let projection = fixture::projection(&project, &["title", "secret"])?;
+    let description = reader
+        .describe(&projection, &runtime, &provider)
+        .await
+        .ok_or("description")?;
+    assert_eq!(description.properties.len(), 1);
+    assert_eq!(
+        description
+            .properties
+            .first()
+            .ok_or("property")?
+            .name
+            .as_str(),
+        "title"
+    );
+    provider.0.store(true, Ordering::Relaxed);
+    assert_eq!(
+        reader
+            .describe(&projection, &runtime, &provider)
+            .await
+            .ok_or("authorized description")?
+            .properties
+            .len(),
+        2
+    );
+    provider.0.store(false, Ordering::Relaxed);
+    assert_eq!(
+        reader
+            .describe(&projection, &runtime, &provider)
+            .await
+            .ok_or("revoked description")?
+            .properties
+            .len(),
+        1
+    );
+    Ok(())
+}
+
 impl PermissionProvider for Rebac {
     async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
         if request.permission.as_str() == "view_body" &&
@@ -67,9 +119,9 @@ async fn schema_exports_hide_denied_metadata_and_match_archived_ir()
         options: &options,
         mappings: &mappings,
     };
-    let projected = exporter
-        .export_schema(&request, &runtime, &provider)
-        .await?;
+    let projected =
+        send_future(exporter.export_schema(&request, &runtime, &provider))
+            .await?;
     let text = projected.schema().to_string();
     assert!(!text.contains("secret"));
     assert!(!text.contains("private_note"));
@@ -712,6 +764,54 @@ async fn structured_assignments_need_child_write_enforcement()
             )
             .await,
         Err(ExportError::WriteDenied)
+    );
+    assert!(!business.0.load(Ordering::Relaxed));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_metadata_projection_cannot_rebind_a_write_to_another_tenant()
+-> fixture::base::TestResult {
+    let project = fixture::project()?;
+    let environment = fixture::environment(&project)?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let exporter = ProjectExporter::new(&project, &environment)?;
+    let runtime = fixture::base::runtime(exporter.contract());
+    let provider = Rebac(AtomicBool::new(false));
+    let projection = fixture::projection(&project, &["title"])?;
+    let options = ExportOptions::default();
+    let mappings = ExternalMappings::default();
+    let request = ExportRequest {
+        projection: &projection,
+        part: SchemaPart::Value,
+        options: &options,
+        mappings: &mappings,
+    };
+    let mut instance = projection.root.access.instance.clone();
+    instance.tenant = "another_tenant".into();
+    let write = galadril_ontology::authorization::Access {
+        route: galadril_ontology::authorization::Route::new(
+            projection.root.access.route.target.clone(),
+            Operation::Write,
+        ),
+        instance,
+        destination: projection.root.access.destination.clone(),
+        purpose: projection.root.access.purpose.clone(),
+    };
+    let business = Business(AtomicBool::new(false));
+    assert_eq!(
+        reader
+            .validate_proposal_for(
+                &request,
+                &json!({"title":"example"}),
+                &write,
+                &runtime,
+                &provider,
+                &business
+            )
+            .await,
+        Err(ExportError::Unavailable)
     );
     assert!(!business.0.load(Ordering::Relaxed));
     Ok(())

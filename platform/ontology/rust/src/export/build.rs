@@ -19,8 +19,8 @@ use crate::{FieldRef, Name, Reference, SymbolRef, TypeRef};
 pub(super) async fn export(
     source: &impl Source,
     request: &ExportRequest<'_>,
-    runtime: &impl TrustedRuntime,
-    provider: &impl PermissionProvider,
+    runtime: &(impl TrustedRuntime + Sync),
+    provider: &(impl PermissionProvider + Sync),
 ) -> Result<SchemaDocument, ExportError> {
     let projection = request.projection;
     let part = request.part;
@@ -185,7 +185,7 @@ struct Builder<'a, S, R, P> {
     count: usize,
 }
 
-impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
+impl<S: Source, R: TrustedRuntime + Sync, P: PermissionProvider + Sync>
     Builder<'_, S, R, P>
 {
     fn optional(&self, ty: &TypeRef) -> bool {
@@ -281,8 +281,13 @@ impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
         &'a mut self,
         ty: &'a TypeRef,
         depth: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, ExportError>> + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<Value>, ExportError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             self.spend(depth)?;
             let value = match ty {
@@ -397,8 +402,13 @@ impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
         definition: Definition,
         selection: &'a Selection,
         depth: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, ExportError>> + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<Value>, ExportError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             self.spend(depth)?;
             match definition {
@@ -440,9 +450,9 @@ pub(super) async fn submit(
     document: &SchemaDocument,
     selection: &Selection,
     proposal: &Value,
-    runtime: &impl TrustedRuntime,
-    provider: &impl PermissionProvider,
-    business: &impl super::GolValidator,
+    runtime: &(impl TrustedRuntime + Sync),
+    provider: &(impl PermissionProvider + Sync),
+    business: &(impl super::GolValidator + Sync),
 ) -> Result<(), ExportError> {
     document.validate_json(proposal)?;
     let properties = proposal.as_object().ok_or(ExportError::InvalidJson)?;
@@ -491,7 +501,7 @@ fn assignment_type<'a>(
     source: &'a impl Source,
     ty: TypeRef,
     depth: usize,
-) -> Pin<Box<dyn Future<Output = Result<(), ExportError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<(), ExportError>> + Send + 'a>> {
     Box::pin(async move {
         if depth > 32 {
             return Err(ExportError::Limit);

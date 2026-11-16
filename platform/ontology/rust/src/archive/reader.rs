@@ -136,6 +136,156 @@ pub struct ArchiveReader<R> {
 }
 
 impl<R: RangeReader> ArchiveReader<R> {
+    /// Loads an owner's invariant contract after current read or write
+    /// admission.
+    ///
+    /// This trusted-host API contains private dependency metadata and grants
+    /// no right to apply a proposal. Missing, oversized, or corrupt
+    /// contracts use the same unavailable result as denial; absence never
+    /// means no invariants.
+    pub async fn invariant_contract(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Option<crate::validation::Contract> {
+        let result = async {
+            if !matches!(
+                access.route.operation,
+                Operation::Read | Operation::Write
+            ) || !self.permitted(access, runtime, provider).await?
+            {
+                return Ok(None);
+            }
+            let owner = match &access.route.target {
+                crate::Reference::Symbol(owner) => owner,
+                crate::Reference::Field(field) => &field.owner,
+            };
+            if owner != &access.instance.owner {
+                return Err(ArchiveError::Invalid);
+            }
+            let key = format!(
+                "v/{}",
+                target_key(&crate::Reference::Symbol(owner.clone()))
+            );
+            let Some(pointer) = self.index.locate(&key).await? else {
+                return Err(ArchiveError::Invalid);
+            };
+            let limits = crate::validation::Limits::default();
+            // Bound the range before fetching a FlatBuffer. Payload validation
+            // alone would still permit an attacker to request an 8 MiB block.
+            let max_record = limits
+                .max_bytes
+                .checked_add(key.len())
+                .and_then(|length| length.checked_add(1024))
+                .ok_or(ArchiveError::Invalid)?;
+            if key.len() > limits.max_bytes || pointer.length > max_record {
+                return Err(ArchiveError::Invalid);
+            }
+            let bytes = self.index.bytes(pointer).await?;
+            let record = checked_record(&bytes, &key, Kind::Definition)?;
+            let contract =
+                crate::validation::Contract::decode(payload(record)?, limits)
+                    .map_err(|_| ArchiveError::Invalid)?;
+            if contract.owner() != owner {
+                return Err(ArchiveError::Invalid);
+            }
+            Ok(Some(contract))
+        }
+        .await;
+        match result {
+            Ok(Some(contract)) => Some(contract),
+            Ok(None) | Err(_) => {
+                unavailable();
+                None
+            },
+        }
+    }
+
+    /// Borrows archive pins for comparison with independently approved inputs.
+    ///
+    /// These values describe the artifact; they do not approve themselves.
+    /// The host must compare authority digests and module generations with
+    /// its trusted configuration before supplying runtime evidence.
+    #[must_use]
+    pub fn versions(&self) -> &crate::authorization::Versions {
+        self.authority.versions()
+    }
+
+    /// Loads verified obligations for the trusted host's evidence resolver.
+    ///
+    /// This integration API contains private metadata. It must never be
+    /// returned to an untrusted client; use authorized `describe`, `read`, or
+    /// `export_schema` for disclosure. No permission decision is cached here.
+    pub async fn requirements(
+        &self,
+        route: &crate::authorization::Route,
+    ) -> Result<
+        BTreeMap<
+            crate::authorization::Route,
+            crate::authorization::Descriptor,
+        >,
+        ArchiveError,
+    > {
+        let primary = self
+            .index
+            .route(route)
+            .await?
+            .ok_or(ArchiveError::Invalid)?;
+        let mut routes = self.index.prerequisites(route, &primary).await?;
+        routes.insert(route.clone(), primary);
+        #[cfg(feature = "export")]
+        if matches!(
+            route.operation,
+            Operation::Describe | Operation::DescribeTransfer
+        ) {
+            let mut pending = vec![(route.clone(), true)];
+            let mut expanded = std::collections::BTreeSet::new();
+            while let Some((candidate, expand)) = pending.pop() {
+                if routes.len() > 4096 {
+                    return Err(ArchiveError::Invalid);
+                }
+                if !routes.contains_key(&candidate) {
+                    let descriptor = self
+                        .index
+                        .route(&candidate)
+                        .await?
+                        .ok_or(ArchiveError::Invalid)?;
+                    routes.extend(
+                        self.index
+                            .prerequisites(&candidate, &descriptor)
+                            .await?,
+                    );
+                    routes.insert(candidate.clone(), descriptor);
+                }
+                let crate::Reference::Symbol(owner) = &candidate.target else {
+                    continue;
+                };
+                if !expand || !expanded.insert(owner.clone()) {
+                    continue;
+                }
+                let bytes = self.definition_bytes(owner).await?;
+                let (fields, references) =
+                    crate::export::description_inventory(&bytes)?;
+                pending.extend(fields.into_iter().map(|name| {
+                    (
+                        Route::new(
+                            crate::FieldRef::new(owner.clone(), name),
+                            route.operation,
+                        ),
+                        false,
+                    )
+                }));
+                pending.extend(references.into_iter().map(
+                    |(target, expand)| {
+                        (Route::new(target, route.operation), expand)
+                    },
+                ));
+            }
+        }
+        Ok(routes)
+    }
+
     /// Verifies the manifest and reads the shared authority block.
     pub fn open(source: R, pin: ArchivePin) -> Result<Self, ArchiveError> {
         let mut opening = std::pin::pin!(Self::open_mode(source, pin, true));
@@ -401,6 +551,21 @@ impl<R: RangeReader> ArchiveReader<R> {
             .await?
             .ok_or(ArchiveError::Invalid)?;
         Ok(Some(symbol))
+    }
+
+    /// Checks a route without disclosing a record or performing its effect.
+    /// Hosts must retain their computation boundary through the actual I/O;
+    /// this decision alone is not an effect capability.
+    pub async fn authorize(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Decision {
+        match self.permitted(access, runtime, provider).await {
+            Ok(true) => Decision::Allow,
+            _ => Decision::Deny(Denial::Runtime),
+        }
     }
 
     pub(crate) async fn permitted(
