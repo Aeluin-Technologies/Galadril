@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Literal
 from urllib.parse import urlsplit
@@ -21,6 +22,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+
+def _gol_gateway_endpoint() -> str:
+    """Reads an operator setting before untrusted pipeline composition."""
+    return os.getenv("GOL_GATEWAY_ENDPOINT", "http://api-proxy:8082")
 
 
 class KafkaConnectorConfig(BaseModel):
@@ -278,6 +284,46 @@ class RayConfig(BaseModel):
 
 class VisionConfig(BaseModel):
     """Root configuration aggregator mapping directly to the unified pipeline YAML layout."""
+
+    gol_worker_key_path: str | None = Field(
+        default_factory=lambda: os.getenv("GOL_WORKER_KEY_PATH"),
+        min_length=1,
+        max_length=4096,
+        repr=False,
+    )
+
+    @field_validator("gol_worker_key_path")
+    @classmethod
+    def _gol_worker_path(cls, value: str | None) -> str | None:
+        """Ray workers must address the same operator-mounted credential file."""
+        if value is not None and not os.path.isabs(value):
+            raise ValueError("GOL worker credential path must be absolute")
+        return value
+
+    gol_gateway_endpoint: str = Field(
+        default_factory=_gol_gateway_endpoint, min_length=1, max_length=2048
+    )
+
+    @field_validator("gol_gateway_endpoint")
+    @classmethod
+    def _gol_endpoint(cls, value: str) -> str:
+        try:
+            uri = urlsplit(value)
+            port = uri.port
+            valid = (
+                uri.scheme in {"http", "https"}
+                and bool(uri.hostname)
+                and not uri.username
+                and not uri.password
+                and not uri.query
+                and not uri.fragment
+                and (port is None or 1 <= port <= 65535)
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError("Invalid GOL Gateway endpoint")
+        return value.rstrip("/")
 
     name: str
     runtime_tenant_id: str | None = None

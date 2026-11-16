@@ -1,173 +1,333 @@
-"""Tenant-scoped runtime contracts for Registry-derived ontology slices."""
+"""Bind immutable projections while Gateway owns calculation provenance."""
 
 from __future__ import annotations
 
-import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+import asyncio
+import hashlib
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
-from datetime import datetime
+from dataclasses import dataclass, field
 from typing import Protocol
 
+import orjson
 import structlog
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    JsonValue,
-    field_validator,
+from opentelemetry import trace
+from pydantic import JsonValue
+
+from .contracts import (
+    GolBlockContract,
+    GolEffect,
+    GolLease,
+    GolOperation,
+    GolRequest,
 )
+from .errors import GolDenied
+from .identity import normalize_tenant_id
 
-from galadril_ontology.errors import OntologyCompatibilityError
-from galadril_ontology.identity import normalize_tenant_id, validate_resource_id
-from galadril_ontology.model import Ontology, ResourceKind
-
-_RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
-def _validate_runtime_id(value: str) -> str:
-    normalized = value.strip()
-    if _RUNTIME_ID_RE.fullmatch(normalized) is None:
-        raise ValueError("runtime identifier contains unsupported characters")
-    return normalized
+class RuntimeGateway(Protocol):
+    async def open(self, request: GolRequest, admission: str) -> GolLease: ...
+    def protected(
+        self,
+        request: GolRequest,
+        selected: GolLease,
+        admission: str,
+        *,
+        effects: Sequence[GolEffect],
+    ) -> AbstractAsyncContextManager[tuple[str | None, ...]]: ...
 
 
-class _RuntimeModel(BaseModel):
-    """Keeps runtime contracts immutable across asynchronous execution."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class OntologySliceMetadata(_RuntimeModel):
-    """Provenance required to pin and explain one runtime ontology slice."""
-
-    tenant_id: str
-    ontology_id: str
-    publication_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")
-    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
-    base_version: str
-    base_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    effective_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    publication_metadata: dict[str, JsonValue] = Field(default_factory=dict)
-    binding_metadata: dict[str, JsonValue] = Field(default_factory=dict)
-    published_at: datetime
+@dataclass(frozen=True, slots=True)
+class BoundCalculation:
+    manager: GolRuntimeManager
+    request: GolRequest
+    lease: GolLease
+    contract: GolBlockContract
+    admission: str = field(repr=False)
 
 
-class OntologySlice(_RuntimeModel):
-    """A validated block-local ontology view loaded from the authority."""
-
-    metadata: OntologySliceMetadata
-    ontology: Ontology
-
-
-class OntologySliceRequest(_RuntimeModel):
-    """Identifies one block execution within a tenant pipeline."""
-
-    tenant_id: str
-    pipeline_id: str
-    pipeline_revision_id: str
-    block_id: str
-
-    @field_validator("tenant_id")
-    @classmethod
-    def _normalize_tenant(cls, value: str) -> str:
-        return normalize_tenant_id(value)
-
-    @field_validator("pipeline_id", "pipeline_revision_id", "block_id")
-    @classmethod
-    def _validate_id(cls, value: str) -> str:
-        return _validate_runtime_id(value)
-
-
-class BlockOntologyContract(_RuntimeModel):
-    """Declares the semantic surface accepted by a processing block."""
-
-    required_resource_ids: tuple[str, ...] = ()
-    allowed_kinds: tuple[ResourceKind, ...] = ()
-
-    @field_validator("required_resource_ids")
-    @classmethod
-    def _validate_resources(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(validate_resource_id(value) for value in values)
-
-
-class OntologyRuntimeStore(Protocol):
-    """Loads runtime state from the authoritative persistence boundary."""
-
-    async def load_runtime_slice(
-        self, request: OntologySliceRequest
-    ) -> OntologySlice: ...
-
-
-_ACTIVE_ONTOLOGY_SLICE: ContextVar[OntologySlice | None] = ContextVar(
-    "active_ontology_slice", default=None
+_ACTIVE: ContextVar[BoundCalculation | None] = ContextVar(
+    "gol_admitted_calculation", default=None
 )
 
 
-def active_ontology_slice() -> OntologySlice | None:
-    """Returns the ontology view bound to the current asynchronous task."""
-    return _ACTIVE_ONTOLOGY_SLICE.get()
+def active_gol_lease() -> GolLease | None:
+    bound = _ACTIVE.get()
+    return bound.lease if bound is not None else None
 
 
-class OntologyRuntimeManager:
-    """Loads and validates authoritative state for every block execution."""
+@dataclass(slots=True)
+class _HeldBatch:
+    manager: GolRuntimeManager
+    effects: tuple[bytes, ...]
+    receipts: tuple[str | None, ...]
+    owner_task: asyncio.Task[object] | None
+    active: bool = True
 
-    __slots__ = ("_store",)
 
-    def __init__(self, store: OntologyRuntimeStore) -> None:
-        self._store = store
+_EFFECT_ACTIVE: ContextVar[_HeldBatch | None] = ContextVar(
+    "gol_effect_active", default=None
+)
 
-    async def resolve(
-        self,
-        request: OntologySliceRequest,
-        contract: BlockOntologyContract | None = None,
-    ) -> OntologySlice:
-        """Loads fresh production state and enforces the target block contract."""
-        ontology_slice = await self._store.load_runtime_slice(request)
-        if ontology_slice.metadata.tenant_id != request.tenant_id:
-            raise OntologyCompatibilityError(
-                "runtime store returned another tenant"
-            )
-        effective_contract = contract or BlockOntologyContract()
-        for resource_id in effective_contract.required_resource_ids:
-            if ontology_slice.ontology.get(resource_id) is None:
-                raise OntologyCompatibilityError(
-                    f"required resource is unavailable: {resource_id}"
-                )
-        if effective_contract.allowed_kinds:
-            allowed = set(effective_contract.allowed_kinds)
-            incompatible = tuple(
-                resource.resource_id
-                for resource in ontology_slice.ontology.resources
-                if resource.kind not in allowed
-            )
-            if incompatible:
-                raise OntologyCompatibilityError(
-                    "resource kind is incompatible with block: "
-                    + ", ".join(incompatible)
-                )
-        logger.info(
-            "ontology_runtime_slice_resolved",
-            tenant_id=request.tenant_id,
-            ontology_id=ontology_slice.metadata.ontology_id,
-            pipeline_id=request.pipeline_id,
-            block_id=request.block_id,
-            revision_id=ontology_slice.metadata.revision_id,
-            resource_count=len(ontology_slice.ontology.resources),
-        )
-        return ontology_slice
+
+def scoped_instance_id(local_id: str) -> str:
+    """Scopes newly created values without renaming existing resolved entities."""
+    bound = _ACTIVE.get()
+    if bound is None or not local_id or len(local_id) > 512:
+        raise GolDenied("GOL instance identity unavailable")
+    return (
+        "gol:"
+        + hashlib.sha256(bound.request.source_object_id.encode()).hexdigest()
+        + ":"
+        + hashlib.sha256(local_id.encode()).hexdigest()
+    )
+
+
+def make_gol_state_effect(
+    *,
+    operation: GolOperation,
+    tenant_id: str,
+    destination: str,
+    purpose: str,
+    proposal: dict[str, JsonValue] | None = None,
+    instance_id: str | None = None,
+    receipt: str | None = None,
+    derived: bool = False,
+) -> GolEffect:
+    """Selecting an explicit state contract does not acquire permission."""
+    bound = _ACTIVE.get()
+    if (
+        bound is None
+        or normalize_tenant_id(tenant_id) != bound.request.tenant_id
+    ):
+        raise GolDenied("Shared state requires GOL admission")
+    target = (
+        bound.contract.derived_symbol_key
+        if derived
+        else bound.contract.state_symbol_key
+    )
+    if not target:
+        raise GolDenied("Shared state requires an explicit GOL contract")
+    return GolEffect(
+        operation=operation,
+        target=target,
+        destination=destination,
+        purpose=purpose,
+        proposal=proposal,
+        instance_id=instance_id,
+        receipt=receipt,
+    )
+
+
+@asynccontextmanager
+async def protected_gol_effects(
+    effects: Sequence[GolEffect],
+    *,
+    tenant_id: str | None = None,
+) -> AsyncIterator[tuple[str | None, ...]]:
+    """All effects in a transaction share one host-retained exclusion boundary."""
+    bound = _ACTIVE.get()
+    if bound is None or (
+        tenant_id is not None
+        and normalize_tenant_id(tenant_id) != bound.request.tenant_id
+    ):
+        raise GolDenied("GOL effect unavailable")
+    async with bound.manager.protected(effects) as receipts:
+        yield receipts
+
+
+@asynccontextmanager
+async def protected_gol_effect(
+    *,
+    operation: GolOperation,
+    target: str,
+    destination: str,
+    purpose: str,
+    proposal: dict[str, JsonValue] | None = None,
+    instance_id: str | None = None,
+    receipt: str | None = None,
+    tenant_id: str | None = None,
+) -> AsyncIterator[str | None]:
+    """The caller must place its actual I/O inside this scope."""
+    effect = GolEffect(
+        operation=operation,
+        target=target,
+        destination=destination,
+        purpose=purpose,
+        proposal=proposal,
+        instance_id=instance_id,
+        receipt=receipt,
+    )
+    async with protected_gol_effects(
+        (effect,), tenant_id=tenant_id
+    ) as receipts:
+        yield next(iter(receipts))
+
+
+@asynccontextmanager
+async def protected_gol_state_effect(
+    *,
+    operation: GolOperation,
+    tenant_id: str,
+    destination: str,
+    purpose: str,
+    proposal: dict[str, JsonValue] | None = None,
+    instance_id: str | None = None,
+    receipt: str | None = None,
+    derived: bool = False,
+) -> AsyncIterator[str | None]:
+    effect = make_gol_state_effect(
+        operation=operation,
+        tenant_id=tenant_id,
+        destination=destination,
+        purpose=purpose,
+        proposal=proposal,
+        instance_id=instance_id,
+        receipt=receipt,
+        derived=derived,
+    )
+    async with protected_gol_effects(
+        (effect,), tenant_id=tenant_id
+    ) as receipts:
+        yield next(iter(receipts))
+
+
+class GolRuntimeManager:
+    """Task-local scope is never proof of independent information provenance."""
+
+    __slots__ = ("_gateway",)
+
+    def __init__(self, gateway: RuntimeGateway) -> None:
+        self._gateway = gateway
 
     @asynccontextmanager
     async def bind(
         self,
-        request: OntologySliceRequest,
-        contract: BlockOntologyContract | None = None,
-    ) -> AsyncIterator[OntologySlice]:
-        """Binds one validated slice without leaking it across concurrent tasks."""
-        ontology_slice = await self.resolve(request, contract)
-        token = _ACTIVE_ONTOLOGY_SLICE.set(ontology_slice)
+        request: GolRequest,
+        contract: GolBlockContract | None = None,
+        *,
+        admission: str | None,
+    ) -> AsyncIterator[GolLease]:
+        """Scopes transport handles without declaring a fresh IFC computation."""
+        if not admission or _EFFECT_ACTIVE.get() is not None:
+            raise GolDenied("GOL runtime unavailable")
+        with tracer.start_as_current_span(
+            "gol.runtime.open",
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
+            lease = await self._gateway.open(request, admission)
+        if lease.tenant_id != request.tenant_id:
+            raise GolDenied("GOL runtime unavailable")
+        if contract is not None:
+            selectors = (
+                *contract.required_symbol_keys,
+                *(
+                    key
+                    for key in (
+                        contract.state_symbol_key,
+                        contract.derived_symbol_key,
+                    )
+                    if key
+                ),
+            )
+            if any(lease.symbol(key) is None for key in selectors):
+                raise GolDenied("GOL runtime unavailable")
+            if contract.allowed_kinds and any(
+                symbol.kind not in contract.allowed_kinds
+                for symbol in lease.symbols
+            ):
+                raise GolDenied("GOL runtime unavailable")
+        token = _ACTIVE.set(
+            BoundCalculation(
+                self, request, lease, contract or GolBlockContract(), admission
+            )
+        )
         try:
-            yield ontology_slice
+            logger.info("gol.runtime.bound")
+            yield lease
         finally:
-            _ACTIVE_ONTOLOGY_SLICE.reset(token)
+            _ACTIVE.reset(token)
+
+    @asynccontextmanager
+    async def protected(
+        self, effects: Sequence[GolEffect]
+    ) -> AsyncIterator[tuple[str | None, ...]]:
+        """A preflight cannot release the exclusion boundary before its actual I/O."""
+        bound = _ACTIVE.get()
+        if (
+            bound is None
+            or bound.manager is not self
+            or not effects
+            or any(
+                bound.lease.symbol(effect.target) is None for effect in effects
+            )
+        ):
+            raise GolDenied("GOL effect scope unavailable")
+        if any(
+            effect.operation in {"write", "execute"}
+            and (effect.proposal is None or not effect.instance_id)
+            for effect in effects
+        ):
+            raise GolDenied("GOL business proposal unavailable")
+        try:
+            canonical = tuple(
+                orjson.dumps(
+                    effect.model_dump(by_alias=True, exclude_none=True),
+                    option=orjson.OPT_SORT_KEYS,
+                )
+                for effect in effects
+            )
+        except (TypeError, ValueError):
+            raise GolDenied("GOL business proposal unavailable") from None
+        held = _EFFECT_ACTIVE.get()
+        if held is not None:
+            if (
+                not held.active
+                or held.manager is not self
+                or held.owner_task is not asyncio.current_task()
+            ):
+                raise GolDenied("GOL effect scope unavailable")
+            matching: list[str | None] = []
+            for effect in canonical:
+                index = next(
+                    (
+                        index
+                        for index, prior in enumerate(held.effects)
+                        if prior == effect
+                    ),
+                    None,
+                )
+                if index is None:
+                    raise GolDenied(
+                        "An effect cannot extend an active GOL batch"
+                    )
+                matching.append(held.receipts[index])
+            yield tuple(matching)
+            return
+        with tracer.start_as_current_span(
+            "gol.runtime.effect",
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
+            async with self._gateway.protected(
+                bound.request, bound.lease, bound.admission, effects=effects
+            ) as receipts:
+                if len(receipts) != len(effects) or any(
+                    effect.operation in {"write", "execute"} and not receipt
+                    for effect, receipt in zip(effects, receipts, strict=True)
+                ):
+                    raise GolDenied("GOL effect receipts unavailable")
+                held = _HeldBatch(
+                    self, canonical, receipts, asyncio.current_task()
+                )
+                token = _EFFECT_ACTIVE.set(held)
+                try:
+                    yield receipts
+                finally:
+                    held.active = False
+                    _EFFECT_ACTIVE.reset(token)

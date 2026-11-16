@@ -272,8 +272,8 @@ impl KafkaConsumerAdapter {
             if path_buf.components().any(|c| {
                 matches!(
                     c,
-                    std::path::Component::ParentDir |
-                        std::path::Component::RootDir
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
                 )
             }) {
                 errors.push(anyhow!(

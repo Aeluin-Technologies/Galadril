@@ -7,81 +7,24 @@ import hashlib
 import importlib
 import math
 from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass
 from typing import Protocol, cast
 
 import orjson
 import structlog
+from galadril_ontology import make_gol_state_effect, protected_gol_effects
+from pydantic import JsonValue, TypeAdapter
 
 from galadril_vision.common.config import IdentityResolutionConfig
+from galadril_vision.identity.contracts import (
+    IdentityResolutionError,
+    ResolutionDecision,
+    ResolutionRequest,
+    SpatialEvidence,
+)
 
 logger = structlog.get_logger(__name__)
-
-
-class IdentityResolutionError(RuntimeError):
-    """Raised when the native resolver cannot produce a durable decision."""
-
-
-@dataclass(frozen=True, slots=True)
-class SpatialEvidence:
-    """WGS84 point and one-sigma location uncertainty."""
-
-    latitude: float
-    longitude: float
-    accuracy_meters: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateEvidence:
-    """One PostgreSQL candidate and its optional LI-ESKG identity mapping."""
-
-    entity_id: str
-    similarity: float
-    licorne_identity_id: int | None = None
-    spatial: SpatialEvidence | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionRequest:
-    """Immutable evidence submitted by a Vision actor for one extracted entity."""
-
-    tenant_id: str
-    observation_key: str
-    source: str
-    modality: str
-    event_time_micros: int
-    pipeline_probability: float
-    candidates: tuple[CandidateEvidence, ...]
-    spatial: SpatialEvidence | None = None
-    vector_similarity_midpoint: float | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionDecision:
-    """Normalized LI-ESKG result with the canonical PostgreSQL entity ID."""
-
-    entity_id: str | None
-    action: str
-    licorne_identity_id: int | None
-    observation_id: int
-    decision_id: int
-    inference_id: int
-    probabilities: tuple[tuple[str, float], ...]
-    selected_probability: float | None
-    created_identity: bool
-    final_version: int | None
-    h3_cell: int | None
-    iterations: int
-    residual: float
-    exact: bool
-
-
-class IdentityResolver(Protocol):
-    """Async resolution contract consumed by the compute pipeline."""
-
-    async def resolve(self, request: ResolutionRequest) -> ResolutionDecision:
-        """Resolves one observation against a bounded candidate domain."""
-        ...
+_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+_REQUEST = TypeAdapter(ResolutionRequest)
 
 
 class _Candidate(Protocol):
@@ -484,51 +427,82 @@ class LicorneActorRuntime:
         self._pump: asyncio.Task[None] | None = None
 
     async def resolve(self, request: ResolutionRequest) -> ResolutionDecision:
-        """Submits evidence and correlates the native batch result by ticket."""
-        async with self._lock:
-            provider = self._ensure_tenant(request.tenant_id)
-            resolver = self._resolver
-            if resolver is None:
-                raise IdentityResolutionError(
-                    "LI-ESKG resolver was not initialized"
-                )
-            observation_id = _stable_u64(
-                request.tenant_id, request.observation_key
-            )
-            observation = self._licorne.Observation(
-                observation_id,
-                _stable_u64("source", request.source),
-                _stable_u32("modality", request.modality),
-                request.event_time_micros,
-                self._payload(request),
-            )
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[tuple[_NativeResolution, int | None]] = (
-                loop.create_future()
-            )
-            ticket = int(
-                resolver.submit(observation, tenant_id=request.tenant_id)
-            )
-            self._pending[ticket] = future
-            resolver.flush(tenant_id=request.tenant_id)
-            if self._pump is None or self._pump.done():
-                self._pump = asyncio.create_task(
-                    self._pump_results(), name="licorne-result-pump"
-                )
-
-        try:
-            resolution, final_version = await asyncio.wait_for(
-                future, timeout=self._config.result_timeout_seconds
-            )
-        except TimeoutError as error:
-            async with self._lock:
-                self._pending.pop(ticket, None)
-            raise IdentityResolutionError(
-                f"LI-ESKG resolution timed out for ticket {ticket}"
-            ) from error
-        return self._decision(
-            request, provider, resolution, final_version, observation_id
+        """Keeps native submission, result consumption, and cleanup in one permit."""
+        effects = (
+            make_gol_state_effect(
+                operation="read",
+                tenant_id=request.tenant_id,
+                destination="identity_state",
+                purpose="identity_resolution",
+            ),
+            make_gol_state_effect(
+                operation="write",
+                tenant_id=request.tenant_id,
+                destination="identity_state",
+                purpose="identity_resolution",
+                instance_id=request.observation_key,
+                proposal=_JSON_OBJECT.validate_python(
+                    _REQUEST.dump_python(request, mode="json")
+                ),
+            ),
         )
+        async with protected_gol_effects(effects, tenant_id=request.tenant_id):
+            async with self._lock:
+                provider = self._ensure_tenant(request.tenant_id)
+                resolver = self._resolver
+                if resolver is None:
+                    raise IdentityResolutionError(
+                        "LI-ESKG resolver was not initialized"
+                    )
+                observation_id = _stable_u64(
+                    request.tenant_id, request.observation_key
+                )
+                observation = self._licorne.Observation(
+                    observation_id,
+                    _stable_u64("source", request.source),
+                    _stable_u32("modality", request.modality),
+                    request.event_time_micros,
+                    self._payload(request),
+                )
+                future: asyncio.Future[tuple[_NativeResolution, int | None]] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                ticket = int(
+                    resolver.submit(observation, tenant_id=request.tenant_id)
+                )
+                self._pending[ticket] = future
+                try:
+                    resolver.flush(tenant_id=request.tenant_id)
+                    self._pump = asyncio.create_task(
+                        self._pump_results(), name="licorne-result-pump"
+                    )
+                    resolution, final_version = await asyncio.wait_for(
+                        future, timeout=self._config.result_timeout_seconds
+                    )
+                    return self._decision(
+                        request,
+                        provider,
+                        resolution,
+                        final_version,
+                        observation_id,
+                    )
+                except (Exception, asyncio.CancelledError):
+                    resolver.close()
+                    await resolver.wait_closed()
+                    self._resolver = None
+                    self._providers.clear()
+                    raise
+                finally:
+                    self._pending.pop(ticket, None)
+                    # A poller must not retain a task-local permit across calculations.
+                    pump = self._pump
+                    self._pump = None
+                    if pump is not None:
+                        pump.cancel()
+                        try:
+                            await pump
+                        except asyncio.CancelledError:
+                            pass
 
     async def close(self) -> None:
         """Stops native workers and fails unresolved actor-local requests."""
@@ -592,7 +566,9 @@ class LicorneActorRuntime:
                 batch = await active_resolver.next_result()
                 error = batch.error
                 if error is not None:
-                    failure = IdentityResolutionError(str(error))
+                    failure = IdentityResolutionError(
+                        "LI-ESKG result unavailable"
+                    )
                     for ticket in batch.tickets:
                         future = self._pending.pop(int(ticket), None)
                         if future is not None and not future.done():
@@ -608,14 +584,12 @@ class LicorneActorRuntime:
         except Exception as error:
             if active_resolver.closed or self._resolver is not resolver:
                 return
-            failure = IdentityResolutionError(
-                f"LI-ESKG result pump failed: {error}"
-            )
+            failure = IdentityResolutionError("LI-ESKG result pump unavailable")
             for future in self._pending.values():
                 if not future.done():
                     future.set_exception(failure)
             self._pending.clear()
-            logger.exception(
+            logger.warning(
                 "licorne_result_pump_failed", error_type=type(error).__name__
             )
 

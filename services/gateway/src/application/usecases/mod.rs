@@ -12,6 +12,7 @@ pub mod documents;
 pub mod evidence;
 pub mod explore;
 pub mod general_access;
+pub mod gol;
 pub mod iam_admin;
 pub mod identity;
 pub mod mcp_delegation;

@@ -1,50 +1,68 @@
-//! Read contracts for authoritative ontology and pipeline runtime records.
+//! GOL source transport and immutable pipeline bindings owned by Registry.
 
 use anyhow::Result;
+pub use galadril_registry::gol::{GolDiagnostic, GolFile};
+pub use galadril_registry::gol_service::{
+    GolCompileApproval, GolDependencyPreview, GolPublication, GolSummary,
+    GolValidation, GolWorkspace,
+};
 use serde_json::Value;
 
-/// Authenticated mutation context; Registry still owns command validation.
-pub struct OntologyWrite<'a> {
-    pub tenant: &'a str,
-    pub ontology: &'a str,
-    pub user: &'a str,
-    pub expected: &'a str,
-    pub name: &'a str,
-    pub definition: &'a Value,
-    pub command: &'a galadril_registry::ontology_authoring::OntologyCommand,
+use crate::application::usecases::authorization::QueryContext;
+
+/// Source input whose authenticated tenant and actor are supplied separately.
+pub struct GolWrite<'a> {
+    /// Qualified identity of the package's primary module.
+    pub ontology_id: &'a str,
+    /// Catalog name supplied by the author.
+    pub display_name: &'a str,
+    /// Complete relative UTF-8 source package, including unfinished drafts.
+    pub files: &'a [GolFile],
+    /// Required source snapshot for replacement; absence means creation.
+    pub expected_revision: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct OntologyCatalogEntry {
-    pub ontology_id: String,
-    pub display_name: String,
-    pub production_publication: Option<OntologyPublication>,
+/// The shared security adapter must admit metadata before it reaches clients.
+#[async_trait::async_trait]
+pub trait GolDisclosure: Send + Sync {
+    /// Admits a new source without granting visibility of existing packages.
+    async fn admit_creation(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        ontology: &str,
+    ) -> Result<()>;
+    /// Applies live GOL checks and IFC floors to a private catalog candidate.
+    async fn admit_catalog(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        summary: &GolSummary,
+    ) -> Result<bool>;
+    /// Applies the conservative approved source-authoring floor and
+    /// obligations.
+    async fn admit_source(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        ontology: &str,
+        source_revision: Option<&str>,
+    ) -> Result<()>;
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct OntologyPublication {
-    pub publication_id: String,
-    pub revision_id: String,
-    pub lifecycle: String,
-    pub metadata: Value,
-    pub base_version: String,
-    pub base_hash: String,
-    pub effective_hash: String,
-    pub author: String,
-    pub message: String,
-    pub published_at_ms: i64,
-    pub retired_at_ms: Option<i64>,
-}
-
+/// Pipeline-owned selection; symbol names require independent disclosure
+/// checks.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineOntologyBinding {
     pub pipeline_id: String,
     pub block_id: String,
     pub ontology_id: String,
-    pub resource_ids: Value,
-    pub resource_kinds: Value,
-    pub include_dependencies: bool,
-    pub metadata: Value,
+    pub generation: String,
+    pub source_revision: String,
+    pub symbols: Vec<String>,
     pub updated_at_ms: i64,
 }
 
@@ -66,35 +84,74 @@ pub struct PipelineExecution {
 
 #[async_trait::async_trait]
 pub trait ControlPlaneStore: Send + Sync {
-    /// Reads collaboration metadata from the same immutable model snapshot.
-    async fn ontology_workspace(
+    /// Source reads are called only after explicit authoring authorization.
+    async fn gol_workspace(
+        &self,
+        _tenant: &str,
+        _id: &str,
+    ) -> Result<GolWorkspace> {
+        anyhow::bail!("GOL workspace unavailable")
+    }
+    /// Draft syntax is validated exclusively by Registry's GOL compiler.
+    async fn save_gol_ontology(
+        &self,
+        _tenant: &str,
+        _user: &str,
+        _input: GolWrite<'_>,
+    ) -> Result<GolWorkspace> {
+        anyhow::bail!("GOL authoring unavailable")
+    }
+    /// Diagnostics are bound to an exact source revision.
+    async fn preview_gol_dependencies(
         &self,
         _tenant: &str,
         _id: &str,
         _revision: &str,
-    ) -> Result<Value> {
-        anyhow::bail!("Ontology workspace unavailable")
+        _approved: &[String],
+    ) -> Result<GolDependencyPreview> {
+        anyhow::bail!("GOL dependency admission unavailable")
     }
-
-    /// Applies an already authorized command with Registry compare-and-swap.
-    async fn author_ontology(
-        &self,
-        _input: OntologyWrite<'_>,
-    ) -> Result<Value> {
-        anyhow::bail!("Ontology authoring unavailable")
-    }
-
-    /// Lists only one ontology's immutable revision metadata.
-    async fn ontology_history(
+    /// Detailed compilation requires a fully admitted immutable import plan.
+    async fn validate_gol_ontology(
         &self,
         _tenant: &str,
         _id: &str,
-        _after: Option<&str>,
-        _limit: usize,
-    ) -> Result<Value> {
-        anyhow::bail!("Ontology history unavailable")
+        _revision: &str,
+        _approval: &GolCompileApproval,
+    ) -> Result<GolValidation> {
+        anyhow::bail!("GOL validation unavailable")
     }
-    /// Pins an authorized published ontology to an existing block.
+    /// Activation is performed only by Registry's atomic GOL publication path.
+    async fn publish_gol_ontology(
+        &self,
+        _tenant: &str,
+        _user: &str,
+        _id: &str,
+        _revision: &str,
+        _expected: Option<&str>,
+        _approval: &GolCompileApproval,
+    ) -> Result<GolPublication> {
+        anyhow::bail!("GOL publication unavailable")
+    }
+    /// Removes source membership and retires its active generation.
+    async fn delete_gol_ontology(
+        &self,
+        _tenant: &str,
+        _user: &str,
+        _id: &str,
+        _expected: &str,
+    ) -> Result<String> {
+        anyhow::bail!("GOL deletion unavailable")
+    }
+    /// Returns backend catalog candidates; no disclosure decision is implied.
+    async fn list_gol_ontologies(
+        &self,
+        _tenant: &str,
+        _limit: usize,
+    ) -> Result<Vec<GolSummary>> {
+        anyhow::bail!("GOL catalog unavailable")
+    }
+    /// Captures a published GOL generation in one pipeline authoring commit.
     async fn bind_ontology(
         &self,
         _tenant: &str,
@@ -104,81 +161,18 @@ pub trait ControlPlaneStore: Send + Sync {
         _ontology: &str,
         _expected: &str,
     ) -> Result<String> {
-        anyhow::bail!("Ontology bindings unavailable")
+        anyhow::bail!("GOL bindings unavailable")
     }
-    /// Reads the current tenant head for optimistic ontology edits.
-    async fn ontology_head(&self, _tenant: &str) -> Result<String> {
-        anyhow::bail!("Ontology head unavailable")
-    }
-    /// Reads one exact ontology revision for an authorized semantic overlay.
-    async fn ontology_document(
-        &self,
-        _tenant: &str,
-        _id: &str,
-        _revision: &str,
-    ) -> Result<Value> {
-        anyhow::bail!("Ontology documents unavailable")
-    }
-    /// Writes a tenant-owned draft with Registry compare-and-swap semantics.
-    async fn save_ontology(
-        &self,
-        _tenant: &str,
-        _id: &str,
-        _name: &str,
-        _user: &str,
-        _ontology: &Value,
-        _expected: Option<&str>,
-    ) -> Result<String> {
-        anyhow::bail!("Ontology authoring unavailable")
-    }
-
-    /// Publishes a previously validated materialization as production.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "publication provenance is an explicit persistence boundary"
-    )]
-    async fn publish_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        display_name: &str,
-        publication_id: &str,
-        revision_id: &str,
-        metadata: &Value,
-        create_only: bool,
-    ) -> Result<OntologyPublication>;
-
-    /// Retires the current production publication without deleting history.
-    async fn retire_ontology(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        publication_id: &str,
-        revision_id: &str,
-    ) -> Result<()>;
-
-    /// Reports whether a tenant ontology catalog entry already exists.
-    async fn ontology_exists(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-    ) -> Result<bool>;
-
-    /// Lists current ontology catalog entries.
-    async fn list_ontologies(
-        &self,
-        tenant_id: &str,
-        limit: usize,
-    ) -> Result<Vec<OntologyCatalogEntry>>;
-
-    /// Lists production ontology bindings for pipeline blocks.
+    /// Returns private immutable selections requiring source disclosure
+    /// checks.
     async fn list_ontology_bindings(
         &self,
-        tenant_id: &str,
-        pipeline_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<PipelineOntologyBinding>>;
-
+        _tenant: &str,
+        _pipeline: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<PipelineOntologyBinding>> {
+        anyhow::bail!("GOL bindings unavailable")
+    }
     /// Lists durable pipeline execution records.
     async fn list_pipeline_executions(
         &self,

@@ -76,6 +76,15 @@
       "name": "requested_resource",
       "type": "string",
       "doc": "Tenant-qualified canonical resource reference."
+    },
+    {
+      "name": "gol_admission",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "doc": "Opaque server-issued GOL calculation admission. Never derived from source payload claims."
     }
   ]
 }

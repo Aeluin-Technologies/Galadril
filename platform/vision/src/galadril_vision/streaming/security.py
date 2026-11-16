@@ -1,0 +1,133 @@
+"""Kafka release reuses the original server calculation and its dependency history."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Protocol
+
+from galadril_ontology import (
+    GolBlockContract,
+    GolDenied,
+    GolEffect,
+    GolRequest,
+    GolRuntimeManager,
+    source_object_id,
+)
+from galadril_pipeline.events import PipelineCommand
+
+from galadril_vision.common.config import VisionConfig
+
+
+class PublicationGate(Protocol):
+    """Every broker write requires a live release decision, including cache hits."""
+
+    async def authorize_state(self, command: PipelineCommand) -> None: ...
+    def protect(
+        self, command: PipelineCommand
+    ) -> AbstractAsyncContextManager[None]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _Binding:
+    pipeline_id: str
+    revision_id: str
+    block_id: str
+    step_type: str
+    target: str | None
+
+
+class GatewayPublicationGate:
+    """Gateway retains flow and all historical authorization dependencies."""
+
+    __slots__ = ("_runtime", "_execution", "_tenant", "_bindings")
+
+    def __init__(
+        self, config: VisionConfig, runtime: GolRuntimeManager
+    ) -> None:
+        self._runtime = runtime
+        self._execution = config.name
+        self._tenant = config.runtime_tenant_id
+        self._bindings: Mapping[str, _Binding] = MappingProxyType(
+            {
+                step.step: _Binding(
+                    step.origin.pipeline_id
+                    if step.origin
+                    else config.ontology_pipeline_id,
+                    step.origin.revision_id
+                    if step.origin
+                    else config.runtime_revision_id or "",
+                    step.origin.block_id if step.origin else step.step,
+                    step.type,
+                    value
+                    if isinstance(
+                        (value := step.params.get("gol_transfer_symbol_key")),
+                        str,
+                    )
+                    else None,
+                )
+                for step in config.pipeline
+            }
+        )
+
+    def _request(self, command: PipelineCommand) -> tuple[GolRequest, str]:
+        binding = self._bindings.get(command.step)
+        record = command.payload.get("record")
+        if (
+            binding is None
+            or not binding.target
+            or not binding.revision_id
+            or not self._tenant
+            or command.tenant_id != self._tenant
+            or command.pipeline != self._execution
+            or command.step_type.value != binding.step_type
+            or not isinstance(record, dict)
+        ):
+            raise GolDenied("GOL publication unavailable")
+        try:
+            source = source_object_id(
+                record.get("storage_path"), command.tenant_id
+            )
+            request = GolRequest(
+                tenant_id=command.tenant_id,
+                pipeline_id=binding.pipeline_id,
+                pipeline_revision_id=binding.revision_id,
+                block_id=binding.block_id,
+                source_object_id=source,
+            )
+        except ValueError:
+            raise GolDenied("GOL publication unavailable") from None
+        return request, binding.target
+
+    async def authorize_state(self, command: PipelineCommand) -> None:
+        """Restores the same admitted calculation before reading the execution ledger."""
+        request, target = self._request(command)
+        async with self._runtime.bind(
+            request,
+            GolBlockContract(required_symbol_keys=(target,)),
+            admission=command.admission,
+        ):
+            pass
+
+    @asynccontextmanager
+    async def protect(self, command: PipelineCommand) -> AsyncIterator[None]:
+        """A newly filtered projection cannot erase previously observed dependencies."""
+        request, target = self._request(command)
+        async with self._runtime.bind(
+            request,
+            GolBlockContract(required_symbol_keys=(target,)),
+            admission=command.admission,
+        ):
+            async with self._runtime.protected(
+                (
+                    GolEffect(
+                        operation="transfer",
+                        target=target,
+                        destination="kafka",
+                        purpose="pipeline_dispatch",
+                    ),
+                )
+            ):
+                yield

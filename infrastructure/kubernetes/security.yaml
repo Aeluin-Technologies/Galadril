@@ -100,6 +100,15 @@ spec:
   - from:
     - source:
         principals:
+        - cluster.local/ns/galadril/sa/vision
+    to:
+    - operation:
+        methods: [POST]
+        paths: [/internal/gol/runtime, /internal/gol/effect]
+        ports: ['8081']
+  - from:
+    - source:
+        principals:
         - cluster.local/ns/galadril/sa/scribe
     to:
     - operation:
@@ -139,16 +148,16 @@ spec:
         - /galadril.registry.v1.Registry/DeletePipeline
         - /galadril.registry.v1.Registry/ListPublishedPipelines
         - /galadril.registry.v1.Registry/GetRuntimePipeline
-        - /galadril.registry.v1.Registry/PutOntology
-        - /galadril.registry.v1.Registry/GetOntology
-        - /galadril.registry.v1.Registry/PublishOntology
-        - /galadril.registry.v1.Registry/RetireOntology
-        - /galadril.registry.v1.Registry/ListOntologies
+        - /galadril.registry.v1.Registry/SaveGolOntology
+        - /galadril.registry.v1.Registry/GetGolWorkspace
+        - /galadril.registry.v1.Registry/PublishGolOntology
+        - /galadril.registry.v1.Registry/DeleteGolOntology
+        - /galadril.registry.v1.Registry/ListGolOntologies
         - /galadril.registry.v1.Registry/PutBinding
         - /galadril.registry.v1.Registry/ListBindings
-        - /galadril.registry.v1.Registry/GetOntologySlice
-        - /galadril.registry.v1.Registry/DiffOntology
-        - /galadril.registry.v1.Registry/MergeOntology
+        - /galadril.registry.v1.Registry/GetGolBinding
+        - /galadril.registry.v1.Registry/ValidateGolOntology
+        - /galadril.registry.v1.Registry/PreviewGolDependencies
         - /grpc.health.v1.Health/Check
         ports:
         - '50053'
@@ -165,7 +174,6 @@ spec:
         - /galadril.registry.v1.Registry/ValidateTenants
         - /galadril.registry.v1.Registry/GetTenant
         - /galadril.registry.v1.Registry/GetRuntimePipeline
-        - /galadril.registry.v1.Registry/GetOntologySlice
         - /galadril.registry.v1.Registry/ListPublishedPipelines
         - /galadril.registry.v1.Registry/ListTenants
         - /grpc.health.v1.Health/Check

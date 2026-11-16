@@ -188,14 +188,16 @@ protects the rest of the VM but cannot guarantee that every model combination
 fits. Quantization quality, peak resident memory and latency require the live
 model benchmark on the deployment architecture before changing the default.
 
-Eru's `OpenInformationPipeline` supports open predicates for HippoRAG 2. A Registry
-`OntologySlice` can accompany private extraction requests; pipeline blocks can also
-use their existing task-bound Registry slice. The policy uses stable `link_type`
-resource IDs and their `source_type`/`target_type` attributes. Endpoint types and
-predicates are validated against that vocabulary after structured generation;
-unlisted or ungrounded triples are rejected. An explicitly empty ontology remains
-closed. Eru consumes authorized Registry projections and never substitutes a
-locally invented ontology or treats extracted names as resolved ESKG identities.
+Eru's `OpenInformationPipeline` supports open predicates for HippoRAG 2. A data-only
+GOL authorized projection can accompany private extraction requests; pipeline
+blocks consume the server-admitted generation projection. Binary relation
+vocabulary uses canonical selectors and explicitly named `source` and `target`
+roles. N-ary or differently named roles are not inferred from reference order.
+Unlisted or ungrounded triples are rejected after generation. An explicitly empty
+projection remains closed. Python performs no import resolution or semantic GOL
+compilation, and extracted names do not establish ESKG identities. Runtime handles
+and admissions are excluded from extraction payloads; Vision checks transfer
+obligations before inference and write obligations before persistence.
 
 The first local use downloads public weights; prewarm the cache for offline operation.
 The embedding weights alone require approximately 4 GiB in BF16; provision additional

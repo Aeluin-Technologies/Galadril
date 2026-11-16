@@ -6,7 +6,7 @@ import json
 from typing import Protocol
 
 import structlog
-from galadril_ontology import Ontology, ResourceKind, active_ontology_slice
+from galadril_ontology import GolProjection, GolSymbolKind, active_gol_lease
 from pydantic import BaseModel, ConfigDict, Field
 
 from eru.common.types import (
@@ -102,39 +102,38 @@ class ExtractionPolicy(BaseModel):
     @classmethod
     def active_registry(cls) -> ExtractionPolicy | None:
         """Uses the Registry slice already authorized for the current block."""
-        published = active_ontology_slice()
+        published = active_gol_lease()
         return (
-            cls.from_registry(published.ontology)
+            cls.from_gol(published.projection())
             if published is not None
             else None
         )
 
     @classmethod
-    def from_registry(cls, ontology: Ontology) -> ExtractionPolicy:
+    def from_gol(cls, ontology: GolProjection) -> ExtractionPolicy:
         """Consumes Registry wire resources without resolving identities locally."""
         entity_types = tuple(
-            resource.resource_id
-            for resource in ontology.resources
-            if resource.kind
-            in {ResourceKind.OBJECT_TYPE, ResourceKind.EVENT_TYPE}
+            resource.key
+            for resource in ontology.symbols
+            if resource.kind is GolSymbolKind.ENTITY
         )
         relations = []
-        for resource in ontology.resources:
-            if resource.kind != ResourceKind.LINK_TYPE:
+        for resource in ontology.symbols:
+            if resource.kind != GolSymbolKind.RELATION:
                 continue
-            source = resource.attributes.get("source_type")
-            target = resource.attributes.get("target_type")
+            source = resource.roles.get("source")
+            target = resource.roles.get("target")
             if source not in entity_types or target not in entity_types:
-                raise ValueError("Registry relation endpoints are unavailable")
+                continue
             relations.append(
                 RelationConstraint(
-                    relation=resource.resource_id,
+                    relation=resource.key,
                     allowed_source={str(source)},
                     allowed_target={str(target)},
                 )
             )
         return cls(
-            version=ontology.version,
+            version=ontology.generation_id,
             entity_types=entity_types,
             relations=tuple(relations),
         )

@@ -95,6 +95,9 @@ class CanonicalRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    admission: str | None = Field(
+        default=None, min_length=1, max_length=4096, repr=False, exclude=True
+    )
     record_id: str = Field(..., min_length=1)
     tenant_id: str = Field(..., min_length=1, max_length=128)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

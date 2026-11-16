@@ -55,6 +55,33 @@ use crate::application::usecases::sso_admin::SsoAdminService;
 use crate::application::usecases::uploads::UploadService;
 use crate::config::AppConfig;
 
+#[async_trait::async_trait]
+impl crate::application::ports::upload_store::UploadAdmission
+    for crate::application::usecases::gol::GolService
+{
+    /// Keeps the storage coordinator on the same trusted GOL host boundary.
+    async fn issue_ingress(
+        &self,
+        tenant: &str,
+        user: &str,
+        source_object_id: &str,
+        revision: &str,
+        group: &str,
+        context: &crate::application::usecases::authorization::QueryContext,
+    ) -> Result<String> {
+        crate::application::usecases::gol::GolService::issue_ingress(
+            self,
+            tenant,
+            user,
+            source_object_id,
+            revision,
+            group,
+            context,
+        )
+        .await
+    }
+}
+
 /// Starts the authenticated, tenant-scoped GraphQL control plane.
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -255,6 +282,15 @@ async fn main() -> Result<()> {
             Err(std::env::VarError::NotPresent) => None,
             Err(error) => return Err(error.into()),
         };
+        let gol = Arc::new(crate::application::usecases::gol::GolService::from_environment(
+            registry_client.clone(),
+            Arc::clone(&identity),
+            Arc::clone(&iam_store_dyn),
+            Arc::clone(&authorization),
+            config.s3.as_ref(),
+            spicedb_endpoint,
+            spicedb_token,
+        ).await?);
         let registry_store =
             Arc::new(RegistryStore::new(registry_client, database.clone()));
         let control_plane_store = registry_store.clone();
@@ -263,6 +299,7 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
+            Arc::clone(&gol) as Arc<dyn crate::application::ports::control_plane_store::GolDisclosure>,
         ));
 
         let search_store = Arc::new(PgSearchStore::new(database.clone()));
@@ -298,6 +335,7 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
+            Arc::clone(&gol) as Arc<dyn crate::application::ports::upload_store::UploadAdmission>,
         ));
 
         let pipeline_store = registry_store;
@@ -357,6 +395,7 @@ async fn main() -> Result<()> {
         ));
 
         let services = Arc::new(GatewayServices {
+            gol: Arc::clone(&gol),
             authorization: Arc::clone(&authorization),
             utils,
             local_provisioning: std::env::var("AUTH_LOCAL_LOGIN_ENABLED").is_ok_and(|value| value == "true"),

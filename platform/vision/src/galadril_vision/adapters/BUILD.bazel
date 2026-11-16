@@ -6,7 +6,6 @@ py_library(
         "__init__.py",
         "builtin.py",
         "inference.py",
-        "memory.py",
     ],
     imports = ["../.."],
     visibility = [
@@ -15,6 +14,7 @@ py_library(
     ],
     deps = [
         ":routing",
+        ":memory",
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/core",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
@@ -43,9 +43,28 @@ py_library(
     imports = ["../.."],
     visibility = ["//platform/vision/src:__subpackages__", "//platform/vision/tests:__subpackages__"],
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/application",
         "@pip//httpx", "@pip//opentelemetry_api", "@pip//pydantic", "@pip//regex", "@pip//structlog",
+    ],
+)
+
+py_library(
+    name = "memory",
+    srcs = ["memory.py"],
+    imports = ["../.."],
+    visibility = ["//platform/vision/src:__subpackages__", "//platform/vision/tests:__subpackages__"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/application",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/compute:helpers",
+        "@pip//httpx", "@pip//opentelemetry_api", "@pip//orjson",
+        "@pip//pydantic", "@pip//structlog",
     ],
 )

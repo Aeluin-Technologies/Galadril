@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum, unique
 
+from galadril_ontology import source_object_id
 from pydantic import BaseModel, ConfigDict, Field
 
 from galadril_vision.common.types import EventType, normalize_tenant_id
@@ -317,7 +318,7 @@ class EventNormalizer:
             A unified dictionary layout normalized for downstream engine consumption.
         """
         tenant_id = EventNormalizer._extract_tenant_id(payload)
-        EventNormalizer._validate_trusted_authz(payload, tenant_id)
+        authz = EventNormalizer._validate_trusted_authz(payload, tenant_id)
         observation = EventNormalizer._observation_context(payload)
         input_type = (
             observation.input_type.value.lower()
@@ -349,7 +350,30 @@ class EventNormalizer:
             else payload.get("storage_path")
         )
 
+        admission = authz.get("gol_admission")
+        if admission is not None:
+            if (
+                not isinstance(admission, str)
+                or not admission
+                or len(admission) > 4096
+                or any(
+                    character.isspace() or ord(character) < 32
+                    for character in admission
+                )
+            ):
+                raise ValueError("Invalid GOL admission")
+            if not isinstance(storage_path, str):
+                raise ValueError("GOL source object is missing")
+            if source_object_id(storage_path, tenant_id) != authz.get(
+                "requested_resource"
+            ):
+                raise ValueError("GOL source object mismatch")
+        sanitized_payload = dict(payload)
+        sanitized_payload["authz"] = {
+            key: value for key, value in authz.items() if key != "gol_admission"
+        }
         context = {
+            "admission": admission,
             "record_id": (
                 observation.observation_id
                 if observation is not None
@@ -366,7 +390,7 @@ class EventNormalizer:
             "ingested_at": EventNormalizer._parse_timestamp_value(ingested_at),
             "storage_path": storage_path,
             "source": source,
-            "raw_payload": dict(payload),
+            "raw_payload": sanitized_payload,
             "metadata": {
                 "input_type": input_type,
                 "mime_type": payload.get("mime_type"),

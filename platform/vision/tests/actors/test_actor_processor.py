@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 import structlog
+from galadril_ontology import GolLease, GolRequest, GolRuntimeManager
 from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_vision.actors.processor import (
@@ -20,6 +21,24 @@ from galadril_vision.adapters.builtin import (
 from galadril_vision.application.execution import PipelineExecutor
 from galadril_vision.common.config import VisionConfig
 from pydantic import JsonValue
+
+
+class _Gateway:
+    async def open(self, request: GolRequest, admission: str) -> GolLease:
+        assert admission == "test-admission"
+        return GolLease(
+            tenant_id=request.tenant_id,
+            ontology_id="test",
+            ontology_version="1.0.0",
+            source_revision="s",
+            generation_id="g",
+            context_id="server-context",
+        )
+
+
+def _admitted_runtime() -> GolRuntimeManager:
+    """Unit handler composition uses a preauthorized transport fixture."""
+    return GolRuntimeManager(_Gateway())
 
 
 def _config() -> VisionConfig:
@@ -81,12 +100,17 @@ def test_builtin_capabilities_do_not_require_a_plugin_binding() -> None:
         type="sink",
         capability_id="core.output.eskg",
         capability_version="1.0.0",
+        params={
+            "gol_symbol_key": "domain::Entity",
+            "gol_event_symbol_key": "domain::Observation",
+        },
     )
     handler = AsyncMock()
     VisionCommandProcessor(
         VisionConfig.model_validate(config),
         plugins=PluginRegistry(()),
         handler_factory=lambda _: {"transform": handler},
+        ontology_runtime=_admitted_runtime(),
     )
 
 
@@ -114,18 +138,28 @@ def test_native_routing_executes_with_an_empty_plugin_registry() -> None:
     ]
     config = VisionConfig.model_validate(data)
     command = PipelineCommand(
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline=config.name,
         tenant_id="tenant_a",
         step="classify",
         step_type="route",
         resource_class="cpu",
-        payload={"text": "hello"},
+        payload=(
+            {"text": "hello"}
+            | {
+                "record": {
+                    "storage_path": "s3://lake/" + "tenant_a" + "/source/object"
+                }
+            }
+        ),
     )
     result = asyncio.run(
-        VisionCommandProcessor(config, plugins=PluginRegistry(())).process(
-            command
-        )
+        VisionCommandProcessor(
+            config,
+            plugins=PluginRegistry(()),
+            ontology_runtime=_admitted_runtime(),
+        ).process(command)
     )
     assert result["branch"] == "yes"
 
@@ -133,6 +167,12 @@ def test_native_routing_executes_with_an_empty_plugin_registry() -> None:
 def test_processor_rejects_unconfigured_runtime_adapter() -> None:
     """Fails DBT commands explicitly instead of silently skipping work."""
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "default" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline="vision",
         step="transform",
@@ -141,12 +181,22 @@ def test_processor_rejects_unconfigured_runtime_adapter() -> None:
     )
 
     with pytest.raises(CommandProcessingError, match="dedicated event-driven"):
-        asyncio.run(VisionCommandProcessor(_config()).process(command))
+        asyncio.run(
+            VisionCommandProcessor(
+                _config(), ontology_runtime=_admitted_runtime()
+            ).process(command)
+        )
 
 
 def test_processor_rejects_pipeline_identity_mismatch() -> None:
     """Prevents a shared actor from executing commands for another pipeline."""
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "default" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline="other",
         step="transform",
@@ -155,7 +205,11 @@ def test_processor_rejects_pipeline_identity_mismatch() -> None:
     )
 
     with pytest.raises(CommandProcessingError, match="does not match"):
-        asyncio.run(VisionCommandProcessor(_config()).process(command))
+        asyncio.run(
+            VisionCommandProcessor(
+                _config(), ontology_runtime=_admitted_runtime()
+            ).process(command)
+        )
 
 
 def test_shared_processor_selects_pipeline_by_tenant_and_revision() -> None:
@@ -168,8 +222,16 @@ def test_shared_processor_selects_pipeline_by_tenant_and_revision() -> None:
     tenant_b.name = "tenant_b/daily/bbbbbbbb"
     tenant_b.runtime_tenant_id = "tenant_b"
     tenant_b.runtime_pipeline_id = "daily"
-    processor = VisionCommandProcessor((tenant_a, tenant_b))
+    processor = VisionCommandProcessor(
+        (tenant_a, tenant_b), ontology_runtime=_admitted_runtime()
+    )
     valid = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "tenant_b" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         tenant_id="tenant_b",
         pipeline=tenant_b.name,
@@ -193,9 +255,17 @@ def test_processor_sanitizes_failed_gpu_command_without_closing_licorne() -> (
     identity_runtime = MagicMock()
     adapter._identity_state.runtime = identity_runtime
     processor = VisionCommandProcessor(
-        _config(), handler_factory=lambda config: {"transform": adapter}
+        _config(),
+        handler_factory=lambda config: {"transform": adapter},
+        ontology_runtime=_admitted_runtime(),
     )
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "default" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline="vision",
         step="transform",
@@ -226,8 +296,16 @@ def test_processor_sanitizes_failed_gpu_command_without_closing_licorne() -> (
 
 def test_processor_sanitizes_successful_cpu_command() -> None:
     """Runs mandatory cleanup on successful commands without touching CUDA."""
-    processor = VisionCommandProcessor(_config())
+    processor = VisionCommandProcessor(
+        _config(), ontology_runtime=_admitted_runtime()
+    )
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "default" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline="vision",
         step="transform",
@@ -271,8 +349,16 @@ def test_processor_injects_route_handlers_after_admission() -> None:
     factory = MagicMock(return_value={"transform": handler})
     config = _config()
     config.runtime_tenant_id = "tenant_a"
-    processor = VisionCommandProcessor(config, handler_factory=factory)
+    processor = VisionCommandProcessor(
+        config, handler_factory=factory, ontology_runtime=_admitted_runtime()
+    )
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "tenant_a" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         tenant_id="tenant_a",
         pipeline="vision",
@@ -297,10 +383,18 @@ def test_builtin_resources_are_owned_by_each_route() -> None:
     second.name = "second"
     second.connectors.postgres.database = "second_database"
     second.connectors.s3.bucket = "second_raw"
-    processor = VisionCommandProcessor((first, second))
+    processor = VisionCommandProcessor(
+        (first, second), ontology_runtime=_admitted_runtime()
+    )
     first.connectors.postgres.database = "mutated_after_composition"
     second.connectors.s3.bucket = "mutated_after_composition"
     command = PipelineCommand(
+        payload={
+            "record": {
+                "storage_path": "s3://lake/" + "default" + "/source/object"
+            }
+        },
+        admission="test-admission",
         correlation_id=uuid4(),
         pipeline="vision",
         step="transform",
@@ -341,7 +435,9 @@ def test_same_tenant_routes_share_identity_sequence_owner() -> None:
     first = _config()
     first.runtime_tenant_id = "tenant_a"
     second = first.model_copy(deep=True, update={"name": "second"})
-    processor = VisionCommandProcessor((first, second))
+    processor = VisionCommandProcessor(
+        (first, second), ontology_runtime=_admitted_runtime()
+    )
     first_adapter = (
         processor._executor._routes[first.name].steps["transform"].handler
     )
@@ -366,7 +462,9 @@ def test_same_tenant_rejects_conflicting_identity_configuration(
     else:
         second.connectors.postgres.database = "other_database"
     with pytest.raises(ValueError, match="identity"):
-        VisionCommandProcessor((first, second))
+        VisionCommandProcessor(
+            (first, second), ontology_runtime=_admitted_runtime()
+        )
 
 
 def test_raw_storage_key_rejects_layer_first_layout() -> None:
@@ -404,7 +502,9 @@ def test_linked_plugin_scope_uses_trusted_block_origin_with_root_execution() -> 
     ]
     config = VisionConfig.model_validate(data)
     registry = MagicMock()
-    VisionCommandProcessor(config, plugins=registry)
+    VisionCommandProcessor(
+        config, plugins=registry, ontology_runtime=_admitted_runtime()
+    )
     scope = registry.handler.call_args.args[0]
     assert scope.tenant_id == "tenant"
     assert scope.pipeline_id == "child"

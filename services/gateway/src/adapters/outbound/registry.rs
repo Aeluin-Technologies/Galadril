@@ -3,14 +3,14 @@
 use anyhow::{Context, Result};
 use galadril_registry::grpc::RegistryClient;
 use galadril_registry::proto;
-use serde_json::Value;
 use sqlx::Row;
 use tonic::Code;
 
 use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::control_plane_store::{
-    ControlPlaneStore, OntologyCatalogEntry, OntologyPublication,
-    OntologyWrite, PipelineExecution, PipelineOntologyBinding,
+    ControlPlaneStore, GolCompileApproval, GolDependencyPreview,
+    GolDiagnostic, GolFile, GolPublication, GolSummary, GolValidation,
+    GolWorkspace, GolWrite, PipelineExecution, PipelineOntologyBinding,
 };
 use crate::application::ports::pipeline_store::{
     NewPipelineRevision, PipelineDefinition, PipelineStore,
@@ -52,18 +52,6 @@ impl RegistryStore {
         })
     }
 
-    /// Keeps collaboration state separate from the semantic document returned
-    /// to tools.
-    fn ontology_workspace_value(
-        value: proto::OntologyRevision,
-    ) -> Result<Value> {
-        let ontology: Value = serde_json::from_slice(&value.ontology_json)?;
-        let authoring: galadril_registry::ontology_authoring::OntologyAuthoringState = if value.authoring_json.is_empty() { Default::default() } else { serde_json::from_slice(&value.authoring_json)? };
-        Ok(
-            serde_json::json!({"revision_id":value.revision_id,"ontology":ontology,"authoring":authoring,"display_name":value.display_name,"author":value.author,"message":value.message,"created_at_ms":value.created_at_ms}),
-        )
-    }
-
     /// Converts Registry failures without exposing transport internals
     /// upstream.
     fn request_error(status: tonic::Status) -> anyhow::Error {
@@ -76,22 +64,61 @@ impl RegistryStore {
             i64::from(value.nanosecond()) / 1_000_000
     }
 
-    /// Converts a Registry ontology publication into the Gateway projection.
-    fn publication(
-        value: proto::OntologyPublication,
-    ) -> Result<OntologyPublication> {
-        Ok(OntologyPublication {
-            publication_id: value.publication_id,
-            revision_id: value.revision_id,
-            lifecycle: value.lifecycle,
-            metadata: serde_json::from_slice(&value.metadata_json)?,
-            base_version: value.base_version,
-            base_hash: value.base_hash,
-            effective_hash: value.effective_hash,
-            author: value.author,
+    fn gol_summary(value: proto::GolSummary) -> GolSummary {
+        GolSummary {
+            ontology_id: value.ontology_id,
+            display_name: value.display_name,
+            source_revision: value.source_revision,
+            active_generation: value.active_generation,
+            active_source_revision: value.active_source_revision,
+            status: value.status,
+        }
+    }
+
+    fn gol_diagnostic(value: proto::GolDiagnostic) -> Result<GolDiagnostic> {
+        Ok(GolDiagnostic {
+            code: value.code,
             message: value.message,
-            published_at_ms: value.published_at_ms,
-            retired_at_ms: value.retired_at_ms,
+            path: value.path,
+            start: usize::try_from(value.start)?,
+            end: usize::try_from(value.end)?,
+            severity: value.severity,
+        })
+    }
+
+    fn gol_dependency(
+        value: proto::GolDependency,
+    ) -> galadril_registry::gol_service::GolDependency {
+        galadril_registry::gol_service::GolDependency {
+            ontology_id: value.ontology_id,
+            generation: value.generation,
+            source_revision: value.source_revision,
+        }
+    }
+
+    fn gol_workspace(value: proto::GolWorkspace) -> Result<GolWorkspace> {
+        Ok(GolWorkspace {
+            summary: Self::gol_summary(
+                value.summary.context("Registry GOL summary missing")?,
+            ),
+            files: value
+                .files
+                .into_iter()
+                .map(|file| GolFile {
+                    path: file.path,
+                    text: file.text,
+                })
+                .collect(),
+            diagnostics: value
+                .diagnostics
+                .into_iter()
+                .map(Self::gol_diagnostic)
+                .collect::<Result<Vec<_>>>()?,
+            dependencies: value
+                .dependencies
+                .into_iter()
+                .map(Self::gol_dependency)
+                .collect(),
         })
     }
 }
@@ -274,75 +301,194 @@ impl PipelineStore for RegistryStore {
 
 #[async_trait::async_trait]
 impl ControlPlaneStore for RegistryStore {
-    async fn ontology_workspace(
+    async fn gol_workspace(
+        &self,
+        tenant: &str,
+        id: &str,
+    ) -> Result<GolWorkspace> {
+        let value = self
+            .client
+            .clone()
+            .get_gol_workspace(proto::GetGolWorkspaceRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                source_revision: None,
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Self::gol_workspace(value)
+    }
+
+    async fn save_gol_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        input: GolWrite<'_>,
+    ) -> Result<GolWorkspace> {
+        let value = self
+            .client
+            .clone()
+            .save_gol_ontology(proto::SaveGolOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: input.ontology_id.into(),
+                display_name: input.display_name.into(),
+                files: input
+                    .files
+                    .iter()
+                    .map(|file| proto::GolFile {
+                        path: file.path.clone(),
+                        text: file.text.clone(),
+                    })
+                    .collect(),
+                author: user.into(),
+                expected_revision: input.expected_revision.map(str::to_owned),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Self::gol_workspace(value)
+    }
+
+    async fn preview_gol_dependencies(
         &self,
         tenant: &str,
         id: &str,
         revision: &str,
-    ) -> Result<Value> {
+        approved: &[String],
+    ) -> Result<GolDependencyPreview> {
         let value = self
             .client
             .clone()
-            .get_ontology(proto::GetOntologyRequest {
+            .preview_gol_dependencies(proto::PreviewGolDependenciesRequest {
                 tenant_id: tenant.into(),
                 ontology_id: id.into(),
-                revision_id: revision.into(),
+                source_revision: revision.into(),
+                approved_owners: approved.to_vec(),
             })
             .await
             .map_err(Self::request_error)?
             .into_inner();
-        Self::ontology_workspace_value(value)
+        Ok(GolDependencyPreview {
+            required_owners: value.required_owners,
+            plan_pin: value.plan_pin,
+            dependencies: value
+                .dependencies
+                .into_iter()
+                .map(Self::gol_dependency)
+                .collect(),
+        })
     }
 
-    async fn author_ontology(
-        &self,
-        input: OntologyWrite<'_>,
-    ) -> Result<Value> {
-        let value = self
-            .client
-            .clone()
-            .put_ontology(proto::PutOntologyRequest {
-                tenant_id: input.tenant.into(),
-                ontology_id: input.ontology.into(),
-                display_name: input.name.into(),
-                ontology_json: serde_json::to_vec(input.definition)?,
-                author: input.user.into(),
-                message: input.command.operation_name().into(),
-                expected_revision_id: Some(input.expected.into()),
-                create_only: false,
-                authoring_command_json: Some(serde_json::to_vec(
-                    input.command,
-                )?),
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner();
-        Self::ontology_workspace_value(value)
-    }
-
-    async fn ontology_history(
+    async fn validate_gol_ontology(
         &self,
         tenant: &str,
         id: &str,
-        after: Option<&str>,
-        limit: usize,
-    ) -> Result<Value> {
-        let page = self
+        revision: &str,
+        approval: &GolCompileApproval,
+    ) -> Result<GolValidation> {
+        let value = self
             .client
             .clone()
-            .list_ontology_history(proto::ListOntologyHistoryRequest {
+            .validate_gol_ontology(proto::ValidateGolOntologyRequest {
                 tenant_id: tenant.into(),
                 ontology_id: id.into(),
-                after_revision_id: after.map(str::to_owned),
+                source_revision: revision.into(),
+                plan_pin: approval.plan_pin.clone(),
+                approved_owners: approval.approved_owners.clone(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Ok(GolValidation {
+            ontology_id: value.ontology_id,
+            source_revision: value.source_revision,
+            status: value.status,
+            diagnostics: value
+                .diagnostics
+                .into_iter()
+                .map(Self::gol_diagnostic)
+                .collect::<Result<Vec<_>>>()?,
+            dependencies: value
+                .dependencies
+                .into_iter()
+                .map(Self::gol_dependency)
+                .collect(),
+        })
+    }
+
+    async fn publish_gol_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        id: &str,
+        revision: &str,
+        expected: Option<&str>,
+        approval: &GolCompileApproval,
+    ) -> Result<GolPublication> {
+        let value = self
+            .client
+            .clone()
+            .publish_gol_ontology(proto::PublishGolOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                source_revision: revision.into(),
+                author_id: user.into(),
+                expected_generation: expected.map(str::to_owned),
+                plan_pin: approval.plan_pin.clone(),
+                approved_owners: approval.approved_owners.clone(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Ok(GolPublication {
+            ontology_id: value.ontology_id,
+            source_revision: value.source_revision,
+            generation: value.generation,
+        })
+    }
+
+    async fn delete_gol_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        id: &str,
+        expected: &str,
+    ) -> Result<String> {
+        Ok(self
+            .client
+            .clone()
+            .delete_gol_ontology(proto::DeleteGolOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                expected_revision: expected.into(),
+                author: user.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner()
+            .revision)
+    }
+
+    async fn list_gol_ontologies(
+        &self,
+        tenant: &str,
+        limit: usize,
+    ) -> Result<Vec<GolSummary>> {
+        Ok(self
+            .client
+            .clone()
+            .list_gol_ontologies(proto::ListGolOntologiesRequest {
+                tenant_id: tenant.into(),
                 limit: u32::try_from(limit.min(HARD_LIMIT))?,
             })
             .await
             .map_err(Self::request_error)?
-            .into_inner();
-        let items: Vec<Value> = page.items.into_iter().map(|item| serde_json::json!({"revision_id":item.revision_id,"author":item.author,"message":item.message,"branch":item.branch,"operation":item.operation,"created_at_ms":item.created_at_ms})).collect();
-        Ok(
-            serde_json::json!({"items":items,"next_revision_id":page.next_revision_id}),
-        )
+            .into_inner()
+            .ontologies
+            .into_iter()
+            .map(Self::gol_summary)
+            .collect())
     }
 
     async fn bind_ontology(
@@ -382,194 +528,36 @@ impl ControlPlaneStore for RegistryStore {
         Ok(saved.head_revision_id)
     }
 
-    async fn ontology_head(&self, tenant: &str) -> Result<String> {
-        let mut client = self.client.clone();
-        Ok(client
-            .get_tenant(proto::GetTenantRequest {
-                tenant_id: tenant.into(),
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner()
-            .head_revision_id)
-    }
-
-    async fn ontology_document(
-        &self,
-        tenant: &str,
-        id: &str,
-        revision: &str,
-    ) -> Result<Value> {
-        let mut client = self.client.clone();
-        let document = client
-            .get_ontology(proto::GetOntologyRequest {
-                tenant_id: tenant.into(),
-                ontology_id: id.into(),
-                revision_id: revision.into(),
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner();
-        Ok(serde_json::from_slice(&document.ontology_json)?)
-    }
-
-    async fn save_ontology(
-        &self,
-        tenant: &str,
-        id: &str,
-        name: &str,
-        user: &str,
-        ontology: &Value,
-        expected: Option<&str>,
-    ) -> Result<String> {
-        let mut client = self.client.clone();
-        Ok(client
-            .put_ontology(proto::PutOntologyRequest {
-                authoring_command_json: None,
-                tenant_id: tenant.into(),
-                ontology_id: id.into(),
-                display_name: name.into(),
-                ontology_json: serde_json::to_vec(ontology)?,
-                author: user.into(),
-                message: "Update tenant plugin ontology overlay".into(),
-                expected_revision_id: expected.map(str::to_owned),
-                create_only: expected.is_none(),
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner()
-            .revision_id)
-    }
-
-    async fn publish_ontology(
-        &self,
-        tenant: &str,
-        ontology_id: &str,
-        display_name: &str,
-        publication_id: &str,
-        revision_id: &str,
-        metadata: &Value,
-        create_only: bool,
-    ) -> Result<OntologyPublication> {
-        let mut client = self.client.clone();
-        let response = client
-            .publish_ontology(proto::PublishOntologyRequest {
-                tenant_id: tenant.to_owned(),
-                ontology_id: ontology_id.to_owned(),
-                display_name: display_name.to_owned(),
-                publication_id: publication_id.to_owned(),
-                revision_id: revision_id.to_owned(),
-                metadata_json: serde_json::to_vec(metadata)?,
-                create_only,
-            })
-            .await
-            .map_err(Self::request_error)?;
-        Self::publication(response.into_inner())
-    }
-
-    async fn retire_ontology(
-        &self,
-        tenant: &str,
-        ontology_id: &str,
-        publication_id: &str,
-        revision_id: &str,
-    ) -> Result<()> {
-        let mut client = self.client.clone();
-        client
-            .retire_ontology(proto::RetireOntologyRequest {
-                tenant_id: tenant.to_owned(),
-                ontology_id: ontology_id.to_owned(),
-                publication_id: publication_id.to_owned(),
-                revision_id: revision_id.to_owned(),
-            })
-            .await
-            .map_err(Self::request_error)?;
-        Ok(())
-    }
-
-    async fn ontology_exists(
-        &self,
-        tenant: &str,
-        ontology_id: &str,
-    ) -> Result<bool> {
-        let mut client = self.client.clone();
-        match client
-            .get_ontology(proto::GetOntologyRequest {
-                tenant_id: tenant.to_owned(),
-                ontology_id: ontology_id.to_owned(),
-                revision_id: String::new(),
-            })
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(status) if status.code() == Code::NotFound => Ok(false),
-            Err(status) => Err(Self::request_error(status)),
-        }
-    }
-
-    async fn list_ontologies(
-        &self,
-        tenant: &str,
-        limit: usize,
-    ) -> Result<Vec<OntologyCatalogEntry>> {
-        let mut client = self.client.clone();
-        client
-            .list_ontologies(proto::ListOntologiesRequest {
-                tenant_id: tenant.to_owned(),
-                limit: u32::try_from(limit.min(HARD_LIMIT))?,
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner()
-            .ontologies
-            .into_iter()
-            .map(|entry| {
-                Ok(OntologyCatalogEntry {
-                    ontology_id: entry.ontology_id,
-                    display_name: entry.display_name,
-                    production_publication: entry
-                        .production_publication
-                        .map(Self::publication)
-                        .transpose()?,
-                })
-            })
-            .collect()
-    }
-
     async fn list_ontology_bindings(
         &self,
         tenant: &str,
         pipeline_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<PipelineOntologyBinding>> {
-        let mut client = self.client.clone();
-        client
+        Ok(self
+            .client
+            .clone()
             .list_bindings(proto::ListBindingsRequest {
-                tenant_id: tenant.to_owned(),
+                tenant_id: tenant.into(),
                 pipeline_id: pipeline_id.map(str::to_owned),
-                limit: u32::try_from(limit.min(HARD_LIMIT))?,
                 revision_id: None,
+                limit: u32::try_from(limit.min(HARD_LIMIT))?,
             })
             .await
             .map_err(Self::request_error)?
             .into_inner()
             .bindings
             .into_iter()
-            .map(|binding| {
-                Ok(PipelineOntologyBinding {
-                    pipeline_id: binding.pipeline_id,
-                    block_id: binding.block_id,
-                    ontology_id: binding.ontology_id,
-                    resource_ids: serde_json::to_value(binding.resource_ids)?,
-                    resource_kinds: serde_json::to_value(
-                        binding.resource_kinds,
-                    )?,
-                    include_dependencies: binding.include_dependencies,
-                    metadata: serde_json::from_slice(&binding.metadata_json)?,
-                    updated_at_ms: binding.updated_at_ms,
-                })
+            .map(|binding| PipelineOntologyBinding {
+                pipeline_id: binding.pipeline_id,
+                block_id: binding.block_id,
+                ontology_id: binding.ontology_id,
+                generation: binding.generation,
+                source_revision: binding.source_revision,
+                symbols: binding.symbols,
+                updated_at_ms: binding.updated_at_ms,
             })
-            .collect()
+            .collect())
     }
 
     async fn list_pipeline_executions(

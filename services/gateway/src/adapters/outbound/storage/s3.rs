@@ -176,8 +176,16 @@ impl S3Uploader {
             .send()
             .await
             .context("Staged upload metadata is unavailable")?;
-        let etag =
-            staged.e_tag().context("Staged upload version is missing")?;
+        let etag = request.staging_revision;
+        anyhow::ensure!(
+            !etag.trim().is_empty() &&
+                !request.gol_admission.trim().is_empty(),
+            "Upload admission is unavailable"
+        );
+        anyhow::ensure!(
+            staged.e_tag() == Some(etag),
+            "Staged upload revision changed"
+        );
         let source = format!(
             "{}/{}",
             self.staging_bucket,
@@ -193,6 +201,7 @@ impl S3Uploader {
             // REPLACE resets Content-Type as well as user metadata. Bind the
             // preserved MIME type to the exact source version read above.
             .copy_source_if_match(etag)
+            .if_none_match("*")
             .set_content_type(staged.content_type().map(str::to_owned))
             .metadata_directive(MetadataDirective::Replace)
             .metadata("tenant", request.tenant_id)
@@ -200,6 +209,7 @@ impl S3Uploader {
             .metadata("authz-origin", "gateway")
             .metadata("authz-permission", "ingest")
             .metadata("authz-resource", format!("raw:{destination_key}"))
+            .metadata("authz-gol-admission", request.gol_admission)
             .metadata("authz-delegation-id", request.delegation_id);
 
         let issuer = request.authn_issuer.trim();
@@ -339,6 +349,22 @@ impl S3Uploader {
 
 #[async_trait::async_trait]
 impl UploadStore for S3Uploader {
+    async fn staging_revision(&self, staging_key: &str) -> Result<String> {
+        let staged = self
+            .client
+            .head_object()
+            .bucket(&self.staging_bucket)
+            .key(staging_key)
+            .send()
+            .await
+            .context("Staged upload is unavailable")?;
+        staged
+            .e_tag()
+            .filter(|etag| !etag.trim().is_empty())
+            .map(str::to_owned)
+            .context("Staged upload revision is unavailable")
+    }
+
     /// Generates a temporary presigned PUT URL targeting the staging bucket.
     async fn presign_upload(
         &self,
@@ -1017,7 +1043,9 @@ mod pengolo_tests {
         let destination = uploader
             .finalize_upload(UploadFinalization {
                 staging_key,
-                destination_key: "tenant/raw/email/mail.json",
+                staging_revision: &uploader.staging_revision(staging_key).await?,
+                gol_admission: "trusted-ingress-receipt",
+                destination_key: "tenant/raw/email/11111111111111111111111111111111/mail.json",
                 tenant_id: "tenant",
                 user_id: "owner",
                 authn_issuer: "test",
@@ -1035,9 +1063,43 @@ mod pengolo_tests {
         assert_eq!(
             promoted
                 .metadata()
+                .and_then(|metadata| metadata.get("authz-gol-admission"))
+                .map(String::as_str),
+            Some("trusted-ingress-receipt")
+        );
+        assert_eq!(
+            promoted
+                .metadata()
                 .and_then(|metadata| metadata.get("owner"))
                 .map(String::as_str),
             Some("owner")
+        );
+        client
+            .put_object()
+            .bucket("staging")
+            .key(staging_key)
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(b"{}"))
+            .send()
+            .await?;
+        assert!(uploader.finalize_upload(UploadFinalization {
+            staging_key,
+            staging_revision: &uploader.staging_revision(staging_key).await?,
+            gol_admission: "replacement-must-not-appear",
+            destination_key: "tenant/raw/email/11111111111111111111111111111111/mail.json",
+            tenant_id: "tenant", user_id: "owner", authn_issuer: "test", delegation_id: "replay", tagging_query: None,
+        }).await.is_err());
+        let unchanged = client
+            .head_object()
+            .bucket("lake")
+            .key("tenant/raw/email/11111111111111111111111111111111/mail.json")
+            .send()
+            .await?;
+        assert_eq!(
+            unchanged
+                .metadata()
+                .and_then(|metadata| metadata.get("authz-gol-admission"))
+                .map(String::as_str),
+            Some("trusted-ingress-receipt")
         );
         let file = crate::application::ports::pengolo_store::StagedFile {
             generated: false,

@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from galadril_ontology import (
-    Ontology,
-    OntologyNotFoundError,
-    OntologyResource,
-    OntologyRuntimeManager,
-    OntologySlice,
-    OntologySliceMetadata,
-    OntologySliceRequest,
-    ResourceKind,
-    active_ontology_slice,
+    GolDenied,
+    GolLease,
+    GolRequest,
+    GolRuntimeManager,
+    GolSymbolKind,
+    active_gol_lease,
 )
 from galadril_pipeline.config import StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
@@ -26,7 +22,7 @@ from galadril_vision.actors.processor import (
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.eskg import (
     GraphNodeKind,
-    resolve_ontology_reference,
+    resolve_gol_reference,
 )
 
 
@@ -35,14 +31,12 @@ class StubRegistryStore:
 
     __slots__ = ("_response", "load_count")
 
-    def __init__(self, response: OntologySlice | Exception) -> None:
+    def __init__(self, response: GolLease | Exception) -> None:
         self._response = response
         self.load_count = 0
 
-    async def load_runtime_slice(
-        self, request: OntologySliceRequest
-    ) -> OntologySlice:
-        del request
+    async def open(self, request: GolRequest, admission: str) -> GolLease:
+        del request, admission
         self.load_count += 1
         if isinstance(self._response, Exception):
             raise self._response
@@ -96,73 +90,71 @@ def _config() -> VisionConfig:
     )
 
 
-def _registry_slice() -> OntologySlice:
-    return OntologySlice(
-        metadata=OntologySliceMetadata(
-            tenant_id="tenant-a",
-            ontology_id="operations",
-            publication_id="2" * 32,
-            revision_id="1" * 32,
-            base_version="vision-1",
-            base_hash="a" * 64,
-            effective_hash="b" * 64,
-            published_at=datetime(2026, 9, 9, tzinfo=UTC),
-        ),
-        ontology=Ontology(
-            version="vision-1",
-            resources=(
-                OntologyResource(
-                    resource_id="core.customer",
-                    kind=ResourceKind.OBJECT_TYPE,
-                    display_name="Customer",
-                ),
-            ),
-        ),
+def _registry_slice() -> GolLease:
+    return GolLease.model_validate(
+        {
+            "tenantId": "tenant-a",
+            "ontologyId": "core",
+            "ontologyVersion": "1.0.0",
+            "sourceRevision": "1" * 32,
+            "generationId": "2" * 32,
+            "contextId": "server-context",
+            "symbols": [
+                {
+                    "key": "core::Customer",
+                    "name": "Customer",
+                    "version": "1.0.0",
+                    "kind": "entity",
+                }
+            ],
+        }
     )
 
 
 @pytest.mark.anyio
 async def test_graph_classification_pins_active_registry_revision() -> None:
-    manager = OntologyRuntimeManager(StubRegistryStore(_registry_slice()))
-    request = OntologySliceRequest(
+    manager = GolRuntimeManager(StubRegistryStore(_registry_slice()))
+    request = GolRequest(
+        source_object_id="raw:tenant-a/source/object",
         tenant_id="tenant-a",
         pipeline_id="vision",
         pipeline_revision_id="pipeline-revision",
         block_id="sink",
     )
-    async with manager.bind(request):
-        reference = resolve_ontology_reference(
-            "core.customer", "tenant-a", GraphNodeKind.ENTITY
+    async with manager.bind(request, admission="server-admission"):
+        reference = resolve_gol_reference(
+            "core::Customer", "tenant-a", GraphNodeKind.ENTITY
         )
         assert reference is not None
-        assert reference.revision_id == "1" * 32
-        assert reference.ontology_id == "operations"
-        assert reference.resource_kind == ResourceKind.OBJECT_TYPE
+        assert reference.source_revision == "1" * 32
+        assert reference.ontology_id == "core"
+        assert reference.symbol_kind == GolSymbolKind.ENTITY
         with pytest.raises(ValueError, match="kind"):
-            resolve_ontology_reference(
-                "core.customer", "tenant-a", GraphNodeKind.EVENT
+            resolve_gol_reference(
+                "core::Customer", "tenant-a", GraphNodeKind.STATE
             )
         with pytest.raises(ValueError, match="tenant"):
-            resolve_ontology_reference(
-                "core.customer", "tenant-b", GraphNodeKind.ENTITY
+            resolve_gol_reference(
+                "core::Customer", "tenant-b", GraphNodeKind.ENTITY
             )
         with pytest.raises(ValueError, match="unavailable"):
-            resolve_ontology_reference(
-                "core.missing", "tenant-a", GraphNodeKind.ENTITY
+            resolve_gol_reference(
+                "core::Missing", "tenant-a", GraphNodeKind.ENTITY
             )
-    with pytest.raises(ValueError, match="Registry slice"):
-        resolve_ontology_reference(
-            "core.customer", "tenant-a", GraphNodeKind.ENTITY
+    with pytest.raises(ValueError, match="GOL calculation"):
+        resolve_gol_reference(
+            "core::Customer", "tenant-a", GraphNodeKind.ENTITY
         )
-    assert (
-        resolve_ontology_reference(None, "tenant-a", GraphNodeKind.ENTITY)
-        is None
-    )
+    assert resolve_gol_reference(None, "tenant-a", GraphNodeKind.ENTITY) is None
 
 
 def _command() -> PipelineCommand:
     return PipelineCommand(
         correlation_id=uuid4(),
+        admission="server-admission",
+        payload={
+            "record": {"storage_path": "s3://lake/tenant-a/source/object"}
+        },
         tenant_id="tenant-a",
         pipeline="vision",
         step="transform",
@@ -176,25 +168,27 @@ async def test_processor_binds_registry_runtime_slice() -> None:
     """Binds the Registry response before dispatch and always resets it."""
     store = StubRegistryStore(_registry_slice())
     processor = VisionCommandProcessor(
-        _config(), ontology_runtime=OntologyRuntimeManager(store)
+        _config(), ontology_runtime=GolRuntimeManager(store)
     )
 
-    assert active_ontology_slice() is None
+    assert active_gol_lease() is None
     with pytest.raises(CommandProcessingError, match="dedicated event-driven"):
         await processor.process(_command())
-    assert active_ontology_slice() is None
+    assert active_gol_lease() is None
     assert store.load_count == 1
 
 
 @pytest.mark.anyio
 async def test_processor_fails_closed_without_registry_binding() -> None:
     """Prevents execution when Registry cannot resolve the pinned binding."""
-    store = StubRegistryStore(OntologyNotFoundError("ontology unavailable"))
+    store = StubRegistryStore(GolDenied("ontology unavailable"))
     processor = VisionCommandProcessor(
-        _config(), ontology_runtime=OntologyRuntimeManager(store)
+        _config(), ontology_runtime=GolRuntimeManager(store)
     )
 
-    with pytest.raises(CommandProcessingError, match="ontology unavailable"):
+    with pytest.raises(
+        CommandProcessingError, match="authorization is unavailable"
+    ):
         await processor.process(_command())
 
 

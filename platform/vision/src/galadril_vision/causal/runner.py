@@ -17,11 +17,18 @@ from amarth.observations import (
     ObservationWindow,
 )
 from amarth.router import AmarthRouter
+from galadril_ontology import (
+    GolDenied,
+    active_gol_lease,
+    protected_gol_state_effect,
+)
 from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
+
+_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
 logger = structlog.get_logger(__name__)
 
@@ -150,29 +157,37 @@ def _default_state_metrics_v1() -> tuple[MetricMapping, ...]:
 async def _cache_get(
     client: PostgresClient, tenant_id: str, cache_key: str
 ) -> dict[str, object] | None:
-    async with client.tenant_connection(tenant_id) as conn:
-        result = await conn.execute(
-            """
-            SELECT cache_key, status, result_summary
-            FROM causal_runs
-            WHERE tenant_id = %s AND cache_key = %s
-            """,
-            (tenant_id, cache_key),
-        )
-        row = await result.fetchone()
-    if not row:
-        return None
-    summary = row[2]
-    if isinstance(summary, str):
-        try:
-            summary = orjson.loads(summary)
-        except orjson.JSONDecodeError:
-            summary = {}
-    return {
-        "cache_key": row[0],
-        "status": row[1],
-        "result_summary": summary,
-    }
+    async with protected_gol_state_effect(
+        operation="read",
+        tenant_id=tenant_id,
+        destination="causal_state",
+        purpose="causal_analysis",
+    ):
+        async with client.tenant_connection(tenant_id) as conn:
+            result = await conn.execute(
+                """
+                SELECT cache_key, status, result_summary
+                FROM causal_runs
+                WHERE tenant_id = %s AND cache_key = %s
+                """,
+                (tenant_id, cache_key),
+            )
+            row = await result.fetchone()
+        if not row:
+            return None
+        summary = row[2]
+        if isinstance(summary, str):
+            try:
+                summary = orjson.loads(summary)
+            except orjson.JSONDecodeError:
+                summary = {}
+        if not isinstance(summary, dict) or not summary.get("gol_receipt"):
+            return None
+        return {
+            "cache_key": row[0],
+            "status": row[1],
+            "result_summary": summary.get("summary"),
+        }
 
 
 async def _cache_put(
@@ -186,32 +201,58 @@ async def _cache_put(
     status: str,
     result_summary: Mapping[str, object],
 ) -> None:
-    async with client.tenant_connection(tenant_id) as conn:
-        await conn.execute(
-            """
-            INSERT INTO causal_runs (
-                tenant_id, cache_key, target, window_start, window_end,
-                status, result_summary
+    value = _JSON_OBJECT.validate_python(
+        {
+            "cache_key": cache_key,
+            "target": target,
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "status": status,
+            "summary": dict(result_summary),
+        }
+    )
+    async with protected_gol_state_effect(
+        operation="write",
+        tenant_id=tenant_id,
+        destination="causal_state",
+        purpose="causal_analysis",
+        instance_id="causal-cache:" + cache_key,
+        proposal=value,
+    ) as receipt:
+        if not receipt:
+            raise GolDenied("Causal cache receipt unavailable")
+        async with client.tenant_connection(tenant_id) as conn:
+            await conn.execute(
+                """
+                INSERT INTO causal_runs (
+                    tenant_id, cache_key, target, window_start, window_end,
+                    status, result_summary
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
+                    created_at = NOW(),
+                    status = EXCLUDED.status,
+                    result_summary = EXCLUDED.result_summary,
+                    window_start = EXCLUDED.window_start,
+                    window_end = EXCLUDED.window_end,
+                    target = EXCLUDED.target
+                """,
+                (
+                    tenant_id,
+                    cache_key,
+                    target,
+                    window_start,
+                    window_end,
+                    status,
+                    orjson.dumps(
+                        {
+                            "gol_value": value,
+                            "gol_receipt": receipt,
+                            "summary": result_summary,
+                        }
+                    ).decode(),
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
-            ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
-                created_at = NOW(),
-                status = EXCLUDED.status,
-                result_summary = EXCLUDED.result_summary,
-                window_start = EXCLUDED.window_start,
-                window_end = EXCLUDED.window_end,
-                target = EXCLUDED.target
-            """,
-            (
-                tenant_id,
-                cache_key,
-                target,
-                window_start,
-                window_end,
-                status,
-                orjson.dumps(result_summary).decode(),
-            ),
-        )
 
 
 async def _load_state_rows(
@@ -223,22 +264,28 @@ async def _load_state_rows(
     window_end: datetime,
     max_rows: int,
 ) -> tuple[tuple[datetime, str, Mapping[str, object], str, str], ...]:
-    if not entity_ids:
-        return ()
-    async with client.tenant_connection(tenant_id) as conn:
-        result = await conn.execute(
-            """
-            SELECT event_time, state_type, state_value, entity_id, event_id
-            FROM entity_states
-            WHERE event_time >= %s AND event_time <= %s
-              AND entity_id = ANY(%s::text[])
-            ORDER BY event_time ASC
-            LIMIT %s
-            """,
-            (window_start, window_end, list(entity_ids), max_rows),
-        )
-        rows = await result.fetchall()
-    return tuple(rows)
+    async with protected_gol_state_effect(
+        operation="read",
+        tenant_id=tenant_id,
+        destination="causal_state",
+        purpose="causal_analysis",
+    ):
+        if not entity_ids:
+            return ()
+        async with client.tenant_connection(tenant_id) as conn:
+            result = await conn.execute(
+                """
+                SELECT event_time, state_type, state_value, entity_id, event_id
+                FROM entity_states
+                WHERE event_time >= %s AND event_time <= %s
+                  AND entity_id = ANY(%s::text[])
+                ORDER BY event_time ASC
+                LIMIT %s
+                """,
+                (window_start, window_end, list(entity_ids), max_rows),
+            )
+            rows = await result.fetchall()
+        return tuple(rows)
 
 
 async def _load_embedding_rows(
@@ -250,22 +297,28 @@ async def _load_embedding_rows(
     window_end: datetime,
     max_rows: int,
 ) -> tuple[tuple[datetime, str, object, str, Mapping[str, object], str], ...]:
-    if not entity_ids:
-        return ()
-    async with client.tenant_connection(tenant_id) as conn:
-        result = await conn.execute(
-            """
-            SELECT created_at, modality, embedding, entity_id, metadata, id
-            FROM entity_embeddings
-            WHERE created_at >= %s AND created_at <= %s
-              AND entity_id = ANY(%s::text[])
-            ORDER BY created_at ASC
-            LIMIT %s
-            """,
-            (window_start, window_end, list(entity_ids), max_rows),
-        )
-        rows = await result.fetchall()
-    return tuple(rows)
+    async with protected_gol_state_effect(
+        operation="read",
+        tenant_id=tenant_id,
+        destination="causal_state",
+        purpose="causal_analysis",
+    ):
+        if not entity_ids:
+            return ()
+        async with client.tenant_connection(tenant_id) as conn:
+            result = await conn.execute(
+                """
+                SELECT created_at, modality, embedding, entity_id, metadata, id
+                FROM entity_embeddings
+                WHERE created_at >= %s AND created_at <= %s
+                  AND entity_id = ANY(%s::text[])
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (window_start, window_end, list(entity_ids), max_rows),
+            )
+            rows = await result.fetchall()
+        return tuple(rows)
 
 
 async def _load_event_rows(
@@ -277,22 +330,28 @@ async def _load_event_rows(
     window_end: datetime,
     max_rows: int,
 ) -> tuple[tuple[datetime, str, Mapping[str, object], str], ...]:
-    if not event_ids:
-        return ()
-    async with client.tenant_connection(tenant_id) as conn:
-        result = await conn.execute(
-            """
-            SELECT event_time, event_type, properties, event_id
-            FROM eskg_events
-            WHERE event_time >= %s AND event_time <= %s
-              AND event_id = ANY(%s::text[])
-            ORDER BY event_time ASC
-            LIMIT %s
-            """,
-            (window_start, window_end, list(event_ids), max_rows),
-        )
-        rows = await result.fetchall()
-    return tuple(rows)
+    async with protected_gol_state_effect(
+        operation="read",
+        tenant_id=tenant_id,
+        destination="causal_state",
+        purpose="causal_analysis",
+    ):
+        if not event_ids:
+            return ()
+        async with client.tenant_connection(tenant_id) as conn:
+            result = await conn.execute(
+                """
+                SELECT event_time, event_type, properties, event_id
+                FROM eskg_events
+                WHERE event_time >= %s AND event_time <= %s
+                  AND event_id = ANY(%s::text[])
+                ORDER BY event_time ASC
+                LIMIT %s
+                """,
+                (window_start, window_end, list(event_ids), max_rows),
+            )
+            rows = await result.fetchall()
+        return tuple(rows)
 
 
 def _coerce_vector(value: object) -> tuple[float, ...]:
@@ -515,8 +574,12 @@ class AmarthCausalRunner:
             tz=UTC,
         )
         window_start = window_end - effective_spec.lookback
+        lease = active_gol_lease()
+        if lease is None:
+            raise GolDenied("Causal analysis requires an admitted generation")
         cache_payload = {
-            "v": 4,
+            "v": 5,
+            "gol_generation": lease.generation_id,
             "tenant_id": self._tenant_id,
             "target": effective_spec.target,
             "window_start": window_start.isoformat(),
@@ -631,7 +694,7 @@ class AmarthCausalRunner:
                 effective_outcome,
                 analysis_window_size=effective_window,
             )
-        except (ValueError, TypeError, RuntimeError) as exc:
+        except (ValueError, TypeError, RuntimeError):
             await _cache_put(
                 self._pg,
                 tenant_id=self._tenant_id,
@@ -640,9 +703,9 @@ class AmarthCausalRunner:
                 window_start=window_start,
                 window_end=window_end,
                 status="failed",
-                result_summary={"error": str(exc)},
+                result_summary={"error": "causal_analysis_failed"},
             )
-            raise CausalJobError(str(exc)) from exc
+            raise CausalJobError("Causal analysis unavailable") from None
 
         links = tuple(result.get("causal_links", ()))
         effects = tuple(result.get("causal_effects", ()))

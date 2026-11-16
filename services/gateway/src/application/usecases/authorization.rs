@@ -63,6 +63,8 @@ where
     Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize,
 )]
 pub struct QueryContext {
+    /// Set only after the authenticated transport rechecks revocable MFA.
+    pub mfa_verified: bool,
     pub entity_id: Option<String>,
     pub modality: Option<String>,
     pub state_type: Option<String>,

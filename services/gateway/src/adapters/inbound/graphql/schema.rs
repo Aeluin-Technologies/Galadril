@@ -10,14 +10,13 @@ use juniper::{
 };
 use serde_json::Value;
 
-use super::{administration as admin_types, capabilities, pengolo};
+use super::{administration as admin_types, capabilities, gol, pengolo};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::application::ports::audit_store::{
     AuditEvent, AuditFilter, AuditOutcome,
 };
 use crate::application::ports::control_plane_store::{
-    OntologyCatalogEntry, OntologyPublication, PipelineExecution,
-    PipelineOntologyBinding,
+    PipelineExecution, PipelineOntologyBinding,
 };
 use crate::application::ports::conversation_agent::{
     AgentChunk, AgentModelCatalog,
@@ -78,15 +77,6 @@ fn pengolo_input<T: serde::Serialize>(input: T) -> FieldResult<Value> {
     with = dynamic_json_scalar
 )]
 pub struct DynamicJson(pub Value);
-
-#[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
-#[graphql(name = "OntologyAccessAction")]
-pub enum GqlOntologyAccessAction {
-    Create,
-    Edit,
-    Publish,
-    Delete,
-}
 
 #[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
 #[graphql(name = "DataDomainGrant")]
@@ -269,15 +259,15 @@ pub struct GqlGraphNode {
     id: String,
     label: String,
     properties: Value,
-    ontology_ref: Option<GqlOntologyReference>,
+    ontology_ref: Option<GqlGolReference>,
 }
 
-pub struct GqlOntologyReference(
-    crate::application::ports::relations_store::OntologyReference,
+pub struct GqlGolReference(
+    crate::application::ports::relations_store::GolReference,
 );
 
-#[graphql_object(name = "GraphOntologyReference", context = AppContext)]
-impl GqlOntologyReference {
+#[graphql_object(name = "GraphGolReference", context = AppContext)]
+impl GqlGolReference {
     fn tenant_id(&self) -> &str {
         &self.0.tenant_id
     }
@@ -286,16 +276,24 @@ impl GqlOntologyReference {
         &self.0.ontology_id
     }
 
-    fn revision_id(&self) -> &str {
-        &self.0.revision_id
+    fn ontology_version(&self) -> &str {
+        &self.0.ontology_version
     }
 
-    fn resource_id(&self) -> &str {
-        &self.0.resource_id
+    fn source_revision(&self) -> &str {
+        &self.0.source_revision
     }
 
-    fn resource_kind(&self) -> &str {
-        &self.0.resource_kind
+    fn generation_id(&self) -> &str {
+        &self.0.generation_id
+    }
+
+    fn symbol_key(&self) -> &str {
+        &self.0.symbol_key
+    }
+
+    fn symbol_kind(&self) -> &str {
+        &self.0.symbol_kind
     }
 }
 
@@ -317,7 +315,7 @@ impl GqlGraphNode {
     }
 
     /// Returns immutable Registry provenance when this projection permits it.
-    fn ontology_ref(&self) -> Option<&GqlOntologyReference> {
+    fn ontology_ref(&self) -> Option<&GqlGolReference> {
         self.ontology_ref.as_ref()
     }
 
@@ -1173,103 +1171,6 @@ impl GqlAuditEvent {
     }
 }
 
-pub struct GqlOntologyPublication(OntologyPublication);
-
-#[graphql_object(name = "OntologyPublication", context = AppContext)]
-impl GqlOntologyPublication {
-    /// Returns the immutable publication identifier.
-    fn publication_id(&self) -> &str {
-        &self.0.publication_id
-    }
-
-    /// Returns the immutable materialized revision identifier.
-    fn revision_id(&self) -> &str {
-        &self.0.revision_id
-    }
-
-    /// Returns the authoritative publication lifecycle state.
-    fn lifecycle(&self) -> &str {
-        &self.0.lifecycle
-    }
-
-    /// Returns publication metadata supplied by the authoring domain.
-    fn metadata(&self) -> DynamicJson {
-        DynamicJson(self.0.metadata.clone())
-    }
-
-    /// Returns the canonical base ontology version.
-    fn base_version(&self) -> &str {
-        &self.0.base_version
-    }
-
-    /// Returns the canonical base artifact content hash.
-    fn base_hash(&self) -> &str {
-        &self.0.base_hash
-    }
-
-    /// Returns the tenant-effective materialization hash.
-    fn effective_hash(&self) -> &str {
-        &self.0.effective_hash
-    }
-
-    /// Returns the revision author recorded by the Ontology service.
-    fn author(&self) -> &str {
-        &self.0.author
-    }
-
-    /// Returns the immutable revision provenance message.
-    fn message(&self) -> &str {
-        &self.0.message
-    }
-
-    /// Returns publication time in Unix milliseconds.
-    fn published_at_ms(&self) -> f64 {
-        i64_ms_to_f64(self.0.published_at_ms)
-    }
-
-    /// Returns retirement time in Unix milliseconds when retired.
-    fn retired_at_ms(&self) -> Option<f64> {
-        self.0.retired_at_ms.map(i64_ms_to_f64)
-    }
-}
-
-pub struct GqlOntology {
-    ontology_id: String,
-    display_name: String,
-    production_publication: Option<GqlOntologyPublication>,
-}
-
-impl From<OntologyCatalogEntry> for GqlOntology {
-    /// Maps the authoritative catalog projection into GraphQL.
-    fn from(value: OntologyCatalogEntry) -> Self {
-        Self {
-            ontology_id: value.ontology_id,
-            display_name: value.display_name,
-            production_publication: value
-                .production_publication
-                .map(GqlOntologyPublication),
-        }
-    }
-}
-
-#[graphql_object(name = "Ontology", context = AppContext)]
-impl GqlOntology {
-    /// Returns the tenant-local ontology identifier.
-    fn ontology_id(&self) -> &str {
-        &self.ontology_id
-    }
-
-    /// Returns the current catalog display name.
-    fn display_name(&self) -> &str {
-        &self.display_name
-    }
-
-    /// Returns the sole production publication when one exists.
-    fn production_publication(&self) -> Option<&GqlOntologyPublication> {
-        self.production_publication.as_ref()
-    }
-}
-
 pub struct GqlPipelineOntologyBinding(PipelineOntologyBinding);
 
 #[graphql_object(name = "PipelineOntologyBinding", context = AppContext)]
@@ -1289,24 +1190,19 @@ impl GqlPipelineOntologyBinding {
         &self.0.ontology_id
     }
 
-    /// Returns explicitly selected semantic resource identifiers.
-    fn resource_ids(&self) -> DynamicJson {
-        DynamicJson(self.0.resource_ids.clone())
+    /// Pins symbol selections to the exact compiled generation.
+    fn generation(&self) -> &str {
+        &self.0.generation
     }
 
-    /// Returns explicitly selected semantic resource kinds.
-    fn resource_kinds(&self) -> DynamicJson {
-        DynamicJson(self.0.resource_kinds.clone())
+    /// Preserves immutable source provenance for consumers.
+    fn source_revision(&self) -> &str {
+        &self.0.source_revision
     }
 
-    /// Reports whether dependent semantic resources are included.
-    fn include_dependencies(&self) -> bool {
-        self.0.include_dependencies
-    }
-
-    /// Returns binding metadata from the Ontology service.
-    fn metadata(&self) -> DynamicJson {
-        DynamicJson(self.0.metadata.clone())
+    /// Returns already-admitted canonical symbol keys.
+    fn symbols(&self) -> &[String] {
+        &self.0.symbols
     }
 
     /// Returns the binding update time in Unix milliseconds.
@@ -2181,7 +2077,7 @@ impl Query {
             nodes.push(GqlGraphNode {
                 id: n.id,
                 label: n.kind.as_str().to_owned(),
-                ontology_ref: n.ontology_ref.map(GqlOntologyReference),
+                ontology_ref: n.ontology_ref.map(GqlGolReference),
                 properties: n.properties,
             });
         }
@@ -2199,166 +2095,116 @@ impl Query {
         Ok(GqlGraphSubgraph { nodes, edges })
     }
 
-    /// Reports a current action-specific decision without granting access.
-    async fn ontology_can_manage(
+    /// Reports an action hint; source reads still require full disclosure
+    /// admission.
+    async fn gol_ontology_can_manage(
         #[graphql(context)] ctx: &AppContext,
         ontology_id: Option<String>,
-        action: Option<GqlOntologyAccessAction>,
+        action: gol::AccessAction,
     ) -> FieldResult<bool> {
         ctx.verify_authentication()?;
         use crate::application::usecases::authorization::Permission;
-        let permission = match action.unwrap_or(if ontology_id.is_some() {
-            GqlOntologyAccessAction::Edit
-        } else {
-            GqlOntologyAccessAction::Create
-        }) {
-            GqlOntologyAccessAction::Create => Permission::CreateOntology,
-            GqlOntologyAccessAction::Edit => Permission::Edit,
-            GqlOntologyAccessAction::Publish => Permission::Publish,
-            GqlOntologyAccessAction::Delete => Permission::Delete,
+        let permission = match action {
+            gol::AccessAction::Create => Permission::CreateOntology,
+            gol::AccessAction::Edit => Permission::Edit,
+            gol::AccessAction::Publish => Permission::Publish,
+            gol::AccessAction::Delete => Permission::Delete,
         };
-        Ok(ctx
-            .control_plane
-            .ontology_permission(
+        ctx.control_plane
+            .gol_can_manage(
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
                 ontology_id.as_deref(),
                 permission,
             )
-            .await?)
+            .await
+            .map_err(|_| gol::unavailable())
     }
 
-    /// Lists immutable packages without installing them into any tenant.
-    async fn plugin_ontologies(
-        #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
-        ctx.verify_authentication()?;
-        Ok(DynamicJson(
-            ctx.pipelines
-                .plugin_ontologies(&ctx.tenant_id, &ctx.user_id)
-                .await?,
-        ))
-    }
-
-    /// Opens a tenant-owned draft for compare-and-swap editing.
-    async fn ontology_workspace(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        revision_id: Option<String>,
-    ) -> FieldResult<DynamicJson> {
-        ctx.verify_authentication()?;
-        if let Some(revision) = revision_id {
-            return Ok(DynamicJson(
-                ctx.control_plane
-                    .ontology_revision(
-                        &ctx.tenant_id,
-                        &ctx.user_id,
-                        &ctx.authz_context,
-                        &ontology_id,
-                        &revision,
-                    )
-                    .await?,
-            ));
-        }
-        Ok(DynamicJson(
-            ctx.control_plane
-                .ontology_workspace(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                )
-                .await?,
-        ))
-    }
-
-    /// Reads only the authorized model's paginated immutable history.
-    async fn ontology_history(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        after_revision_id: Option<String>,
-        limit: Option<i32>,
-    ) -> FieldResult<DynamicJson> {
-        ctx.verify_authentication()?;
-        let limit = usize::try_from(limit.unwrap_or(20))
-            .ok()
-            .filter(|value| (1..=100).contains(value))
-            .ok_or_else(|| {
-                FieldError::from("Invalid ontology history limit")
-            })?;
-        Ok(DynamicJson(
-            ctx.control_plane
-                .ontology_history(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    after_revision_id.as_deref(),
-                    limit,
-                )
-                .await?,
-        ))
-    }
-
-    /// Reads an exact tenant-owned ontology revision after resource
-    /// authorization.
-    async fn ontology_document(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        revision_id: String,
-    ) -> FieldResult<DynamicJson> {
-        ctx.verify_authentication()?;
-        Ok(DynamicJson(
-            ctx.control_plane
-                .ontology_document(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    &revision_id,
-                )
-                .await?,
-        ))
-    }
-
-    /// Previews explicit participant links without writing either ontology.
-    async fn plugin_ontology_preview(
-        #[graphql(context)] ctx: &AppContext,
-        package_id: String,
-        package_version: String,
-        target_ontology_id: Option<String>,
-        target_revision_id: Option<String>,
-        mappings: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
-        Ok(DynamicJson(
-            plugin_ontology_view(
-                ctx,
-                &package_id,
-                &package_version,
-                target_ontology_id.as_deref(),
-                target_revision_id.as_deref(),
-                &mappings.0,
-            )
-            .await?,
-        ))
-    }
-
-    /// Lists authorized ontology catalog entries and production publications.
-    async fn ontologies(
+    /// Returns only catalog summaries admitted by the live disclosure adapter.
+    async fn gol_ontologies(
         #[graphql(context)] ctx: &AppContext,
         limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlOntology>> {
-        let ontologies = ctx
-            .control_plane
-            .ontologies(
+    ) -> FieldResult<Vec<gol::Summary>> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .gol_ontologies(
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
                 control_plane_limit(limit),
             )
-            .await?;
-        Ok(ontologies.into_iter().map(GqlOntology::from).collect())
+            .await
+            .map(|values| values.into_iter().map(Into::into).collect())
+            .map_err(|_| gol::unavailable())
+    }
+
+    /// Source text and diagnostic metadata require source-authoring authority.
+    async fn gol_ontology_workspace(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+    ) -> FieldResult<gol::Workspace> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .gol_workspace(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+            )
+            .await
+            .map_err(|_| gol::unavailable())?
+            .try_into()
+    }
+
+    /// Pins one authorized symbol projection to an immutable generation.
+    async fn gol_ontology_symbols(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        generation: Option<String>,
+    ) -> FieldResult<gol::Symbols> {
+        ctx.verify_authentication()?;
+        ctx.gol
+            .symbols(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                generation.as_deref(),
+            )
+            .await
+            .map(Into::into)
+            .map_err(|_| gol::unavailable())
+    }
+
+    /// Schema projection reuses live field, reference, transfer and IFC
+    /// checks.
+    async fn gol_ontology_schema(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        generation: String,
+        target: String,
+        profile: gol::SchemaProfile,
+        fields: Vec<String>,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        ctx.gol
+            .schema(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                crate::application::usecases::gol::SchemaQuery {
+                    ontology_id,
+                    generation: Some(generation),
+                    target,
+                    profile: profile.into(),
+                    fields,
+                },
+            )
+            .await
+            .map(DynamicJson)
+            .map_err(|_| gol::unavailable())
     }
 
     /// Lists authorized pipeline block bindings to published ontologies.
@@ -2796,71 +2642,6 @@ impl Query {
             .await?;
         Ok(pipelines.into_iter().map(GqlPipelineDefinition).collect())
     }
-}
-
-/// Keeps authorization errors actionable without exposing dependency
-/// internals.
-/// Resolves the package from the trusted inventory and pins every external
-/// read.
-async fn plugin_ontology_view(
-    ctx: &AppContext,
-    package_id: &str,
-    package_version: &str,
-    target_id: Option<&str>,
-    target_revision: Option<&str>,
-    mappings: &Value,
-) -> FieldResult<Value> {
-    ctx.verify_authentication()?;
-    let inventory = ctx
-        .pipelines
-        .plugin_ontologies(&ctx.tenant_id, &ctx.user_id)
-        .await?;
-    let package = inventory
-        .get("packages")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find(|item| {
-                item.get("id").and_then(Value::as_str) == Some(package_id)
-            })
-        })
-        .ok_or_else(|| {
-            FieldError::from("Plugin ontology package unavailable")
-        })?;
-    if package.get("version").and_then(Value::as_str) != Some(package_version)
-    {
-        return Err(FieldError::from(
-            "The plugin ontology version changed. Review the new version before saving.",
-        ));
-    }
-    let mappings: std::collections::BTreeMap<String, String> =
-        serde_json::from_value(mappings.clone())
-            .map_err(|_| FieldError::from("Invalid participant mappings"))?;
-    let target = match (target_id, target_revision) {
-        (Some(id), Some(revision)) => Some(
-            ctx.control_plane
-                .ontology_document(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    id,
-                    revision,
-                )
-                .await?,
-        ),
-        (None, None) => None,
-        _ => {
-            return Err(FieldError::from(
-                "A pinned target ontology revision is required",
-            ));
-        },
-    };
-    let mut view = galadril_registry::plugin_ontology::materialize(package,target.as_ref(),&mappings).map_err(|_| FieldError::from("Ontology links are incompatible; check the selected types and resource identities"))?;
-    if !mappings.is_empty() {
-        view.as_object_mut()
-            .ok_or_else(|| FieldError::from("Invalid ontology view"))?
-            .insert("target_origin".into(), serde_json::json!({"ontology_id":target_id,"revision_id":target_revision}));
-    }
-    Ok(view)
 }
 
 fn pipeline_error(error: anyhow::Error) -> FieldError {
@@ -3545,7 +3326,7 @@ impl Mutation {
 
     /// Enables a block contract in a new draft and binds its ontology before
     /// review.
-    async fn bind_plugin_ontology(
+    async fn bind_gol_ontology(
         #[graphql(context)] ctx: &AppContext,
         ontology_id: String,
         pipeline_id: String,
@@ -3567,182 +3348,93 @@ impl Mutation {
             .map_err(pipeline_error)
     }
 
-    /// Applies metadata operations without accepting arbitrary semantic
-    /// drafts.
-    async fn author_ontology(
+    /// Invalid drafts remain saveable; Registry owns all compilation and CAS.
+    async fn save_gol_ontology(
         #[graphql(context)] ctx: &AppContext,
         ontology_id: String,
-        expected_revision_id: String,
-        command: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        display_name: String,
+        files: Vec<gol::SourceFileInput>,
+        expected_revision: Option<String>,
+    ) -> FieldResult<gol::Workspace> {
         ctx.verify_authentication()?;
-        let command = serde_json::from_value(command.0)
-            .map_err(|_| FieldError::from("Invalid ontology operation"))?;
-        Ok(DynamicJson(
-            ctx.control_plane
-                .author_ontology(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    &expected_revision_id,
-                    command,
-                )
-                .await?,
-        ))
-    }
-
-    /// Authors tenant-owned types without fabricating plugin provenance.
-    async fn save_ontology_draft(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        display_name: String,
-        definition: DynamicJson,
-        expected_revision_id: Option<String>,
-        branch: Option<String>,
-    ) -> FieldResult<String> {
-        ctx.verify_authentication()?;
-        if definition.0.get("plugin_origin").is_some() ||
-            definition.0.get("target_origin").is_some()
-        {
-            return Err(FieldError::from(
-                "Use the plugin overlay operation for plugin ontologies",
-            ));
-        }
-        if let Some(branch) = branch.filter(|value| value != "main") {
-            let expected =
-                expected_revision_id.as_deref().ok_or_else(|| {
-                    FieldError::from("Expected ontology revision is required")
-                })?;
-            return Ok(ctx
-                .control_plane
-                .save_ontology_branch(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    &display_name,
-                    &definition.0,
-                    expected,
-                    &branch,
-                )
-                .await?);
-        }
-        Ok(ctx
-            .control_plane
-            .save_plugin_ontology(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &ontology_id,
-                &display_name,
-                &definition.0,
-                expected_revision_id.as_deref(),
-            )
-            .await?)
-    }
-
-    /// Saves a tenant-only overlay; a separate explicit publication activates
-    /// it.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "GraphQL arguments expose the independently pinned package and target revisions"
-    )]
-    async fn save_plugin_ontology(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        display_name: String,
-        package_id: String,
-        package_version: String,
-        target_ontology_id: Option<String>,
-        target_revision_id: Option<String>,
-        mappings: DynamicJson,
-        expected_revision_id: Option<String>,
-        branch: Option<String>,
-    ) -> FieldResult<String> {
-        let view = plugin_ontology_view(
-            ctx,
-            &package_id,
-            &package_version,
-            target_ontology_id.as_deref(),
-            target_revision_id.as_deref(),
-            &mappings.0,
-        )
-        .await?;
-        if let Some(branch) = branch.filter(|value| value != "main") {
-            let expected =
-                expected_revision_id.as_deref().ok_or_else(|| {
-                    FieldError::from("Expected ontology revision is required")
-                })?;
-            return Ok(ctx
-                .control_plane
-                .save_ontology_branch(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    &display_name,
-                    &view,
-                    expected,
-                    &branch,
-                )
-                .await?);
-        }
-        Ok(ctx
-            .control_plane
-            .save_plugin_ontology(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &ontology_id,
-                &display_name,
-                &view,
-                expected_revision_id.as_deref(),
-            )
-            .await?)
-    }
-
-    /// Publishes a validated ontology materialization as production.
-    async fn publish_ontology(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        display_name: String,
-        revision_id: String,
-        metadata: DynamicJson,
-    ) -> FieldResult<GqlOntologyPublication> {
-        Ok(GqlOntologyPublication(
-            ctx.control_plane
-                .publish_ontology(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &ontology_id,
-                    &display_name,
-                    &revision_id,
-                    &metadata.0,
-                )
-                .await?,
-        ))
-    }
-
-    /// Retires production publication without deleting ontology history.
-    async fn retire_ontology(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        publication_id: String,
-        revision_id: String,
-    ) -> FieldResult<bool> {
+        let files = files.into_iter().map(Into::into).collect::<Vec<_>>();
         ctx.control_plane
-            .retire_ontology(
+            .save_gol_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                crate::application::ports::control_plane_store::GolWrite {
+                    ontology_id: &ontology_id,
+                    display_name: &display_name,
+                    files: &files,
+                    expected_revision: expected_revision.as_deref(),
+                },
+            )
+            .await
+            .map_err(|_| gol::unavailable())?
+            .try_into()
+    }
+
+    /// Validation binds diagnostics and dependency selections to one revision.
+    async fn validate_gol_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        source_revision: String,
+    ) -> FieldResult<gol::Validation> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .validate_gol_ontology(
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
                 &ontology_id,
-                &publication_id,
-                &revision_id,
+                &source_revision,
             )
-            .await?;
-        Ok(true)
+            .await
+            .map_err(|_| gol::unavailable())?
+            .try_into()
+    }
+
+    /// Activation is delegated to Registry's atomic manifest publication.
+    async fn publish_gol_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        source_revision: String,
+        expected_generation: Option<String>,
+    ) -> FieldResult<gol::Publication> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .publish_gol_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                &source_revision,
+                expected_generation.as_deref(),
+            )
+            .await
+            .map(Into::into)
+            .map_err(|_| gol::unavailable())
+    }
+
+    /// Deletion checks source revision and retires the active generation.
+    async fn delete_gol_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        expected_revision: String,
+    ) -> FieldResult<gol::Deletion> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .delete_gol_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                &expected_revision,
+            )
+            .await
+            .map(|revision| gol::Deletion { revision })
+            .map_err(|_| gol::unavailable())
     }
 
     /// Creates a pipeline with an immutable root revision.
@@ -5006,8 +4698,15 @@ mod tests {
             "defaultReasoningEffort: String",
             "reasoningEffort: String",
             "type AuditEvent",
-            "type Ontology",
-            "type OntologyPublication",
+            "type GolSummary",
+            "type GolWorkspace",
+            "type GolPublication",
+            "type GolValidation",
+            "type GolSymbols",
+            "type GolSourceFile",
+            "input GolSourceFileInput",
+            "enum GolSchemaProfile",
+            "enum GolOntologyAccessAction",
             "type PipelineExecution",
             "sourceStoragePath: String",
             "sourceEmailAccountId: String",
@@ -5015,7 +4714,11 @@ mod tests {
             "type PipelineOntologyBinding",
             "type RoleAssignment",
             "auditEvents(",
-            "ontologies(",
+            "golOntologies(",
+            "golOntologyWorkspace(",
+            "golOntologySymbols(",
+            "golOntologySchema(",
+            "golOntologyCanManage(",
             "ontologyBindings(",
             "pipelineExecutions(",
             "structuredSearch(",
@@ -5044,18 +4747,46 @@ mod tests {
             "deleteRole(",
             "conversationId",
             "messageId",
-            "publishOntology(",
-            "retireOntology(",
+            "saveGolOntology(",
+            "validateGolOntology(",
+            "publishGolOntology(",
+            "deleteGolOntology(",
+            "bindGolOntology(",
         ] {
             assert!(
                 schema.contains(expected),
                 "missing schema contract: {expected}"
             );
         }
-        assert!(!schema.contains("ontologyVersion"));
+        assert!(schema.contains("type GraphGolReference"));
+        assert!(schema.contains("ontologyVersion: String!"));
+        assert!(schema.contains("sourceRevision: String!"));
+        assert!(schema.contains("generationId: String!"));
+        assert!(schema.contains("symbolKey: String!"));
+        assert!(schema.contains("symbolKind: String!"));
+        assert!(!schema.contains("type GraphOntologyReference"));
         assert!(!schema.contains("workflow"));
-        assert!(schema.contains(
-            "retireOntology(ontologyId: String!, publicationId: String!, revisionId: String!): Boolean!"
-        ));
+        for removed in [
+            "type Ontology {",
+            "type OntologyPublication",
+            "pluginOntologies",
+            "bindPluginOntology(",
+            "ontologyWorkspace(",
+            "ontologyHistory(",
+            "ontologyDocument(",
+            "authorOntology(",
+            "saveOntologyDraft(",
+            "savePluginOntology(",
+            "publishOntology(",
+            "retireOntology(",
+        ] {
+            assert!(
+                !schema.contains(removed),
+                "removed ontology contract: {removed}"
+            );
+        }
+        assert!(schema.contains("sourceRevision: String!"));
+        assert!(schema.contains("generation: String!"));
+        assert!(schema.contains("references: [String!]!"));
     }
 }

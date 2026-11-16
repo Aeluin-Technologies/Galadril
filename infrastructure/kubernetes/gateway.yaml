@@ -35,6 +35,18 @@ spec:
           value: http://otel-collector.observability.svc.cluster.local:4317
         - name: OTEL_EXPORTER_OTLP_PROTOCOL
           value: grpc
+        - name: GOL_WORKER_KEY_PATH
+          value: /run/gol-worker-secrets/worker-key
+        - name: REGISTRY_GATEWAY_KEY_PATH
+          value: /run/registry-secrets/gateway-key
+        - name: GOL_ARTIFACT_BUCKET
+          value: ontology-artifacts
+        - name: GOL_AUTHORITY_CONFIG_PATH
+          value: /etc/gol/gol-authorities.json
+        - name: GOL_RUNTIME_CONFIG_PATH
+          value: /etc/gol/gol-runtime.json
+        - name: GOL_EFFECT_KEY_PATH
+          value: /run/secrets/gol-effect-key
         - name: DEPLOYMENT_ENVIRONMENT
           value: production
         - name: GALADRIL_PIPELINE_PATH
@@ -62,8 +74,20 @@ spec:
           limits:
             memory: 512Mi
         volumeMounts:
+        - name: gol-worker-key
+          mountPath: /run/gol-worker-secrets
+          readOnly: true
         - name: connectors
           mountPath: /etc/galadril
+          readOnly: true
+        - name: registry-gateway-key
+          mountPath: /run/registry-secrets
+          readOnly: true
+        - name: gol-authorities
+          mountPath: /etc/gol
+          readOnly: true
+        - name: gol-effect-key
+          mountPath: /run/secrets
           readOnly: true
         - name: tmp
           mountPath: /tmp
@@ -91,9 +115,24 @@ spec:
         - secretRef:
             name: gateway-runtime
       volumes:
+      - name: gol-worker-key
+        secret:
+          secretName: gol-worker-key
+          defaultMode: 0440
       - name: connectors
         secret:
           secretName: gateway-connectors
+      - name: registry-gateway-key
+        secret:
+          secretName: registry-gateway-key
+          defaultMode: 0440
+      - name: gol-authorities
+        configMap:
+          name: galadril-gol-authorities
+      - name: gol-effect-key
+        secret:
+          secretName: gol-effect-key
+          optional: true
       - name: tmp
         emptyDir: {}
       - name: schemas

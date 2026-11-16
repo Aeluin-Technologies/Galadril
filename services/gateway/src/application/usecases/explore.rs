@@ -318,7 +318,7 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::application::ports::relations_store::OntologyReference;
+    use crate::application::ports::relations_store::GolReference;
 
     struct MixedGraph;
 
@@ -337,12 +337,14 @@ mod tests {
                     GraphNode {
                         id: "evt_entity-1".into(),
                         kind: GraphNodeKind::Entity,
-                        ontology_ref: Some(OntologyReference {
+                        ontology_ref: Some(GolReference {
                             tenant_id: "tenant-a".into(),
-                            ontology_id: "operations".into(),
-                            revision_id: "a".repeat(32),
-                            resource_id: "object.person".into(),
-                            resource_kind: "object_type".into(),
+                            ontology_id: "operations.people".into(),
+                            ontology_version: "1.0.0".into(),
+                            source_revision: "a".repeat(32),
+                            generation_id: "b".repeat(32),
+                            symbol_key: "operations.people::Person".into(),
+                            symbol_kind: "entity".into(),
                         }),
                         properties: serde_json::json!({"label":"private"}),
                     },
@@ -523,8 +525,8 @@ mod tests {
                 .iter()
                 .find(|node| node.kind == GraphNodeKind::Entity)
                 .and_then(|node| node.ontology_ref.as_ref())
-                .map(|reference| reference.resource_id.as_str()),
-            Some("object.person")
+                .map(|reference| reference.symbol_key.as_str()),
+            Some("operations.people::Person")
         );
         assert_eq!(
             admin_graph

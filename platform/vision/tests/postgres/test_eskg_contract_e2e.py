@@ -7,9 +7,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from galadril_ontology import ResourceKind
+from galadril_ontology import GolSymbolKind
 from galadril_vision.common.config import PostgresConnectorConfig
-from galadril_vision.common.eskg import OntologyReference
+from galadril_vision.common.eskg import GolReference
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.common.types import (
     EventRecord,
@@ -67,12 +67,14 @@ async def test_eskg_structural_contract_on_age() -> None:
                 and "document_evidence" in str(index[0])
             )
         store = GraphStore(client, config)
-        reference = OntologyReference(
+        reference = GolReference(
             tenant_id="tenant-a",
             ontology_id="operations",
-            revision_id="a" * 32,
-            resource_id="object.person",
-            resource_kind=ResourceKind.OBJECT_TYPE,
+            ontology_version="1.0.0",
+            source_revision="a" * 32,
+            generation_id="g" * 32,
+            symbol_key="core::Person",
+            symbol_kind=GolSymbolKind.ENTITY,
         )
         entity = GraphVertex(
             "evt_entity", "Entity", "tenant-a", ontology_ref=reference
@@ -129,7 +131,7 @@ async def test_eskg_structural_contract_on_age() -> None:
                 replace(
                     entity,
                     ontology_ref=reference.model_copy(
-                        update={"revision_id": "b" * 32}
+                        update={"generation_id": "b" * 32}
                     ),
                 )
             )

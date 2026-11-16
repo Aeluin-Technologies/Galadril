@@ -1,9 +1,9 @@
-"""Probabilistic identity-resolution boundary for LI-ESKG."""
+"""Pure identity contracts; native runtime is imported only by its consumers."""
 
-from galadril_vision.identity.licorne import (
+from .contracts import (
     CandidateEvidence,
     IdentityResolutionError,
-    LicorneActorRuntime,
+    IdentityResolver,
     ResolutionDecision,
     ResolutionRequest,
     SpatialEvidence,
@@ -12,7 +12,7 @@ from galadril_vision.identity.licorne import (
 __all__ = [
     "CandidateEvidence",
     "IdentityResolutionError",
-    "LicorneActorRuntime",
+    "IdentityResolver",
     "ResolutionDecision",
     "ResolutionRequest",
     "SpatialEvidence",

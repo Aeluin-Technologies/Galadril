@@ -1,6 +1,8 @@
 //! Outbound port for retrieving graph relations for an entity.
 
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
+use galadril_ontology::archive::remote::Generation;
+use galadril_ontology::{Name, OntologyId, Version};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -8,7 +10,7 @@ use serde_json::Value;
 pub struct GraphNode {
     pub id: String,
     pub kind: GraphNodeKind,
-    pub ontology_ref: Option<OntologyReference>,
+    pub ontology_ref: Option<GolReference>,
     pub properties: Value,
 }
 
@@ -36,7 +38,7 @@ impl GraphNodeKind {
             "Decision" => Ok(Self::Decision),
             "CausalVariable" => Ok(Self::CausalVariable),
             "Metric" => Ok(Self::Metric),
-            _ => bail!("Unsupported structural graph kind: {label}"),
+            _ => bail!("Unsupported structural graph kind"),
         }
     }
 
@@ -57,65 +59,75 @@ impl GraphNodeKind {
     /// Defines which ontology classifications can apply to an instance role.
     pub const fn ontology_kind(self) -> Option<&'static str> {
         match self {
-            Self::Entity | Self::LatentIdentity => Some("object_type"),
-            Self::Event => Some("event_type"),
-            Self::State | Self::CausalVariable => Some("property"),
+            Self::Entity | Self::Event | Self::LatentIdentity => {
+                Some("entity")
+            },
+            Self::State | Self::CausalVariable => Some("field"),
             Self::Inference | Self::Decision | Self::Metric => None,
         }
     }
 }
 
+/// Immutable compiled provenance; source revisions never stand in for
+/// generations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OntologyReference {
+pub struct GolReference {
     pub tenant_id: String,
     pub ontology_id: String,
-    pub revision_id: String,
-    pub resource_id: String,
-    pub resource_kind: String,
+    pub ontology_version: String,
+    pub source_revision: String,
+    pub generation_id: String,
+    pub symbol_key: String,
+    pub symbol_kind: String,
 }
 
-impl OntologyReference {
-    /// Checks wire provenance without resolving or rewriting Registry state.
+impl GolReference {
+    /// Validates lexical provenance without resolving symbols or granting
+    /// access.
+    ///
+    /// Structural nodes refer either to a GOL entity or to one explicit field.
+    /// Generic error text prevents malformed private provenance from becoming
+    /// an error-message disclosure before the runtime applies metadata
+    /// authorization.
     pub fn validate(
         &self,
         tenant_id: &str,
         kind: GraphNodeKind,
     ) -> Result<()> {
-        if self.tenant_id != tenant_id ||
-            self.ontology_id.is_empty() ||
-            self.ontology_id.len() > 128 ||
-            !valid_resource_id(&self.resource_id) ||
-            !(20..=128).contains(&self.revision_id.len()) ||
-            !self.revision_id.bytes().all(|b| {
-                b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
-            }) ||
-            kind.ontology_kind() != Some(self.resource_kind.as_str())
-        {
-            bail!("Invalid versioned ontology reference for graph node");
+        const INVALID: &str = "Invalid compiled GOL reference for graph node";
+        ensure!(
+            self.tenant_id == tenant_id &&
+                !tenant_id.is_empty() &&
+                tenant_id.len() <= 128 &&
+                self.ontology_id.len() <= 128 &&
+                self.ontology_version.len() <= 128 &&
+                self.symbol_key.len() <= 512 &&
+                galadril_registry::storage::valid_revision(
+                    &self.source_revision
+                ) &&
+                kind.ontology_kind() == Some(self.symbol_kind.as_str()),
+            INVALID
+        );
+        ensure!(self.ontology_id.parse::<OntologyId>().is_ok(), INVALID);
+        ensure!(self.ontology_version.parse::<Version>().is_ok(), INVALID);
+        ensure!(self.generation_id.parse::<Generation>().is_ok(), INVALID);
+        let (module, local) = self
+            .symbol_key
+            .split_once("::")
+            .ok_or_else(|| anyhow::anyhow!(INVALID))?;
+        ensure!(module == self.ontology_id, INVALID);
+        let (symbol, field) = match local.split_once('.') {
+            Some((symbol, field)) => (symbol, Some(field)),
+            None => (local, None),
+        };
+        ensure!(symbol.parse::<Name>().is_ok(), INVALID);
+        match (self.symbol_kind.as_str(), field) {
+            ("entity", None) => Ok(()),
+            ("field", Some(name)) if name.parse::<Name>().is_ok() => Ok(()),
+            _ => bail!(INVALID),
         }
-        Ok(())
     }
-}
-
-/// Matches Registry's stable dotted resource identities without allocations.
-fn valid_resource_id(value: &str) -> bool {
-    let mut count = 0;
-    for segment in value.split('.') {
-        let mut bytes = segment.bytes();
-        if !bytes.next().is_some_and(|b| b.is_ascii_lowercase()) ||
-            !bytes.all(|b| {
-                b.is_ascii_lowercase() ||
-                    b.is_ascii_digit() ||
-                    b == b'_' ||
-                    b == b'-'
-            })
-        {
-            return false;
-        }
-        count += 1;
-    }
-    count >= 2
 }
 
 use GraphNodeKind::{
@@ -166,7 +178,7 @@ pub fn validate_relation(
     target: GraphNodeKind,
 ) -> Result<()> {
     if !RELATION_ENDPOINTS.contains(&(label, source, target)) {
-        bail!("Invalid structural graph relation: {label}");
+        bail!("Invalid structural graph relation");
     }
     Ok(())
 }

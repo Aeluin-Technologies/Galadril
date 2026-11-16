@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use uuid::Uuid;
 
 use crate::application::ports::upload_store::{
-    UploadFinalization, UploadStore,
+    UploadAdmission, UploadFinalization, UploadStore,
 };
 use crate::application::usecases::audit::{
     AuditAction, AuditService, AuditTarget,
@@ -39,6 +39,7 @@ pub struct UploadService {
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
+    admission: Arc<dyn UploadAdmission>,
 }
 
 impl UploadService {
@@ -48,12 +49,14 @@ impl UploadService {
         identity: Arc<IdentityService>,
         auth: Arc<dyn Authorization>,
         audit: Arc<AuditService>,
+        admission: Arc<dyn UploadAdmission>,
     ) -> Self {
         Self {
             store,
             identity,
             auth,
             audit,
+            admission,
         }
     }
 
@@ -215,13 +218,50 @@ impl UploadService {
                 .await?;
             bail!("Authentication provenance is missing");
         }
+        let nonce = destination
+            .staging_key
+            .rsplit('/')
+            .next()
+            .context("Invalid staging capability")?;
+        let raw_key = format!(
+            "{tenant_id}/raw/{}/{nonce}/{}",
+            upload.group_id, upload.object_name
+        );
+        let staging_revision =
+            match self.store.staging_revision(destination.staging_key).await {
+                Ok(revision) if !revision.trim().is_empty() => revision,
+                Ok(_) | Err(_) => {
+                    operation.failed("staging_revision_unavailable").await?;
+                    bail!("Staged upload is unavailable");
+                },
+            };
+        let gol_admission = match self
+            .admission
+            .issue_ingress(
+                tenant_id,
+                user_id,
+                &raw_key,
+                &staging_revision,
+                &upload.group_id,
+                context,
+            )
+            .await
+        {
+            Ok(receipt) if !receipt.trim().is_empty() => receipt,
+            Ok(_) | Err(_) => {
+                operation.denied("gol_ingress_denied").await?;
+                bail!("Upload admission unavailable");
+            },
+        };
         let delegation_id = Uuid::new_v4().simple().to_string();
         let tagging_query = Self::tagging_query(tenant_id, user_id);
         let destination_key = match self
             .store
             .finalize_upload(UploadFinalization {
                 staging_key: destination.staging_key,
-                destination_key: &upload.s3_key,
+                staging_revision: &staging_revision,
+                gol_admission: &gol_admission,
+                destination_key: &raw_key,
                 tenant_id,
                 user_id,
                 authn_issuer,
@@ -281,6 +321,10 @@ impl UploadService {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/support/gol_upload.rs"]
+mod gol_upload_tests;
 
 #[cfg(test)]
 mod tests {
@@ -353,8 +397,28 @@ mod tests {
         finalizations: Mutex<Vec<FinalizationRecord>>,
     }
 
+    struct PermittedAdmission;
+    #[async_trait::async_trait]
+    impl UploadAdmission for PermittedAdmission {
+        async fn issue_ingress(
+            &self,
+            _tenant: &str,
+            _user: &str,
+            _source: &str,
+            _revision: &str,
+            _group: &str,
+            _context: &QueryContext,
+        ) -> Result<String> {
+            Ok("unit-test-admission".into())
+        }
+    }
+
     #[async_trait::async_trait]
     impl UploadStore for MemoryUploadStore {
+        async fn staging_revision(&self, _key: &str) -> Result<String> {
+            Ok("unit-test-etag".into())
+        }
+
         async fn presign_upload(
             &self,
             key: &str,
@@ -403,6 +467,7 @@ mod tests {
             identity(true),
             authorization.clone(),
             audit,
+            Arc::new(PermittedAdmission),
         );
         let context = QueryContext {
             request_id: "request-upload".to_owned(),
@@ -451,7 +516,17 @@ mod tests {
                 },
             )
             .await?;
-        ensure!(destination == "tenant_a/raw/default/image.png");
+        ensure!(
+            destination ==
+                format!(
+                    "tenant_a/raw/default/{}/image.png",
+                    staging
+                        .staging_key
+                        .rsplit('/')
+                        .next()
+                        .context("staging nonce")?
+                )
+        );
         let finalizations = store
             .finalizations
             .lock()
@@ -473,7 +548,7 @@ mod tests {
         ensure!(mutations.len() == 3);
         ensure!(mutations.iter().all(|mutation| {
             mutation.resource_type == "raw" &&
-                mutation.resource_id == "tenant_a/raw/default/image.png"
+                mutation.resource_id == destination
         }));
         ensure!(mutations.iter().any(|mutation| {
             mutation.relation == "domain" &&
@@ -503,6 +578,7 @@ mod tests {
             identity(true),
             TestAuthorization::new(AuthorizationDecision::Deny),
             audit,
+            Arc::new(PermittedAdmission),
         );
         ensure!(
             service
@@ -543,6 +619,7 @@ mod tests {
             identity(true),
             Arc::new(ScopedAuthorization),
             audit,
+            Arc::new(PermittedAdmission),
         );
         let context = QueryContext::default();
         ensure!(
@@ -603,7 +680,17 @@ mod tests {
                 },
             )
             .await?;
-        ensure!(destination == "tenant_a/raw/sales/record.csv");
+        ensure!(
+            destination ==
+                format!(
+                    "tenant_a/raw/sales/{}/record.csv",
+                    staging
+                        .staging_key
+                        .rsplit('/')
+                        .next()
+                        .context("staging nonce")?
+                )
+        );
         Ok(())
     }
 }

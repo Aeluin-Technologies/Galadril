@@ -708,20 +708,21 @@ mod tests {
     #[test]
     fn chatbot_graph_excludes_unattributed_properties_for_every_actor() {
         use crate::application::ports::relations_store::{
-            GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
-            OntologyReference,
+            GolReference, GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
         };
 
         let projection = super::graph_evidence(GraphSubgraph {
             nodes: vec![GraphNode {
                 id: "entity_a".into(),
                 kind: GraphNodeKind::Entity,
-                ontology_ref: Some(OntologyReference {
+                ontology_ref: Some(GolReference {
                     tenant_id: "tenant_a".into(),
-                    ontology_id: "operations".into(),
-                    revision_id: "a".repeat(32),
-                    resource_id: "object.customer".into(),
-                    resource_kind: "object_type".into(),
+                    ontology_id: "operations.people".into(),
+                    ontology_version: "1.0.0".into(),
+                    source_revision: "a".repeat(32),
+                    generation_id: "b".repeat(32),
+                    symbol_key: "operations.people::Customer".into(),
+                    symbol_kind: "entity".into(),
                 }),
                 properties: serde_json::json!({"private_neighbor": "entity_b"}),
             }],

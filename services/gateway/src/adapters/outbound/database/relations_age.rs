@@ -14,7 +14,7 @@ use crate::adapters::outbound::database::connection::{
     Database, tenant_schema_name,
 };
 use crate::application::ports::relations_store::{
-    GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph, OntologyReference,
+    GolReference, GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
     RELATION_ENDPOINTS, RelationsStore, validate_relation,
 };
 
@@ -190,7 +190,7 @@ impl PgAgeRelationsStore {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing {side}.label"))?,
         )?;
-        let ontology_ref: Option<OntologyReference> = match props
+        let ontology_ref: Option<GolReference> = match props
             .as_object_mut()
             .and_then(|props| props.remove("ontology_ref"))
         {
@@ -496,9 +496,11 @@ mod tests {
             "properties": {
                 "id": "evt_entity", "tenant_id": "tenant-a",
                 "ontology_ref": {
-                    "tenant_id": "tenant-a", "ontology_id": "operations",
-                    "revision_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "resource_id": "object.person", "resource_kind": "object_type"
+                    "tenant_id": "tenant-a", "ontology_id": "operations.people",
+                    "ontology_version":"1.2.3",
+                    "source_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "generation_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "symbol_key":"operations.people::Person", "symbol_kind":"entity"
                 }
             }
         });
@@ -507,8 +509,8 @@ mod tests {
         assert_eq!(
             node.ontology_ref
                 .as_ref()
-                .map(|reference| reference.resource_id.as_str()),
-            Some("object.person")
+                .map(|reference| reference.symbol_key.as_str()),
+            Some("operations.people::Person")
         );
         assert!(node.properties.get("ontology_ref").is_none());
         let reference = vertex
@@ -557,19 +559,16 @@ mod tests {
     }
 
     #[test]
-    fn ontology_reference_requires_a_stable_resource_identifier() {
-        let reference = OntologyReference {
-            tenant_id: "tenant-a".into(),
-            ontology_id: "operations".into(),
-            revision_id: "a".repeat(32),
-            resource_id: "Person".into(),
-            resource_kind: "object_type".into(),
-        };
-        assert!(
-            reference
-                .validate("tenant-a", GraphNodeKind::Entity)
-                .is_err()
-        );
+    fn vertex_parser_rejects_removed_ontology_provenance() {
+        let vertex = serde_json::json!({
+            "label":"Entity",
+            "properties":{"id":"person","tenant_id":"tenant-a",
+                "ontology_ref":{"tenant_id":"tenant-a","ontology_id":"operations",
+                    "revision_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "resource_id":"object.person","resource_kind":"object_type"}
+            }
+        });
+        assert!(PgAgeRelationsStore::extract_vertex(&vertex, "node").is_err());
     }
 
     #[test]

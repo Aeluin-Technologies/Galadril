@@ -1,7 +1,8 @@
 //! Outbound port for tenant-scoped users, roles, and Cedar policies.
 
-use crate::domain::directory_label::DirectorySubject;
 use anyhow::Result;
+
+use crate::domain::directory_label::DirectorySubject;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IamUser {
@@ -38,7 +39,18 @@ pub struct CedarPolicy {
 
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
-    /// Changes presentation metadata without rewriting authorization identities.
+    /// Reads the live explicit ceiling; role membership never implies
+    /// clearance.
+    async fn gol_clearance(
+        &self,
+        _tenant: &str,
+        _user: &str,
+    ) -> Result<Option<galadril_ontology::authorization::Clearance>> {
+        Ok(None)
+    }
+
+    /// Changes presentation metadata without rewriting authorization
+    /// identities.
     async fn set_display_name(
         &self,
         _: &str,
@@ -91,8 +103,8 @@ pub trait IamStore: Send + Sync {
     ) -> Result<Vec<IamUser>> {
         let mut users = self.list_users(tenant_id, limit).await?;
         users.retain(|user| {
-            (administrator || user.user_id == user_id)
-                && matches_search(
+            (administrator || user.user_id == user_id) &&
+                matches_search(
                     search,
                     &[
                         Some(&user.user_id),
@@ -118,8 +130,8 @@ pub trait IamStore: Send + Sync {
             .await?;
         let mut roles = self.list_roles(tenant_id, limit).await?;
         roles.retain(|role| {
-            (administrator || owned.contains(&role.role_name))
-                && matches_search(
+            (administrator || owned.contains(&role.role_name)) &&
+                matches_search(
                     search,
                     &[Some(&role.role_name), role.display_name.as_deref()],
                 )
