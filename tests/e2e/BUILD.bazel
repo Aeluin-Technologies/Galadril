@@ -488,13 +488,19 @@ _PIPELINE_RUNTIME_DATA = [
     "//plugins:ontology_packages",
 ]
 
+py_library(
+    name = "pipeline_definition",
+    srcs = ["pipeline_definition.py"],
+    imports = ["."],
+)
+
 py_test(
     name = "pipeline_fixture_test",
-    srcs = ["test_pipeline_fixture.py", "pipeline_definition.py"],
-    imports = ["."],
+    srcs = ["test_pipeline_fixture.py"],
     legacy_create_init = False,
     main = "test_pipeline_fixture.py",
     deps = [
+        ":pipeline_definition",
         "//platform/pipeline/src/galadril_pipeline",
         "@pip//pytest",
     ],
@@ -504,7 +510,7 @@ py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
     timeout = "eternal",
-    srcs = ["test_pipeline_lifecycle.py", "pipeline_authoring.py", "pipeline_definition.py"],
+    srcs = ["test_pipeline_lifecycle.py", "pipeline_authoring.py"],
     data = _PIPELINE_RUNTIME_DATA,
     exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
@@ -518,6 +524,7 @@ py_test(
         ":e2e_support",
         ":empirical_lifecycle_support",
         ":chatbot_support",
+        ":pipeline_definition",
         "@pip//pytest",
     ],
 )
