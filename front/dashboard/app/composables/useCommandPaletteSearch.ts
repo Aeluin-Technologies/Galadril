@@ -38,7 +38,7 @@ export function useCommandPaletteSearch() {
         ontologyNavigation.value = searchOntologies(
           query,
           items,
-          t("ontologyManager.ontologies"),
+          t("gol.catalog"),
         );
     } catch {
       /* Catalog telemetry records denied or unavailable reads; other search sources remain usable. */

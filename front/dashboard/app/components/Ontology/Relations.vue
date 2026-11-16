@@ -1,157 +1,61 @@
 <script setup lang="ts">
-import { VueFlow, Handle, Position } from "@vue-flow/core";
+import { VueFlow } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
-import {
-  CubeIcon,
-  EnvelopeIcon,
-  UserGroupIcon,
-  PaperClipIcon,
-  ChevronRightIcon,
-} from "@heroicons/vue/24/outline";
-import { pipelinePalette } from "~/utils/pipeline-visuals";
-import type { Node, Edge, EdgeProps } from "@vue-flow/core";
+import { CubeIcon } from "@heroicons/vue/24/outline";
+import type { Node, Edge } from "@vue-flow/core";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
-const props = defineProps<{
-  nodes: Node[];
-  edges: Edge[];
-  editable?: boolean;
-}>();
-const emit = defineEmits<{
-  select: [id: string];
-  connect: [source: string, target: string];
-  inspect: [id: string];
-}>();
+defineProps<{ nodes: Node[]; edges: Edge[] }>();
+const emit = defineEmits<{ select: [key: string] }>();
 const id = useId();
-const renderedEdges = computed(() => {
-  const groups = new Map<string, Edge[]>();
-  for (const edge of props.edges) {
-    const key = JSON.stringify([edge.source, edge.target]);
-    const group = groups.get(key) ?? [];
-    group.push(edge);
-    groups.set(key, group);
-  }
-  return [...groups.values()].flatMap((group) =>
-    group.map((edge, index) => ({
-      ...edge,
-      type: "relationship",
-      data: { offset: (index - (group.length - 1) / 2) * 36 },
-      style: { stroke: "rgb(var(--ui-border-control))", strokeWidth: 1.5 },
-    })),
-  );
-});
-function appearance(id: string) {
-  if (id.includes("person") || id.includes("address"))
-    return { color: pipelinePalette.input.color, icon: UserGroupIcon };
-  if (id.includes("message"))
-    return { color: pipelinePalette.output.color, icon: EnvelopeIcon };
-  if (
-    id.includes("attachment") ||
-    id.includes("document") ||
-    id.includes("content")
-  )
-    return { color: pipelinePalette.processing.color, icon: PaperClipIcon };
-  return { color: pipelinePalette.control.color, icon: CubeIcon };
-}
 </script>
 <template>
   <section
-    class="rounded-control border border-border bg-surface"
-    :aria-label="$t('ontologyManager.related_types')"
+    class="rounded-panel border border-border bg-surface"
+    :aria-label="$t('gol.relationships')"
   >
-    <h2 class="border-b border-border px-4 py-3 text-sm font-semibold">
-      {{ $t("ontologyManager.related_types") }}
+    <h2 class="border-b border-border px-4 py-3 font-semibold">
+      {{ $t("gol.relationships") }}
     </h2>
     <div
-      class="h-[min(62vh,640px)] min-h-[360px] bg-canvas"
-      :aria-label="$t('ontologyManager.ontology_relationship_graph')"
+      class="h-[min(52vh,540px)] min-h-[320px] bg-canvas"
+      :aria-label="$t('gol.graph')"
     >
       <VueFlow
         :id="id"
-        :nodes="
-          nodes.map((node) => ({
-            ...node,
-            type: 'ontology',
-            connectable: !node.data.packageId && !!editable,
-          }))
-        "
-        :edges="renderedEdges"
-        :edges-focusable="false"
-        :nodes-draggable="editable ?? false"
-        :nodes-connectable="editable ?? false"
+        :nodes="nodes.map((node) => ({ ...node, type: 'ontology' }))"
+        :edges="edges"
+        :nodes-draggable="false"
+        :nodes-connectable="false"
         :delete-key-code="null"
         :fit-view-params="{ padding: 0.2, maxZoom: 1 }"
         fit-view-on-init
         @node-click="({ node }) => emit('select', node.id)"
-        @connect="({ source, target }) => emit('connect', source, target)"
-        @edge-click="({ edge }) => emit('inspect', edge.id)"
       >
         <Background :gap="24" :size="0.6" />
-        <template #edge-relationship="edge: EdgeProps<{ offset: number }>">
-          <OntologyRelationshipEdge
-            v-bind="edge"
-            :editable="editable"
-            @inspect="emit('inspect', edge.id)"
-          />
-        </template>
-        <template #node-ontology="{ id: nodeId, data, selected }">
-          <div
-            class="relative w-60 border bg-surface text-foreground shadow-sm"
+        <template #node-ontology="{ id: key, data, selected }"
+          ><div
+            class="w-60 rounded-control border bg-surface shadow-panel"
             :class="
               selected
                 ? 'border-focus ring-2 ring-focus'
                 : 'border-border-control'
             "
           >
-            <Handle type="target" :position="Position.Left" />
             <UiButton
-              v-if="data.packageId"
               variant="ghost"
-              size="sm"
               align="start"
               class="w-full"
-              :aria-expanded="data.expanded"
-              @click.stop="emit('select', nodeId)"
-            >
-              <ChevronRightIcon
-                class="h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none"
-                :class="{ 'rotate-90': data.expanded }"
-              />
-              {{ data.label }}
-            </UiButton>
-            <div
-              v-if="!data.packageId"
-              class="flex items-center gap-2 px-3 py-2 text-white"
-              :style="{ backgroundColor: appearance(nodeId).color }"
-            >
-              <component
-                :is="appearance(nodeId).icon"
-                class="h-4 w-4 shrink-0"
-                aria-hidden="true"
-              /><strong class="min-w-0 flex-1 break-words text-sm">{{
+              @click.stop="emit('select', key)"
+              ><CubeIcon class="mr-2 h-4 w-4" aria-hidden="true" />{{
                 data.label
-              }}</strong>
-            </div>
-            <div class="space-y-1 px-3 py-2 text-xs text-muted">
-              <p v-if="!data.packageId" class="truncate font-mono">
-                {{ nodeId }}
-              </p>
-              <p>
-                {{
-                  $t(
-                    data.packageId
-                      ? "ontologyManager.layerTypeCount"
-                      : "ontologyManager.propertyCount",
-                    {
-                      count: data.count ?? 0,
-                    },
-                  )
-                }}
-              </p>
-            </div>
-            <Handle type="source" :position="Position.Right" />
-          </div>
-        </template>
+              }}</UiButton
+            >
+            <p class="break-all px-3 pb-3 font-mono text-xs text-muted">
+              {{ key }}
+            </p>
+          </div></template
+        >
       </VueFlow>
     </div>
   </section>
