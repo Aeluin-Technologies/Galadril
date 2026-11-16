@@ -52,6 +52,11 @@ filegroup(
     name = "fixtures",
     srcs = [
         "connectors.yaml",
+        "gol-authorities.json",
+        "gol-runtime.json",
+        "gol-context.cedar",
+        "gol-cedar.bundle.json",
+        "gol-host-profile.json",
         "e2e_inference_model.py",
         "otel-collector.yaml",
     ],

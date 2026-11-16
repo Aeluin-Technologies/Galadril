@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -47,10 +48,10 @@ from clients import (
 from empirical_causal import exercise_empirical_causal
 from empirical_pipeline import exercise_empirical_pipeline
 from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
-from galadril_pipeline.config import PipelineConfig
-from galadril_pipeline.routing import PipelineRouteTable
+from gol_authoring import gol_access, publish_gol_source
 from pengolo import exercise_pengolo
 from pipeline_authoring import exercise_pipeline_authoring
+from pipeline_definition import pipeline_fixture
 from retrieval_lifecycle import exercise_retrieval
 from scenario import ADMIN
 
@@ -73,14 +74,12 @@ _QUERY_FIELDS = frozenset(
         "globalSearch",
         "globalSearchPage",
         "generationEvents",
-        "ontologies",
+        "golOntologies",
+        "golOntologyCanManage",
+        "golOntologyWorkspace",
+        "golOntologySymbols",
+        "golOntologySchema",
         "ontologyBindings",
-        "ontologyCanManage",
-        "ontologyDocument",
-        "ontologyHistory",
-        "ontologyWorkspace",
-        "pluginOntologies",
-        "pluginOntologyPreview",
         "pipelineCapabilities",
         "pipelineDefinition",
         "pipelineLinkTargets",
@@ -104,18 +103,17 @@ _MUTATION_FIELDS = frozenset(
         "createConversation",
         "createMessage",
         "createPipeline",
-        "authorOntology",
         "authorPipeline",
         "deleteConversation",
         "deleteMessage",
         "deletePipeline",
-        "publishOntology",
-        "saveOntologyDraft",
-        "savePluginOntology",
-        "bindPluginOntology",
+        "saveGolOntology",
+        "validateGolOntology",
+        "publishGolOntology",
+        "deleteGolOntology",
+        "bindGolOntology",
         "publishPipeline",
         "requestStagingUpload",
-        "retireOntology",
         "updateConversation",
         "updateMessage",
         "updatePipeline",
@@ -129,143 +127,19 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _ontology() -> bytes:
-    """Returns the smallest production-valid ontology for every DAG block."""
-    return json.dumps(
-        {
-            "version": "1",
-            "resources": [
-                {
-                    "resource_id": "object.entity",
-                    "kind": "object_type",
-                    "display_name": "E2E entity",
-                    "description": "Entity materialized by the lifecycle test",
-                    "references": [],
-                    "attributes": {},
-                }
-            ],
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+def _ontology() -> str:
+    """Declares canonical types without treating graph labels as ontology IDs."""
+    return f"""ontology {ONTOLOGY_ID} version "1.0.0" {{
+    entity E2EEntity {{ field label: String; field confidence: f64; }}
+    entity E2EObservation {{ field kind: String; }}
+    {gol_access("E2EEntity")}
+    {gol_access("E2EObservation")}
+}}"""
 
 
 def _pipeline() -> dict[str, object]:
-    """Returns one deterministic source-to-sink runtime DAG."""
-    return {
-        "version": 1,
-        "name": PIPELINE_ID,
-        "sources": [
-            {
-                "id": "e2e_text",
-                "topic": "e2e.raw",
-                "match_pattern": (
-                    rf"^{TENANT_ID}/raw/default/e2e-record(?:-[0-9]{{2}})?\.txt$"
-                ),
-                "schema_path": "schemas/avro/text.avsc",
-                "parser": "text",
-                "source_kind": "e2e_fixture",
-            },
-            {
-                "id": "e2e_empirical",
-                "topic": "e2e.raw",
-                "match_pattern": (
-                    rf"^{TENANT_ID}/raw/((sales/sales-|returns/returns-)[0-9]{{2}}|trial/trial-205)\.csv$"
-                ),
-                "schema_path": "schemas/avro/text.avsc",
-                "parser": "csv",
-                "source_kind": "e2e_empirical",
-            },
-        ],
-        "pipeline": [
-            {
-                "step": "infer",
-                "type": "inference",
-                "input_from": ["e2e_text"],
-                "model": "e2e_deterministic",
-                "artifact_path": "/tmp/galadril-e2e-model",
-                "params": {"action": "embed"},
-            },
-            {
-                "step": "resolve",
-                "type": "resolve",
-                "input_from": ["infer"],
-                "params": {
-                    "modality": "e2e",
-                    "threshold": 0.85,
-                    "entity_type": "E2E_ENTITY",
-                },
-            },
-            {
-                "step": "sink",
-                "type": "sink",
-                "connector": "postgres",
-                "input_from": ["resolve"],
-                "params": {
-                    "entity_type": "E2E_ENTITY",
-                    "modality": "e2e",
-                    "state_type": "E2E_OBSERVATION",
-                },
-            },
-            {
-                "step": "causal",
-                "type": "causal",
-                "input_from": ["sink"],
-                "params": {
-                    "trigger": "on_demand",
-                    "amarth_target_outcome": "E2E_OBSERVATION.confidence",
-                    "amarth_window_size": "120s",
-                    "lookback": "120s",
-                    "bucket": "1s",
-                    "max_events": 64,
-                    "max_states": 64,
-                    "k_min": 1,
-                    "k_max": 1,
-                    "max_vertices": 8,
-                    "include_presence_links": False,
-                },
-            },
-            {
-                "step": "empirical_infer",
-                "type": "inference",
-                "input_from": ["e2e_empirical"],
-                "model": "e2e_deterministic",
-                "artifact_path": "/tmp/galadril-e2e-model",
-                "params": {"action": "embed"},
-            },
-            {
-                "step": "empirical_resolve",
-                "type": "resolve",
-                "input_from": ["empirical_infer"],
-                "params": {
-                    "modality": "e2e",
-                    "threshold": 0.85,
-                    "entity_type": "E2E_ENTITY",
-                },
-            },
-            {
-                "step": "empirical_sink",
-                "type": "sink",
-                "connector": "postgres",
-                "input_from": ["empirical_resolve"],
-                "params": {
-                    "entity_type": "E2E_ENTITY",
-                    "modality": "e2e",
-                    "state_type": "E2E_OBSERVATION",
-                },
-            },
-        ],
-    }
-
-
-def test_empirical_pipeline_routes_are_streaming_safe() -> None:
-    """Both source branches must compile without an implicit streaming join."""
-    routes = PipelineRouteTable(PipelineConfig.model_validate(_pipeline()))
-    assert routes.entry_steps("e2e_text") == ("infer",)
-    assert routes.entry_steps("e2e_empirical") == ("empirical_infer",)
-    assert routes.route("empirical_resolve").dependencies == (
-        "empirical_infer",
-    )
+    """Returns the shared deterministic runtime DAG."""
+    return pipeline_fixture(TENANT_ID, PIPELINE_ID)
 
 
 def _field(data: Mapping[str, object], name: str) -> dict[str, object]:
@@ -378,7 +252,7 @@ async def _assert_graphql_security_boundaries(
 
     oversized = await gateway.request(
         token,
-        "query { __typename }" + (" " * 5000),
+        "query { __typename }" + (" " * (64 * 1024 + 1)),
     )
     assert oversized.status_code == 413
 
@@ -431,6 +305,7 @@ async def _exercise_causal_branch(
     token: str,
 ) -> None:
     """Runs real Amarth on Gateway observations resolved by native LI-ESKG."""
+    first_source_key: str | None = None
     for index in range(36):
         cohort = "alpha" if index < 30 else "decoy"
         signal = (((index * 7) % 13) + 1) / 14.0
@@ -464,9 +339,11 @@ async def _exercise_causal_branch(
             {"key": _string(staged, "stagingKey"), "name": name},
             trace_id=_CAUSAL_TRACE_ID if index == 0 else None,
         )
-        assert promoted.get("completeUpload") == (
-            f"{TENANT_ID}/raw/default/{name}"
-        )
+        raw_key = _string(promoted, "completeUpload")
+        nonce = _string(staged, "stagingKey").rsplit("/", 1)[-1]
+        assert raw_key == f"{TENANT_ID}/raw/default/{nonce}/{name}"
+        if index == 0:
+            first_source_key = raw_key
         await asyncio.sleep(1.0)
     alpha_entity = await eventually(
         read_causal_cohort,
@@ -485,9 +362,11 @@ async def _exercise_causal_branch(
         permission="view",
         user_id=OUTSIDER_ID,
     )
+    if first_source_key is None:
+        raise AssertionError("The causal fixture has no admitted source")
     correlation_id = await publish_causal_command(
         alpha_entity,
-        source_key=f"{TENANT_ID}/raw/default/e2e-record-00.txt",
+        source_key=first_source_key,
         trace_id=_CAUSAL_TRACE_ID,
     )
     causal = await eventually(
@@ -1031,8 +910,8 @@ async def _exercise_query_api(
             action outcome requestId traceId revisionId publicationId
           }
           }
-          ontologies(limit: 10) {
-            ontologyId productionPublication { publicationId revisionId }
+          golOntologies(limit: 10) {
+            ontologyId activeGeneration sourceRevision
           }
           ontologyBindings(pipelineId: $pipelineId, limit: 10) {
             pipelineId blockId ontologyId
@@ -1058,7 +937,7 @@ async def _exercise_query_api(
         "structuredSearch",
         "searchEvents",
         "searchEmbeddings",
-        "ontologies",
+        "golOntologies",
         "ontologyBindings",
         "pipelineExecutions",
         "conversations",
@@ -1108,7 +987,9 @@ async def _exercise_query_api(
     }
     assert any(
         require_mapping(item, "ontology").get("ontologyId") == ONTOLOGY_ID
-        for item in require_sequence(data.get("ontologies"), "ontologies")
+        for item in require_sequence(
+            data.get("golOntologies"), "GOL ontologies"
+        )
     )
     assert any(
         require_mapping(item, "pipeline").get("pipelineId") == PIPELINE_ID
@@ -1188,38 +1069,9 @@ async def _run_gateway_upload_lifecycle() -> None:
                 )
 
             print("E2E stage: publishing ontology", flush=True)
-            ontology_revision = await registry.put_ontology(_ontology())
-            ontology_data = await gateway.execute(
-                uploader_token,
-                """
-                mutation PublishOntology(
-                  $ontologyId: String!,
-                  $displayName: String!,
-                  $revisionId: String!,
-                  $metadata: JSON!
-                ) {
-                  publishOntology(
-                    ontologyId: $ontologyId,
-                    displayName: $displayName,
-                    revisionId: $revisionId,
-                    metadata: $metadata
-                  ) { publicationId revisionId lifecycle }
-                }
-                """,
-                {
-                    "ontologyId": ONTOLOGY_ID,
-                    "displayName": "E2E ontology",
-                    "revisionId": ontology_revision,
-                    "metadata": json.dumps(
-                        {"purpose": "pipeline-e2e"},
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ),
-                },
+            await publish_gol_source(
+                gateway, uploader_token, ONTOLOGY_ID, _ontology()
             )
-            publication = _field(ontology_data, "publishOntology")
-            assert publication.get("revisionId") == ontology_revision
-            assert publication.get("lifecycle") == "production"
 
             print(
                 "E2E stage: exercising pipeline authoring and review",
@@ -1338,10 +1190,17 @@ async def _run_gateway_upload_lifecycle() -> None:
                 "empirical_resolve",
                 "empirical_sink",
             ):
-                head_revision = await registry.put_binding(
-                    block_id=block_id,
-                    expected_revision_id=head_revision,
+                bound = await gateway.execute(
+                    uploader_token,
+                    "mutation($ontology:String!,$pipeline:String!,$block:String!,$head:String!){bindGolOntology(ontologyId:$ontology,pipelineId:$pipeline,blockId:$block,expectedPipelineRevision:$head)}",
+                    {
+                        "ontology": ONTOLOGY_ID,
+                        "pipeline": PIPELINE_ID,
+                        "block": block_id,
+                        "head": head_revision,
+                    },
                 )
+                head_revision = _string(bound, "bindGolOntology")
 
             published_data = await gateway.execute(
                 uploader_token,
@@ -1413,12 +1272,18 @@ async def _run_gateway_upload_lifecycle() -> None:
                 },
                 trace_id=_GATEWAY_TRACE_ID,
             )
-            object_key = f"{TENANT_ID}/raw/default/e2e-record.txt"
+            nonce = staging_key.rsplit("/", 1)[-1]
+            object_key = f"{TENANT_ID}/raw/default/{nonce}/e2e-record.txt"
             assert complete_data.get("completeUpload") == object_key
 
             s3_evidence = await read_s3_object(object_key)
             assert s3_evidence is not None
-            assert s3_evidence.metadata == {
+            assert bool(s3_evidence.metadata.get("authz-gol-admission"))
+            assert {
+                key: value
+                for key, value in s3_evidence.metadata.items()
+                if key != "authz-gol-admission"
+            } == {
                 "tenant": TENANT_ID,
                 "owner": UPLOADER_ID,
                 "authz-origin": "gateway",
@@ -1628,28 +1493,24 @@ async def _run_gateway_upload_lifecycle() -> None:
                 },
             )
             assert deleted_pipeline.get("deletePipeline") is True
+            workspace = await gateway.execute(
+                uploader_token,
+                "query($id:String!){golOntologyWorkspace(ontologyId:$id){summary{sourceRevision}}}",
+                {"id": ONTOLOGY_ID},
+            )
+            expected = _string(
+                _field(_field(workspace, "golOntologyWorkspace"), "summary"),
+                "sourceRevision",
+            )
             retired_ontology = await gateway.execute(
                 uploader_token,
-                """
-                mutation RetireOntology(
-                  $ontologyId: String!,
-                  $publicationId: String!,
-                  $revisionId: String!
-                ) {
-                  retireOntology(
-                    ontologyId: $ontologyId,
-                    publicationId: $publicationId,
-                    revisionId: $revisionId
-                  )
-                }
-                """,
-                {
-                    "ontologyId": ONTOLOGY_ID,
-                    "publicationId": _string(publication, "publicationId"),
-                    "revisionId": ontology_revision,
-                },
+                "mutation($id:String!,$expected:String!){deleteGolOntology(ontologyId:$id,expectedRevision:$expected){revision}}",
+                {"id": ONTOLOGY_ID, "expected": expected},
             )
-            assert retired_ontology.get("retireOntology") is True
+            assert _string(
+                _field(retired_ontology, "deleteGolOntology"), "revision"
+            )
+
     finally:
         await registry.close()
         await gateway.close()
@@ -1671,5 +1532,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
 
 if __name__ == "__main__":
     raise SystemExit(
-        pytest.main([__file__, "--import-mode=importlib", "--capture=no"])
+        pytest.main(
+            [__file__, "--import-mode=importlib", "--capture=no", *sys.argv[1:]]
+        )
     )

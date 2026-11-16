@@ -3,7 +3,7 @@ name: galadril-e2e
 gateway:
   host: "127.0.0.1"
   port: 8081
-  max_body_bytes: 4096
+  max_body_bytes: 65536
   max_graphql_depth: 8
 
 scribe:

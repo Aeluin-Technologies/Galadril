@@ -8,13 +8,15 @@ from collections.abc import Mapping
 import pytest
 from assertions import require_mapping, require_sequence
 from clients import GatewayClient, GraphQLOperationError
+from environment import runfile
+from gol_authoring import gol_access, publish_gol_source
 
 
 async def exercise_pipeline_authoring(
     gateway: GatewayClient, token: str, outsider_token: str
 ) -> None:
     """Exercises the public contract through real IAM, Registry and immutable storage."""
-    await exercise_plugin_ontology_authoring(gateway, token, outsider_token)
+    await exercise_gol_plugin_authoring(gateway, token, outsider_token)
     identifier = "e2e_authoring"
     incomplete = {"name": "E2E authoring", "sources": [], "pipeline": []}
     query = """
@@ -116,130 +118,83 @@ async def exercise_pipeline_authoring(
     assert retired.get("deletePipeline") is True
 
 
-async def exercise_plugin_ontology_authoring(
+async def exercise_gol_plugin_authoring(
     gateway: GatewayClient, token: str, outsider_token: str
 ) -> None:
-    """Proves explicit tenant overlays survive the public API and Registry CAS."""
-    inventory = await gateway.execute(token, "{pluginOntologies}")
-    packages = require_sequence(
-        require_mapping(
-            json.loads(str(inventory["pluginOntologies"])), "inventory"
-        ).get("packages"),
-        "packages",
+    """Publishes the real Utils GOL package and a typed dependent ontology."""
+    plugin_source = runfile(
+        "plugins/src/galadril_plugins/utils/mail.gol"
+    ).read_text()
+    package = await publish_gol_source(
+        gateway, token, "communication.mail", plugin_source
     )
-    package = next(
-        require_mapping(item, "package")
-        for item in packages
-        if require_mapping(item, "package").get("id") == "utils.mail"
-    )
-    person = {
-        "version": "1",
-        "resources": [
-            {
-                "resource_id": "tenant.person",
-                "kind": "object_type",
-                "display_name": "Person",
-                "references": [],
-                "attributes": {},
-            },
-            {
-                "resource_id": "tenant.person.name",
-                "kind": "property",
-                "display_name": "Name",
-                "owner_id": "tenant.person",
-                "value_type": "string",
-                "references": [],
-                "attributes": {},
-            },
-        ],
-    }
-    draft = """mutation($id:String!,$definition:JSON!){saveOntologyDraft(ontologyId:$id,displayName:"E2E people",definition:$definition)}"""
-    variables = {"id": "e2e_people", "definition": json.dumps(person)}
+    source = """ontology e2e.mail version "1.0.0" {
+    import communication.mail version "1.0.0";
+    entity LinkedMessage { field message: Ref<communication.mail.Message>; }
+}"""
+    source = source.removesuffix("}") + gol_access("LinkedMessage") + "\n}"
+    saved = await publish_gol_source(gateway, token, "e2e.mail", source)
+    query = 'query{golOntologyWorkspace(ontologyId:"e2e.mail"){summary{sourceRevision activeGeneration} files{path text}}}'
     with pytest.raises(GraphQLOperationError):
-        await gateway.execute(outsider_token, draft, variables)
-    saved = await gateway.execute(token, draft, variables)
-    target_revision = saved.get("saveOntologyDraft")
-    assert isinstance(target_revision, str)
-    publish = """mutation($id:String!,$revision:String!){publishOntology(ontologyId:$id,displayName:"E2E ontology",revisionId:$revision,metadata:"{}") {revisionId}}"""
-    await gateway.execute(
-        token, publish, {"id": "e2e_people", "revision": target_revision}
+        await gateway.execute(outsider_token, query)
+    opened = require_mapping(
+        (await gateway.execute(token, query)).get("golOntologyWorkspace"),
+        "GOL workspace",
     )
-    preview = """query($version:String!,$target:String,$revision:String,$mappings:JSON!){pluginOntologyPreview(packageId:"utils.mail",packageVersion:$version,targetOntologyId:$target,targetRevisionId:$revision,mappings:$mappings)}"""
-    selection: dict[str, object] = {
-        "version": package.get("version"),
-        "target": None,
-        "revision": None,
-        "mappings": "{}",
-    }
-    isolated = await gateway.execute(token, preview, selection)
-    isolated_document = require_mapping(
-        json.loads(str(isolated["pluginOntologyPreview"])), "isolated ontology"
-    )
-    assert all(
-        require_mapping(item, "resource").get("resource_id") != "tenant.person"
-        for item in require_sequence(
-            isolated_document.get("resources"), "resources"
-        )
-    )
-    selection.update(
-        target="e2e_people",
-        revision=target_revision,
-        mappings=json.dumps({"mail.message.to": "tenant.person"}),
-    )
-    linked = await gateway.execute(token, preview, selection)
-    linked_document = require_mapping(
-        json.loads(str(linked["pluginOntologyPreview"])), "linked ontology"
-    )
-    resources = {
-        require_mapping(item, "resource").get("resource_id"): require_mapping(
-            item, "resource"
-        )
-        for item in require_sequence(
-            linked_document.get("resources"), "resources"
-        )
-    }
     assert (
-        require_mapping(
-            resources["mail.message.to"].get("attributes"),
-            "recipient attributes",
-        ).get("target_type")
-        == "tenant.person"
+        require_mapping(opened.get("summary"), "GOL summary").get(
+            "activeGeneration"
+        )
+        == saved.generation
     )
     assert (
         require_mapping(
-            resources["mail.message.sender"].get("attributes"),
-            "sender attributes",
-        ).get("target_type")
-        == "mail.person"
+            require_sequence(opened.get("files"), "source files")[0],
+            "source file",
+        ).get("text")
+        == source
     )
-    assert "tenant.person.name" in resources
-    write = """mutation($version:String!,$target:String,$revision:String,$mappings:JSON!,$expected:String){savePluginOntology(ontologyId:"e2e_mail",displayName:"E2E mail",packageId:"utils.mail",packageVersion:$version,targetOntologyId:$target,targetRevisionId:$revision,mappings:$mappings,expectedRevisionId:$expected)}"""
-    with pytest.raises(GraphQLOperationError):
-        await gateway.execute(outsider_token, write, selection)
-    result = await gateway.execute(token, write, selection)
-    overlay_revision = result.get("savePluginOntology")
-    assert isinstance(overlay_revision, str)
-    workspace_query = """{ontologyWorkspace(ontologyId:"e2e_mail")}"""
-    opened = await gateway.execute(token, workspace_query)
-    workspace = require_mapping(
-        json.loads(str(opened["ontologyWorkspace"])), "workspace"
-    )
-    assert workspace.get("ontology") == linked_document
-    selection["expected"] = workspace.get("revision_id")
-    updated = await gateway.execute(token, write, selection)
-    with pytest.raises(GraphQLOperationError):
-        await gateway.execute(token, write, selection)
-    await gateway.execute(
+    replacement = await publish_gol_source(
+        gateway,
         token,
-        publish,
-        {"id": "e2e_mail", "revision": updated.get("savePluginOntology")},
+        "e2e.mail",
+        source.replace(
+            "field message:", "field title: Option<String>; field message:"
+        ),
+        expected_revision=saved.source_revision,
+        expected_generation=saved.generation,
     )
+    assert replacement.generation != saved.generation
     with pytest.raises(GraphQLOperationError):
-        await gateway.execute(outsider_token, workspace_query)
-    assert await gateway.execute(token, "{pluginOntologies}") == inventory
+        await publish_gol_source(
+            gateway,
+            token,
+            "e2e.mail",
+            source,
+            expected_revision=saved.source_revision,
+            expected_generation=saved.generation,
+        )
+    dependency = await gateway.execute(
+        token,
+        'mutation($revision:String!){validateGolOntology(ontologyId:"e2e.mail",sourceRevision:$revision){status dependencies{ontologyId generation}}}',
+        {"revision": replacement.source_revision},
+    )
+    checked = require_mapping(
+        dependency.get("validateGolOntology"), "GOL dependencies"
+    )
+    assert checked.get("status") == "valid"
+    assert any(
+        require_mapping(item, "dependency").get("ontologyId")
+        == "communication.mail"
+        and require_mapping(item, "dependency").get("generation")
+        == package.generation
+        for item in require_sequence(
+            checked.get("dependencies"), "dependencies"
+        )
+    )
     authored = await gateway.execute(
         token,
-        """mutation($definition:JSON!,$command:JSON!){authorPipeline(pipelineId:"e2e_bound_mail",name:"E2E mail draft",definition:$definition,command:$command,message:"Ontology contract fixture"){headRevisionId}}""",
+        'mutation($definition:JSON!,$command:JSON!){authorPipeline(pipelineId:"e2e_bound_mail",name:"E2E mail draft",definition:$definition,command:$command,message:"GOL contract fixture"){headRevisionId}}',
         {
             "definition": json.dumps(
                 {
@@ -264,19 +219,21 @@ async def exercise_plugin_ontology_authoring(
     )
     bound = await gateway.execute(
         token,
-        """mutation($head:String!){bindPluginOntology(ontologyId:"e2e_mail",pipelineId:"e2e_bound_mail",blockId:"reply",expectedPipelineRevision:$head)}""",
+        'mutation($head:String!){bindGolOntology(ontologyId:"e2e.mail",pipelineId:"e2e_bound_mail",blockId:"reply",expectedPipelineRevision:$head)}',
         {"head": head},
     )
-    assert isinstance(bound.get("bindPluginOntology"), str)
-    bindings = await gateway.execute(
+    assert isinstance(bound.get("bindGolOntology"), str)
+    data = await gateway.execute(
         token,
-        """{ontologyBindings(pipelineId:"e2e_bound_mail"){blockId ontologyId includeDependencies resourceKinds}}""",
+        '{ontologyBindings(pipelineId:"e2e_bound_mail"){blockId ontologyId generation sourceRevision symbols}}',
     )
     binding = require_mapping(
-        require_sequence(bindings.get("ontologyBindings"), "bindings")[0],
-        "binding",
+        require_sequence(data.get("ontologyBindings"), "bindings")[0], "binding"
     )
     assert binding.get("blockId") == "reply"
-    assert binding.get("ontologyId") == "e2e_mail"
-    assert binding.get("includeDependencies") is True
-    assert "object_type" in json.loads(str(binding.get("resourceKinds")))
+    assert binding.get("ontologyId") == "e2e.mail"
+    assert binding.get("generation") == replacement.generation
+    assert binding.get("sourceRevision") == replacement.source_revision
+    assert "e2e.mail::LinkedMessage" in require_sequence(
+        binding.get("symbols"), "bound symbols"
+    )

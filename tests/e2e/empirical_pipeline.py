@@ -153,7 +153,8 @@ async def _upload_rows(
                 "groupId": upload.data_type,
             },
         )
-        key = f"{TENANT_ID}/raw/{upload.data_type}/{upload.name}"
+        nonce = staging_key.rsplit("/", 1)[-1]
+        key = f"{TENANT_ID}/raw/{upload.data_type}/{nonce}/{upload.name}"
         assert completed.get("completeUpload") == key
         evidence = await read_s3_object(key)
         assert evidence is not None
