@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import TypedDict
 
 from worker_fixture import offline_bundle
 
@@ -23,6 +24,27 @@ PROBE = Path(sys.argv.pop(1)).resolve()
 SUPERVISOR = Path(sys.argv.pop(1)).resolve()
 NATIVE = Path(sys.argv.pop(1)).resolve().parent
 DIAGNOSTIC = Path(sys.argv.pop(1)).resolve()
+CONTROLLER_UID = os.getuid()
+WORKER_UID = 1000
+
+
+class WorkerCredentials(TypedDict, total=False):
+    user: int
+    group: int
+    extra_groups: tuple[int, ...]
+
+
+def worker_credentials() -> WorkerCredentials:
+    """Drops privileges only in the child so Bazel can write coverage."""
+    if CONTROLLER_UID == 0:
+        return {"user": WORKER_UID, "group": WORKER_UID, "extra_groups": ()}
+    return {}
+
+
+def own_worker_path(path: Path) -> None:
+    """Makes test-owned paths accessible after the child changes identity."""
+    if CONTROLLER_UID == 0:
+        os.chown(path, WORKER_UID, WORKER_UID)
 
 
 def rendered(source: bytes) -> bytes:
@@ -64,20 +86,18 @@ class WorkerTest(unittest.TestCase):
         shutil.copy2(SUPERVISOR, cls.supervisor)
         (cls.root / "private.cls").write_text("synthetic other-job secret")
         # Match the deployed unprivileged identity after preparing public fixtures.
-        if os.getuid() == 0:
-            for path in (cls.root, *cls.root.rglob("*")):
-                os.chown(path, 1000, 1000)
-            os.setgroups([])
-            os.setgid(1000)
-            os.setuid(1000)
-        if os.getuid() != 1000:
+        if CONTROLLER_UID not in (0, WORKER_UID):
             raise RuntimeError("Native integration tests require UID 1000")
+        if CONTROLLER_UID == 0:
+            for path in (cls.root, *cls.root.rglob("*")):
+                own_worker_path(path)
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls.directory.cleanup()
 
     def environment(self, runtime: Path, workspace: Path) -> dict[str, str]:
+        own_worker_path(workspace)
         return {
             "PATH": "/",
             "LANG": "C.UTF-8",
@@ -104,6 +124,12 @@ class WorkerTest(unittest.TestCase):
                         "Coverage writers cannot run inside the worker policy",
                     )
 
+    def test_worker_credentials_do_not_change_coverage_writer_identity(
+        self,
+    ) -> None:
+        """Bazel writes Python coverage after the native test suite exits."""
+        self.assertEqual(os.getuid(), CONTROLLER_UID)
+
     def test_real_latex_class_and_macro_produce_pdf(self) -> None:
         with tempfile.TemporaryDirectory(dir=self.root) as workspace:
             project = {
@@ -126,6 +152,7 @@ class WorkerTest(unittest.TestCase):
                 capture_output=True,
                 timeout=70,
                 check=False,
+                **worker_credentials(),
             )
             diagnostic = b""
             if result.returncode != 0:
@@ -141,6 +168,7 @@ class WorkerTest(unittest.TestCase):
                         capture_output=True,
                         timeout=70,
                         check=False,
+                        **worker_credentials(),
                     )
                     diagnostic = detail.stderr + detail.stdout[-4096:]
             self.assertEqual(
@@ -162,6 +190,7 @@ class WorkerTest(unittest.TestCase):
                     capture_output=True,
                     timeout=70,
                     check=False,
+                    **worker_credentials(),
                 )
                 self.assertEqual(
                     result.returncode, 0, result.stderr.decode(errors="replace")
@@ -182,6 +211,7 @@ class WorkerTest(unittest.TestCase):
                 capture_output=True,
                 timeout=10,
                 check=False,
+                **worker_credentials(),
             )
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertTrue(result.stdout.startswith(b"%PDF-"))
@@ -195,6 +225,7 @@ class WorkerTest(unittest.TestCase):
                 capture_output=True,
                 timeout=10,
                 check=False,
+                **worker_credentials(),
             )
             self.assertEqual(
                 result.returncode, -signal.SIGSYS, result.stderr.decode()
@@ -202,8 +233,11 @@ class WorkerTest(unittest.TestCase):
 
     def start_supervisor(self, state: Path) -> subprocess.Popen[bytes]:
         state.mkdir()
+        own_worker_path(state)
         for name in ("private.cls", "queue.db", "storage-secret"):
-            (state / name).write_text("synthetic service or other-job secret")
+            fixture = state / name
+            fixture.write_text("synthetic service or other-job secret")
+            own_worker_path(fixture)
         environment = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(state),
@@ -222,6 +256,7 @@ class WorkerTest(unittest.TestCase):
             env=environment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            **worker_credentials(),
         )
         deadline = time.monotonic() + 10
         while not (state / "worker.sock").exists():
