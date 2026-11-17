@@ -176,24 +176,28 @@ test("GOL authoring, atomic generations, authorized schemas and warm-cache revoc
     .getByRole("textbox", { name: "Ontology name", exact: true })
     .fill(displayName);
   const editor = page.getByRole("textbox", { name: "GOL source", exact: true });
-  await editor.fill(
-    source.replace(
-      "  entity BrowserMessage",
-      "  import unavailable.dependency as missing;\n  entity BrowserMessage",
-    ),
+  const invalidSource = source.replace(
+    "field title: String;",
+    "field title: ;",
   );
+  await editor.fill(invalidSource);
   const invalidDraft = await mutationResult(page, "saveGolOntology", () =>
     page.getByRole("button", { name: "Save draft", exact: true }).click(),
   );
   expect(object(invalidDraft.summary).sourceRevision).toBeTruthy();
-  await page.getByRole("button", { name: "Validate", exact: true }).click();
+  const invalidValidation = await mutationResult(
+    page,
+    "validateGolOntology",
+    () => page.getByRole("button", { name: "Validate", exact: true }).click(),
+  );
+  expect(invalidValidation.status).toBe("invalid");
   await expect(
     page.getByRole("region", { name: "Compiler diagnostics", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Publish", exact: true }),
   ).toBeDisabled();
-  await expect(editor).toHaveValue(/import unavailable\.dependency/);
+  await expect(editor).toHaveValue(invalidSource);
   await editor.fill(source);
   await mutationResult(page, "saveGolOntology", () =>
     page.getByRole("button", { name: "Save draft", exact: true }).click(),

@@ -30,5 +30,15 @@ def test_every_pipeline_publication_names_its_bound_gol_contract() -> None:
         }
 
 
+def test_on_demand_causal_step_has_no_streaming_input() -> None:
+    """The lifecycle dispatches causal work explicitly after collecting data."""
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    causal = next(step for step in config.pipeline if step.step == "causal")
+    assert causal.params.model_dump().get("trigger") == "on_demand"
+    assert not causal.input_from
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

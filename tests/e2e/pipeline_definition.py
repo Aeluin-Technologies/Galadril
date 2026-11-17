@@ -68,7 +68,7 @@ def pipeline_fixture(tenant_id: str, pipeline_id: str) -> dict[str, object]:
             {
                 "step": "causal",
                 "type": "causal",
-                "input_from": ["sink"],
+                "input_from": [],
                 "params": {
                     "gol_transfer_symbol_key": "e2e.lifecycle::E2EObservation",
                     "trigger": "on_demand",
