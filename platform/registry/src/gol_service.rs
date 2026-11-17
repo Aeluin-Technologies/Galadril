@@ -263,6 +263,21 @@ impl<S: RevisionStore> Registry<S> {
                 "expected revision is required for existing ontology"
             );
         }
+        // A draft keeps the publication baseline the editor needs for its
+        // next compare-and-swap. Read it before committing the draft.
+        let (active_generation, active_source_revision) = match existing {
+            Some(record) => {
+                let summary = self
+                    .gol_summary(
+                        input.tenant_id,
+                        &snapshot.revision_id,
+                        record,
+                    )
+                    .await?;
+                (summary.active_generation, summary.active_source_revision)
+            },
+            None => (None, None),
+        };
         let now = Utc::now().timestamp_millis();
         let created_at_ms =
             existing.map_or(now, |record| record.created_at_ms);
@@ -310,8 +325,8 @@ impl<S: RevisionStore> Registry<S> {
                 ontology_id: record.ontology_id,
                 display_name: record.display_name,
                 source_revision: revision,
-                active_generation: None,
-                active_source_revision: None,
+                active_generation,
+                active_source_revision,
                 status: "draft".into(),
             },
             files: record.files,

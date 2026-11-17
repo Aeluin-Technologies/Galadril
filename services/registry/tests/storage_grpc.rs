@@ -491,6 +491,40 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         "failed provisioning changed the active manifest"
     );
     spice_post(&spice_http,"/v1/relationships/write",json!({"updates":[{"operation":"OPERATION_TOUCH","relationship":owner}]})).await?;
+    let head = client
+        .get_gol_workspace(proto::GetGolWorkspaceRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: None,
+        })
+        .await?
+        .into_inner()
+        .summary
+        .context("missing current workspace")?;
+    let draft = client
+        .save_gol_ontology(proto::SaveGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            display_name: "People".into(),
+            files: vec![proto::GolFile {
+                path: "people.gol".into(),
+                text: format!("{source}\n"),
+            }],
+            author: "test".into(),
+            expected_revision: Some(head.source_revision),
+        })
+        .await?
+        .into_inner()
+        .summary
+        .context("missing saved draft")?;
+    ensure!(
+        draft.active_generation.as_deref() ==
+            Some(published.generation.as_str()) &&
+            draft.active_source_revision.as_deref() ==
+                Some(source_revision.as_str()) &&
+            draft.source_revision != source_revision,
+        "saving a draft discarded the active publication baseline"
+    );
     let second = client
         .publish_gol_ontology(proto::PublishGolOntologyRequest {
             tenant_id: "tenant_a".into(),

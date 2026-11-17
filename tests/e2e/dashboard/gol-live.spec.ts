@@ -74,7 +74,7 @@ function cookies(value: unknown): Parameters<BrowserContext["addCookies"]>[0] {
 }
 const fixture = object(JSON.parse(readFileSync("live-fixture.json", "utf8")));
 
-async function graphql(
+async function graphqlEnvelope(
   context: BrowserContext,
   query: string,
   variables: Record<string, unknown> = {},
@@ -84,7 +84,14 @@ async function graphql(
     data: { query, variables },
   });
   expect(response.status()).toBe(200);
-  const result = object(await response.json());
+  return object(await response.json());
+}
+async function graphql(
+  context: BrowserContext,
+  query: string,
+  variables: Record<string, unknown> = {},
+) {
+  const result = await graphqlEnvelope(context, query, variables);
   expect(result.errors).toBeUndefined();
   return object(result.data);
 }
@@ -199,7 +206,7 @@ test("GOL authoring, atomic generations, authorized schemas and warm-cache revoc
   ).toBeDisabled();
   await expect(editor).toHaveValue(invalidSource);
   await editor.fill(source);
-  await mutationResult(page, "saveGolOntology", () =>
+  const firstDraft = await mutationResult(page, "saveGolOntology", () =>
     page.getByRole("button", { name: "Save draft", exact: true }).click(),
   );
   const first = await publish(page);
@@ -289,19 +296,28 @@ test("GOL authoring, atomic generations, authorized schemas and warm-cache revoc
         "field title: String;\n    field archived: bool;",
       ),
     );
-    await mutationResult(page, "saveGolOntology", () =>
+    const secondDraft = await mutationResult(page, "saveGolOntology", () =>
       page.getByRole("button", { name: "Save draft", exact: true }).click(),
+    );
+    const secondSummary = object(secondDraft.summary);
+    expect(secondSummary.activeGeneration).toBe(firstGeneration);
+    expect(secondSummary.activeSourceRevision).toBe(
+      object(firstDraft.summary).sourceRevision,
     );
     const second = await publish(page);
     expect(second.generation).not.toBe(firstGeneration);
-    const pinned = await graphql(
+    // Only handles opened before activation can retain a retired generation.
+    const pinned = await graphqlEnvelope(
       viewer,
       "query($id:String!,$generation:String){golOntologySymbols(ontologyId:$id,generation:$generation){generation symbols{key name properties{name}}}}",
       { id: ontologyId, generation: firstGeneration },
     );
-    const pinnedProjection = object(pinned.golOntologySymbols);
-    expect(pinnedProjection.generation).toBe(firstGeneration);
-    expect(JSON.stringify(pinnedProjection)).not.toContain("archived");
+    expect(pinned.errors).toEqual([
+      expect.objectContaining({
+        extensions: expect.objectContaining({ code: "GOL_UNAVAILABLE" }),
+      }),
+    ]);
+    expect(pinned.data).toBeNull();
     await memberPage.reload();
     await selectMessage(memberPage);
     await expect(
