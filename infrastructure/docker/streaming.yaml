@@ -111,6 +111,7 @@ services:
     environment:
       UTILS_SERVICE_URL: http://127.0.0.1:8095
       GOL_WORKER_KEY_PATH: /run/gol-worker-secrets/worker-key
+      GOL_GATEWAY_ENDPOINT: http://127.0.0.1:8082
       UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
