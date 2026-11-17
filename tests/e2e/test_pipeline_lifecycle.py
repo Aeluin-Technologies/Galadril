@@ -1232,7 +1232,10 @@ async def _run_gateway_upload_lifecycle() -> None:
             runtime_definition = await registry.get_runtime_pipeline(
                 published_revision
             )
-            assert json.loads(runtime_definition) == _pipeline()
+            expected_runtime = _pipeline()
+            for step in require_sequence(expected_runtime["pipeline"], "steps"):
+                require_mapping(step, "bound step")["ontology_required"] = True
+            assert json.loads(runtime_definition) == expected_runtime
 
             print("E2E stage: awaiting Vision runtime", flush=True)
             await eventually(
