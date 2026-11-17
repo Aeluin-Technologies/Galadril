@@ -710,6 +710,7 @@ mod tests {
             pin: [0; 32],
             bytes: 100,
             etag: "\"fixture\"".into(),
+            provenance: None,
         };
         let response = storage.range("object", &artifact, 0, 64).await;
         if delay.is_zero() {

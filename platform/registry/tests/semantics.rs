@@ -1,6 +1,6 @@
 //! Pipeline graph checks remain independent of GOL language semantics.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use galadril_registry::semantics::validate_pipeline;
 use serde_json::json;
 
