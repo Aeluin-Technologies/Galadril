@@ -572,10 +572,18 @@ async def test_completed_replay_rechecks_transfer_without_reexecuting_effects() 
     await handler.handle(command)
     first_count = len(publisher.items)
     gate.allowed = False
-    assert await handler.handle(command) is None
+    with pytest.raises(GolDenied):
+        await handler.handle(command)
     assert len(publisher.items) == first_count
     assert dispatcher.calls == 1
     assert gate.calls > first_count
+    gate.allowed = True
+    await handler.handle(command)
+    # Replaying a completed claim emits successors without another RUNNING.
+    assert [item.topic for item in publisher.items[first_count:]] == [
+        item.topic for item in publisher.items[1:first_count]
+    ]
+    assert dispatcher.calls == 1
 
 
 @pytest.mark.anyio

@@ -493,15 +493,20 @@ async def seed_users() -> None:
         )
 
 
-def pipeline_execution_failure(
+class PipelineExecutionError(AssertionError):
+    """Reports a durable failure for a pipeline with retries disabled."""
+
+
+def require_pipeline_execution_not_failed(
     rows: Sequence[tuple[object, object, object]],
-) -> str | None:
-    """Returns the first durable step failure with its persisted reason."""
+) -> None:
+    """Raises the first durable step failure with its persisted reason."""
     for step, status, error in rows:
         if str(status) == "failed":
             reason = str(error) if error is not None else "unspecified error"
-            return f"{step}: {reason}"
-    return None
+            raise PipelineExecutionError(
+                f"Vision pipeline execution failed: {step}: {reason}"
+            )
 
 
 async def read_pipeline_state() -> DerivedPipelineState | None:
@@ -534,11 +539,9 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
             (TENANT_ID,),
         )
         outbox_row = await outbox_cursor.fetchone()
-    failure = pipeline_execution_failure(
+    require_pipeline_execution_not_failed(
         [(row[0], row[1], row[3]) for row in execution_rows]
     )
-    if failure is not None:
-        raise AssertionError(f"Vision pipeline execution failed: {failure}")
     if entity_row is None or outbox_row is None or int(outbox_row[0]) != 0:
         return None
     completed_steps = frozenset(

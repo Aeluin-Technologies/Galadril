@@ -27,7 +27,7 @@ from clients import (
     _vision_consumer_groups_have_members,
     _vision_consumers_ready,
     lineage_statuses_complete,
-    pipeline_execution_failure,
+    require_pipeline_execution_not_failed,
     statuses_by_step,
 )
 from environment import (
@@ -667,19 +667,18 @@ def test_eventually_bounds_one_stuck_observation() -> None:
 def test_eventually_propagates_terminal_pipeline_failure() -> None:
     """A durable step failure must not consume the entire lifecycle budget."""
 
-    class TerminalPipelineFailure(RuntimeError):
-        """Represents work that cannot recover without a new publication."""
-
     async def failed() -> None:
-        raise TerminalPipelineFailure("empirical_resolve: invalid candidate")
+        require_pipeline_execution_not_failed(
+            [("resolve", "failed", "Pipeline execution unavailable")]
+        )
 
     async def exercise() -> None:
-        with pytest.raises(TerminalPipelineFailure, match="empirical_resolve"):
+        with pytest.raises(e2e_clients.PipelineExecutionError, match="resolve"):
             await eventually(
                 failed,
                 timeout_seconds=1.0,
                 description="empirical pipeline",
-                abort_on=(TerminalPipelineFailure,),
+                abort_on=(e2e_clients.PipelineExecutionError,),
             )
 
     asyncio.run(exercise())
@@ -687,13 +686,14 @@ def test_eventually_propagates_terminal_pipeline_failure() -> None:
 
 def test_pipeline_failure_preserves_step_and_error() -> None:
     """Makes terminal actor failures actionable instead of timing out opaquely."""
-    assert (
-        pipeline_execution_failure(
+    with pytest.raises(
+        e2e_clients.PipelineExecutionError,
+        match="infer: model fixture unavailable",
+    ):
+        require_pipeline_execution_not_failed(
             [("infer", "failed", "model fixture unavailable")]
         )
-        == "infer: model fixture unavailable"
-    )
-    assert pipeline_execution_failure([("infer", "completed", None)]) is None
+    require_pipeline_execution_not_failed([("infer", "completed", None)])
 
 
 def test_tempo_service_names_read_otlp_resource_attributes() -> None:

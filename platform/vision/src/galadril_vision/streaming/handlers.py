@@ -339,7 +339,9 @@ class CommandHandler:
             return await self._handle(command)
         except GolDenied:
             logger.warning("gol.publication.denied", operation="command")
-            return None
+            # The consumer must retain delivery when a live release check
+            # fails. Replays reuse the durable result without repeating I/O.
+            raise
 
     async def _publish(
         self,
