@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, ensure};
 use galadril_ontology::archive::remote::RemoteArchive;
 use galadril_ontology::authorization::{
-    Access, Decision, Instance, Operation, Route,
+    Access, Decision, Flow, Instance, Operation, Route,
 };
 use galadril_ontology::export::{
     ExportOptions, ExportRequest, IntegerEncoding, SchemaPart,
@@ -52,6 +52,44 @@ struct Worker {
     expires: Instant,
 }
 
+/// Selects the deployment floor for one verified tenant and upload group.
+fn ingress_floor<'a>(
+    floors: &'a BTreeMap<String, Flow>,
+    tenant: &str,
+    group: &str,
+) -> Option<&'a Flow> {
+    floors.get(&format!("{tenant}/{group}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use galadril_ontology::Classification;
+
+    use super::*;
+
+    #[test]
+    fn ingress_floor_requires_the_exact_tenant_and_group() {
+        let public = Flow::new(Classification::Public);
+        let restricted = Flow::new(Classification::Restricted);
+        let floors = BTreeMap::from([
+            ("tenant_a/default".into(), public.clone()),
+            ("tenant_b/default".into(), restricted.clone()),
+            ("default".into(), public.clone()),
+        ]);
+
+        assert_eq!(
+            ingress_floor(&floors, "tenant_a", "default"),
+            Some(&public)
+        );
+        assert_eq!(
+            ingress_floor(&floors, "tenant_b", "default"),
+            Some(&restricted)
+        );
+        assert!(ingress_floor(&floors, "tenant_c", "default").is_none());
+        assert!(ingress_floor(&floors, "tenant_a", "other").is_none());
+    }
+}
+
 pub(super) struct Workers {
     entries: Mutex<BTreeMap<String, Arc<Worker>>>,
     permits: Permits,
@@ -81,11 +119,9 @@ impl GolService {
     ) -> Result<String> {
         let backend = self.backend()?;
         let actor = self.actor(tenant, user).await?;
-        let floor = backend
-            .profile
-            .ingress_floors
-            .get(group)
-            .context("GOL ingress channel is not approved")?;
+        let floor =
+            ingress_floor(&backend.profile.ingress_floors, tenant, group)
+                .context("GOL ingress channel is not approved")?;
         ensure!(
             source_object_id.starts_with(&format!("{tenant}/")),
             "GOL ingress scope unavailable"
