@@ -30,6 +30,20 @@ def test_every_pipeline_publication_names_its_bound_gol_contract() -> None:
         }
 
 
+def test_resolvers_name_their_gol_state_contract() -> None:
+    """The resolver cannot infer a state contract from a Kafka transfer key."""
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    resolvers = [step for step in config.pipeline if step.type == "resolve"]
+    assert len(resolvers) == 2
+    for step in resolvers:
+        assert (
+            step.params.model_dump().get("gol_state_symbol_key")
+            == "e2e.lifecycle::E2EEntity"
+        )
+
+
 def test_on_demand_causal_step_has_no_streaming_input() -> None:
     """The lifecycle dispatches causal work explicitly after collecting data."""
     config = PipelineConfig.model_validate(

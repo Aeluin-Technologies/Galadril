@@ -45,6 +45,7 @@ def pipeline_fixture(tenant_id: str, pipeline_id: str) -> dict[str, object]:
                 "type": "resolve",
                 "input_from": ["infer"],
                 "params": {
+                    "gol_state_symbol_key": "e2e.lifecycle::E2EEntity",
                     "gol_transfer_symbol_key": "e2e.lifecycle::E2EEntity",
                     "modality": "e2e",
                     "threshold": 0.85,
@@ -100,6 +101,7 @@ def pipeline_fixture(tenant_id: str, pipeline_id: str) -> dict[str, object]:
                 "type": "resolve",
                 "input_from": ["empirical_infer"],
                 "params": {
+                    "gol_state_symbol_key": "e2e.lifecycle::E2EEntity",
                     "gol_transfer_symbol_key": "e2e.lifecycle::E2EEntity",
                     "modality": "e2e",
                     "threshold": 0.85,
