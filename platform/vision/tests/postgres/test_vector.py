@@ -1,9 +1,12 @@
 """Unit tests targeting vector storage mappings, dimensionality filters, and similarity calculations."""
 
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import EntityEmbedding
 from galadril_vision.connectors.postgres.vector import VectorStore
@@ -277,6 +280,103 @@ async def test_store_embeddings_batch_processing(
 def anyio_backend() -> str:
     """Runs async contracts on the production asyncio backend."""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_vector_candidate_reads_require_shared_state_admission(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = VectorStore(client=mock_postgres_client, config=mock_config)
+    with pytest.raises(GolDenied):
+        await store.find_resolution_candidates([0.1] * 4, "text", "tenant-a", 3)
+    mock_postgres_client.tenant_connection.assert_not_called()
+
+
+@asynccontextmanager
+async def _unit_scope(**_kwargs: object) -> AsyncIterator[str]:
+    """Supplies a unit transport scope without claiming an authorization decision."""
+    yield "unit-receipt"
+
+
+@asynccontextmanager
+async def _unit_batch(
+    effects: list[GolEffect], **_kwargs: object
+) -> AsyncIterator[tuple[str, ...]]:
+    yield tuple("unit-receipt" for _ in effects)
+
+
+def _unit_state_effect(**kwargs: object) -> GolEffect:
+    return GolEffect.model_validate(
+        {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"tenant_id", "derived"}
+        }
+        | {"target": "tests.scope::Value"}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_vector_candidate_reads_require_shared_state_admission"
+    ):
+        yield
+        return
+    with (
+        patch(
+            "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
+            new=_unit_scope,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.vector.protected_gol_effects",
+            new=_unit_batch,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.vector.make_gol_state_effect",
+            new=_unit_state_effect,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_vector_sql_is_inside_the_live_effect_scope(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Read permission must remain bound while the SQL result is fetched."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(**_kwargs: object) -> AsyncIterator[str]:
+        nonlocal held
+        held = True
+        try:
+            yield "unit-receipt"
+        finally:
+            held = False
+
+    conn = _connection_mock()
+    cursor = AsyncMock()
+
+    async def execute(*_args: object) -> None:
+        assert held, "Vector SQL escaped its live permit"
+
+    cursor.execute.side_effect = execute
+    cursor.fetchone.return_value = (1,)
+    conn.cursor.return_value.__aenter__.return_value = cursor
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = conn
+    with patch(
+        "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
+        new=scope,
+        create=True,
+    ):
+        assert await VectorStore(
+            mock_postgres_client, mock_config
+        ).has_embeddings(tenant_id="tenant-a", modality=None)
+    assert not held
 
 
 if __name__ == "__main__":

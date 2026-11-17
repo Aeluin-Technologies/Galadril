@@ -19,24 +19,36 @@
 //! };
 //!
 //! async fn describe(
-//!     archive: &ArchiveReader<impl RangeReader>,
+//!     archive: &ArchiveReader<impl RangeReader + Sync>,
 //!     request: &ExportRequest<'_>,
-//!     runtime: &impl TrustedRuntime,
-//!     spicedb: &impl PermissionProvider,
+//!     runtime: &(impl TrustedRuntime + Sync),
+//!     spicedb: &(impl PermissionProvider + Sync),
 //! ) -> Result<SchemaDocument, ExportError> {
 //!     archive.export_schema(request, runtime, spicedb).await
 //! }
 //! ```
 
 mod build;
+mod describe;
 mod model;
 mod scalar;
 mod source;
+
+pub(crate) fn description_inventory(
+    bytes: &[u8],
+) -> Result<
+    (BTreeSet<Name>, BTreeMap<SymbolRef, bool>),
+    crate::archive::ArchiveError,
+> {
+    model::description_inventory(bytes)
+        .map_err(|_| crate::archive::ArchiveError::Invalid)
+}
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 
+pub use describe::{PropertyDescription, RoleDescription, SymbolDescription};
 use serde_json::Value;
 #[cfg(feature = "parser")]
 pub use source::ProjectExporter;
@@ -301,7 +313,7 @@ pub trait GolValidator {
         &self,
         target: &Access,
         proposal: &Value,
-    ) -> impl Future<Output = GolValidation>;
+    ) -> impl Future<Output = GolValidation> + Send;
 }
 
 fn access_for(
@@ -333,8 +345,8 @@ impl ProjectExporter<'_> {
     pub async fn export_schema(
         &self,
         request: &ExportRequest<'_>,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
     ) -> Result<SchemaDocument, ExportError> {
         build::export(self, request, runtime, provider)
             .await
@@ -347,9 +359,9 @@ impl ProjectExporter<'_> {
         &self,
         request: &ExportRequest<'_>,
         proposal: &Value,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
-        business: &impl GolValidator,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+        business: &(impl GolValidator + Sync),
     ) -> Result<(), ExportError> {
         let document = self.export_schema(request, runtime, provider).await?;
         build::submit(
@@ -366,13 +378,55 @@ impl ProjectExporter<'_> {
     }
 }
 
-impl<R: crate::archive::RangeReader> crate::archive::ArchiveReader<R> {
+impl<R: crate::archive::RangeReader + Sync> crate::archive::ArchiveReader<R> {
+    /// Validates a business instance using separately authorized schema
+    /// metadata. Metadata permissions cannot stand in for the instance's
+    /// write permissions.
+    pub async fn validate_proposal_for(
+        &self,
+        request: &ExportRequest<'_>,
+        proposal: &Value,
+        write: &Access,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+        business: &(impl GolValidator + Sync),
+    ) -> Result<(), ExportError> {
+        let root = &request.projection.root;
+        let owner = match &write.route.target {
+            crate::Reference::Symbol(symbol) => symbol,
+            crate::Reference::Field(field) => &field.owner,
+        };
+        if write.route.operation != Operation::Write ||
+            write.route.target != root.access.route.target ||
+            write.instance.tenant != root.access.instance.tenant ||
+            write.instance.owner != *owner ||
+            write.instance.id.is_empty()
+        {
+            return Err(ExportError::Unavailable);
+        }
+        let document = self.export_schema(request, runtime, provider).await?;
+        let selection = Selection::new(
+            Access {
+                route: write.route.clone(),
+                instance: write.instance.clone(),
+                destination: write.destination.clone(),
+                purpose: write.purpose.clone(),
+            },
+            root.fields.clone(),
+        )?;
+        build::submit(
+            self, &document, &selection, proposal, runtime, provider, business,
+        )
+        .await
+        .map_err(record_error)
+    }
+
     /// Generates a bounded schema from the pinned archive without a parser.
     pub async fn export_schema(
         &self,
         request: &ExportRequest<'_>,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
     ) -> Result<SchemaDocument, ExportError> {
         build::export(self, request, runtime, provider)
             .await
@@ -384,9 +438,9 @@ impl<R: crate::archive::RangeReader> crate::archive::ArchiveReader<R> {
         &self,
         request: &ExportRequest<'_>,
         proposal: &Value,
-        runtime: &impl TrustedRuntime,
-        provider: &impl PermissionProvider,
-        business: &impl GolValidator,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+        business: &(impl GolValidator + Sync),
     ) -> Result<(), ExportError> {
         let document = self.export_schema(request, runtime, provider).await?;
         build::submit(

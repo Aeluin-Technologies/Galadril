@@ -10,7 +10,5 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/ontology/src/galadril_ontology",
-        "//platform/registry/python/galadril_registry_api",
-        "@pip//orjson",
     ],
 )

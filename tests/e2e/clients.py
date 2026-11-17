@@ -54,7 +54,7 @@ TENANT_ID = "debug_tenant"
 UPLOADER_ID = "e2e_uploader"
 OUTSIDER_ID = "e2e_outsider"
 PIPELINE_ID = "e2e_pipeline"
-ONTOLOGY_ID = "e2e_ontology"
+ONTOLOGY_ID = "e2e.lifecycle"
 GATEWAY_URL = "https://127.0.0.1:18080/graphql"
 REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
@@ -76,14 +76,6 @@ def gateway_tls_context() -> ssl.SSLContext:
     return ssl.create_default_context(
         cadata=identity_files()["identity/gateway/ca.pem"].decode("ascii")
     )
-
-
-class _Revision(Protocol):
-    revision_id: str
-
-
-class _Binding(Protocol):
-    head_revision_id: str
 
 
 class _RuntimePipeline(Protocol):
@@ -259,23 +251,13 @@ def _serialize(message: object) -> bytes:
     return cast(bytes, cast(Message, message).SerializeToString())
 
 
-def _ontology_revision(data: bytes) -> object:
-    """Deserializes one Registry ontology revision."""
-    return registry_pb2.OntologyRevision.FromString(data)
-
-
-def _binding(data: bytes) -> object:
-    """Deserializes one Registry binding response."""
-    return registry_pb2.OntologyBinding.FromString(data)
-
-
 def _pipeline(data: bytes) -> object:
     """Deserializes one Registry runtime pipeline."""
     return registry_pb2.Pipeline.FromString(data)
 
 
 class RegistryFixtures:
-    """Authors prerequisites absent from Gateway's current public schema."""
+    """Reads pipeline pins; ontology writes always pass through Gateway."""
 
     __slots__ = ("_channel",)
 
@@ -291,55 +273,6 @@ class RegistryFixtures:
     async def close(self) -> None:
         """Closes the Registry HTTP/2 channel."""
         await self._channel.close()
-
-    async def put_ontology(self, ontology_json: bytes) -> str:
-        """Creates the ontology revision required by pipeline bindings."""
-        response = cast(
-            _Revision,
-            await self._channel.unary_unary(
-                "/galadril.registry.v1.Registry/PutOntology",
-                request_serializer=_serialize,
-                response_deserializer=_ontology_revision,
-            )(
-                registry_pb2.PutOntologyRequest(
-                    tenant_id=TENANT_ID,
-                    ontology_id=ONTOLOGY_ID,
-                    display_name="E2E ontology",
-                    ontology_json=ontology_json,
-                    author=UPLOADER_ID,
-                    message="Seed E2E ontology",
-                    create_only=True,
-                )
-            ),
-        )
-        return response.revision_id
-
-    async def put_binding(
-        self, *, block_id: str, expected_revision_id: str
-    ) -> str:
-        """Binds one pipeline block and returns the resulting immutable head."""
-        response = cast(
-            _Binding,
-            await self._channel.unary_unary(
-                "/galadril.registry.v1.Registry/PutBinding",
-                request_serializer=_serialize,
-                response_deserializer=_binding,
-            )(
-                registry_pb2.PutBindingRequest(
-                    tenant_id=TENANT_ID,
-                    expected_revision_id=expected_revision_id,
-                    binding=registry_pb2.OntologyBinding(
-                        pipeline_id=PIPELINE_ID,
-                        block_id=block_id,
-                        ontology_id=ONTOLOGY_ID,
-                        resource_ids=["object.entity"],
-                        include_dependencies=True,
-                        metadata_json=b"{}",
-                    ),
-                )
-            ),
-        )
-        return response.head_revision_id
 
     async def get_runtime_pipeline(self, revision_id: str) -> bytes:
         """Verifies the exact revision Vision will resolve at startup."""
@@ -514,7 +447,7 @@ class SpiceDBProbe:
 
 
 async def seed_users() -> None:
-    """Creates both test identities in Gateway's authoritative directory."""
+    """Provisions fixture identities and explicit clearances independently of roles."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
     ) as connection:
@@ -524,6 +457,28 @@ async def seed_users() -> None:
             VALUES (%s, %s), (%s, %s), (%s, %s), (%s, %s)
             ON CONFLICT (tenant_id, user_id) DO UPDATE
             SET is_active = TRUE, deleted_at = NULL, updated_at = NOW()
+            """,
+            (
+                TENANT_ID,
+                UPLOADER_ID,
+                TENANT_ID,
+                OUTSIDER_ID,
+                "isolated_e2e_tenant",
+                UPLOADER_ID,
+                "other_tenant",
+                UPLOADER_ID,
+            ),
+        )
+
+        await connection.execute(
+            """
+            INSERT INTO iam_ifc_clearances (tenant_id, user_id, classification, compartments)
+            VALUES (%s, %s, 3, ARRAY['Legal','Mailbox']),
+                   (%s, %s, 0, ARRAY[]::TEXT[]),
+                   (%s, %s, 3, ARRAY['Legal','Mailbox']),
+                   (%s, %s, 3, ARRAY['Legal','Mailbox'])
+            ON CONFLICT (tenant_id, user_id) DO UPDATE
+            SET classification=EXCLUDED.classification, compartments=EXCLUDED.compartments
             """,
             (
                 TENANT_ID,

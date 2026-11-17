@@ -25,6 +25,54 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_gol_workload_key_is_private_to_gateway_and_vision(self) -> None:
+        for filename, service in (
+            ("dashboard.yaml", "gateway"),
+            ("streaming.yaml", "vision"),
+        ):
+            configuration = mapping(services(filename)[service])
+            environment = mapping(configuration["environment"])
+            self.assertEqual(
+                environment["GOL_WORKER_KEY_PATH"],
+                "/run/gol-worker-secrets/worker-key",
+            )
+            mounts = configuration["volumes"]
+            self.assertTrue(
+                any(
+                    isinstance(mount, dict)
+                    and mount.get("target")
+                    == "/run/gol-worker-secrets/worker-key"
+                    for mount in mounts
+                )
+            )
+        registry = mapping(services("streaming.yaml")["registry"])
+        self.assertNotIn(
+            "GOL_WORKER_KEY_PATH", mapping(registry["environment"])
+        )
+
+    def test_gol_compiler_and_gateway_share_explicit_approved_artifacts(
+        self,
+    ) -> None:
+        for filename, service in (
+            ("streaming.yaml", "registry"),
+            ("dashboard.yaml", "gateway"),
+        ):
+            configuration = mapping(services(filename)[service])
+            environment = mapping(configuration["environment"])
+            self.assertEqual(
+                environment["GOL_ARTIFACT_BUCKET"], "ontology-artifacts"
+            )
+            self.assertEqual(
+                environment["GOL_AUTHORITY_CONFIG_PATH"],
+                "/etc/galadril/gol-authorities.json",
+            )
+            self.assertTrue(
+                any(
+                    "gol-authorities.json:ro" in path
+                    for path in configuration["volumes"]
+                )
+            )
+
     def test_mcp_image_is_published_by_the_ci_entrypoint(self) -> None:
         publication = (ROOT.parents[1] / "build/multirun.bzl").read_text()
         self.assertIn('"//services/mcp:push"', publication)

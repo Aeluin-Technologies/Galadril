@@ -1114,7 +1114,7 @@ def test_gateway_signing_keys_are_owned_by_hydra() -> None:
 def test_gateway_security_limits_are_explicit_in_bootstrap_fixture() -> None:
     """Keeps denial thresholds deterministic across local and remote runners."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
-    assert "max_body_bytes: 4096" in connectors
+    assert "max_body_bytes: 65536" in connectors
     assert "max_graphql_depth: 8" in connectors
 
 
@@ -1159,6 +1159,11 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         "proxy/envoy.yaml",
         "proxy/error-page.lua",
         "application/connectors.yaml",
+        "application/gol-authorities.json",
+        "application/gol-runtime.json",
+        "gol-secrets/gol-effect-key",
+        "registry-secrets/gateway-key",
+        "worker-secrets/worker-key",
         "application/s3-notifications.yaml",
         "observability/otel-collector.yaml",
         "observability/tempo.yaml",
@@ -1169,6 +1174,45 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         "database/010-init-spicedb.sh",
         "database/020-init-galadril-roles.sh",
     } <= names
+
+
+def test_gol_effect_receipts_use_an_isolated_ephemeral_key() -> None:
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as first:
+        first_key = first.extractfile("gol-secrets/gol-effect-key")
+        assert first_key is not None
+        key = first_key.read()
+        assert len(key) == 32
+        source_channel = first.extractfile("registry-secrets/gateway-key")
+        assert source_channel is not None
+        source_key = source_channel.read()
+        assert len(source_key) == 32 and source_key != key
+        worker_file = first.extractfile("worker-secrets/worker-key")
+        assert worker_file is not None
+        worker_key = worker_file.read()
+        assert len(worker_key) == 32 and worker_key not in (key, source_key)
+
+        profile_file = first.extractfile("application/gol-authorities.json")
+        assert profile_file is not None
+        profile = json.load(profile_file)
+        assert "location" not in profile["cedar_context"]
+        assert "context.hour_utc" in profile["cedar_policies"]
+        runtime_file = first.extractfile("application/gol-runtime.json")
+        assert runtime_file is not None
+        runtime = json.load(runtime_file)
+        assert set(runtime["ingress_floors"]) == {
+            f"debug_tenant/{group}"
+            for group in ("default", "sales", "returns", "trial")
+        }
+        assert runtime["shared_state_floor"]["classification"] == "Restricted"
+
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as second:
+        second_key = second.extractfile("gol-secrets/gol-effect-key")
+        assert second_key is not None
+        assert second_key.read() != key
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    assert compose.count("source: e2e-gol-secrets") == 1
+    assert compose.count("source: e2e-registry-secrets") == 2
+    assert compose.count("source: e2e-worker-secrets") == 2
 
 
 def test_spicedb_probe_allowed_supports_canonical_resources() -> None:

@@ -52,6 +52,71 @@ use galadril_ontology::authorization::{
 use sha2::{Digest, Sha256};
 
 #[test]
+fn shared_cedar_actions_retain_each_approved_resource_type()
+-> fixture::TestResult {
+    let project = fixture::project(0, false)?;
+    let mut environment = fixture::environment(&project)?;
+    let cedar = environment.cedar.as_mut().ok_or("Cedar authority")?;
+    let mut resources = cedar.resources.values_mut();
+    let action = resources
+        .next()
+        .and_then(|resource| resource.actions.first())
+        .ok_or("action")?
+        .clone();
+    resources
+        .next()
+        .ok_or("second resource")?
+        .actions
+        .insert(action);
+    let compiled = compile(&project, &environment);
+    assert!(compiled.publishable().is_some(), "{:?}", compiled.issues());
+    Ok(())
+}
+
+#[test]
+fn archive_authority_pins_are_available_for_independent_host_verification()
+-> fixture::TestResult {
+    let project = fixture::project(0, false)?;
+    let environment = fixture::environment(&project)?;
+    let compilation = compile(&project, &environment);
+    let contract = compilation.publishable().ok_or("security contract")?;
+    assert!(contract.flows().len() > 0);
+    assert!(
+        contract
+            .flows()
+            .all(|(target, flow)| contract.flow(target) == Some(flow))
+    );
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    assert_eq!(reader.versions(), contract.versions());
+    Ok(())
+}
+
+#[tokio::test]
+async fn host_requirements_preserve_the_compiled_root_and_prerequisites()
+-> fixture::TestResult {
+    let project = fixture::project(0, false)?;
+    let environment = fixture::environment(&project)?;
+    let compilation = compile(&project, &environment);
+    let contract = compilation.publishable().ok_or("security contract")?;
+    let (route, descriptor) = contract.routes().next().ok_or("route")?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let requirements = reader.requirements(route).await?;
+    assert_eq!(
+        requirements.get(route).ok_or("root")?.flow(),
+        descriptor.flow()
+    );
+    assert!(
+        descriptor
+            .dependencies()
+            .iter()
+            .all(|route| requirements.contains_key(route))
+    );
+    Ok(())
+}
+
+#[test]
 fn deserialization_preserves_canonical_identifier_validation() {
     use galadril_ontology::{Name, QualifiedName};
 
@@ -94,6 +159,153 @@ impl PermissionProvider for All {
     async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
         PermissionOutcome::Allow(request.consistency.clone())
     }
+}
+
+struct Refuse;
+impl PermissionProvider for Refuse {
+    async fn check(&self, _request: PermissionCheck<'_>) -> PermissionOutcome {
+        PermissionOutcome::Deny
+    }
+}
+
+#[tokio::test]
+async fn invariant_contracts_are_explicit_even_without_predicates()
+-> fixture::TestResult {
+    let project = fixture::project(0, false)?;
+    let environment = fixture::environment(&project)?;
+    let compilation = compile(&project, &environment);
+    let security = compilation.publishable().ok_or("security contract")?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let request = fixture::access(
+        &project,
+        "Document",
+        None,
+        "document",
+        Operation::Read,
+    )?;
+    let contract = reader
+        .invariant_contract(&request, &fixture::runtime(security), &All)
+        .await
+        .ok_or("explicit invariant contract")?;
+    assert_eq!(contract.owner(), &request.instance.owner);
+    assert!(contract.predicates().is_empty());
+    assert!(
+        reader
+            .invariant_contract(&request, &fixture::runtime(security), &Refuse)
+            .await
+            .is_none()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn invariant_contracts_normalize_aliases_and_reject_tampered_blocks()
+-> fixture::TestResult {
+    use galadril_ontology::validation::{Bindings, Error, Limits, Scalar};
+    use galadril_ontology::{FieldRef, Name, Primitive, TypeRef};
+
+    struct Proposed<'a>(&'a str);
+    impl Bindings for Proposed<'_> {
+        fn field<'a>(
+            &'a self,
+            base: Option<&galadril_ontology::checked::Checked>,
+            path: &[FieldRef],
+            expected: &TypeRef,
+        ) -> Result<Scalar<'a>, Error> {
+            if base.is_none() &&
+                path.len() == 1 &&
+                path.first()
+                    .is_some_and(|field| field.name.as_str() == "title") &&
+                *expected == TypeRef::Primitive(Primitive::String)
+            {
+                Ok(Scalar::String(self.0))
+            } else {
+                Err(Error::MissingBinding)
+            }
+        }
+
+        fn context<'a>(
+            &'a self,
+            _name: &Name,
+            _expected: &TypeRef,
+        ) -> Result<Scalar<'a>, Error> {
+            Err(Error::MissingBinding)
+        }
+    }
+
+    let documents = include_str!("fixtures/archive_documents.gol")
+        .replace("field title: String", "field title: Title")
+        .replace(
+            "    entity Document {",
+            "    type Title = String;\n    invariant Nonempty on Document { title != \"\" }\n    entity Document {",
+        );
+    let sources = [
+        parse_source("documents.gol", &documents)?,
+        parse_source(
+            "organization.gol",
+            include_str!("fixtures/archive_organization.gol"),
+        )?,
+        parse_source("mail.gol", include_str!("fixtures/archive_mail.gol"))?,
+        parse_source(
+            "observations.gol",
+            include_str!("fixtures/archive_observations.gol"),
+        )?,
+    ];
+    let registry = ExternalTypeRegistry::default();
+    let mut input = Environment::new(&registry);
+    for (name, ty) in [
+        ("hour", Primitive::I64),
+        ("region", Primitive::String),
+        ("mfa", Primitive::Bool),
+    ] {
+        input.context.insert(name.parse()?, ty)?;
+    }
+    let project = analyze_project(&sources, &input)?;
+    let environment = fixture::environment(&project)?;
+    let compilation = compile(&project, &environment);
+    let security = compilation.publishable().ok_or("security contract")?;
+    let archive = compile_archive(&project, &environment)?;
+    let trace = Trace::default();
+    let reader = ArchiveReader::open(
+        Observed(archive.bytes(), trace.clone()),
+        archive.pin(),
+    )?;
+    let request = fixture::access(
+        &project,
+        "Document",
+        None,
+        "document",
+        Operation::Read,
+    )?;
+    trace.take()?;
+    let contract = reader
+        .invariant_contract(&request, &fixture::runtime(security), &All)
+        .await
+        .ok_or("invariant contract")?;
+    assert_eq!(contract.predicates().len(), 1);
+    contract.check(&Proposed("allowed"), Limits::default())?;
+    assert_eq!(
+        contract.check(&Proposed(""), Limits::default()),
+        Err(Error::Violation)
+    );
+
+    let reads = trace.take()?;
+    let (offset, length) = reads.last().copied().ok_or("contract range")?;
+    let mut tampered = archive.bytes().to_vec();
+    let index = usize::try_from(offset)?
+        .checked_add(length.saturating_sub(1))
+        .ok_or("contract offset")?;
+    let byte = tampered.get_mut(index).ok_or("contract byte")?;
+    *byte ^= 1;
+    let reader = ArchiveReader::open(tampered.as_slice(), archive.pin())?;
+    assert!(
+        reader
+            .invariant_contract(&request, &fixture::runtime(security), &All)
+            .await
+            .is_none()
+    );
+    Ok(())
 }
 
 #[tokio::test]

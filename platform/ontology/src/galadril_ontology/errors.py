@@ -1,15 +1,13 @@
-"""Domain exceptions for ontology wire and runtime compatibility failures."""
-
-from __future__ import annotations
+"""Bounded failures do not reveal protected resource metadata."""
 
 
-class OntologyError(Exception):
-    """Base exception for ontology domain failures."""
+class GolError(Exception):
+    """The admitted GOL operation could not be completed."""
 
 
-class OntologyNotFoundError(OntologyError):
-    """Fails closed when a tenant-scoped ontology object is unavailable."""
+class GolDenied(GolError):
+    """An authority or provenance obligation was not satisfied."""
 
 
-class OntologyCompatibilityError(OntologyError):
-    """Raised when an ontology slice cannot satisfy a processing block."""
+class GolUnavailable(GolError):
+    """No usable immutable runtime projection or decision was available."""

@@ -9,7 +9,13 @@ from typing import Annotated, cast
 import httpx
 import orjson
 import structlog
-from galadril_ontology import active_ontology_slice
+from galadril_ontology import (
+    GolDenied,
+    GolEffect,
+    active_gol_lease,
+    protected_gol_effects,
+    scoped_instance_id,
+)
 from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
 from opentelemetry import trace
@@ -170,98 +176,174 @@ class MemorySink:
         features: list[
             tuple[str, tuple[Fact, ...], str, tuple[float, ...]]
         ] = []
-        ontology = active_ontology_slice()
-        if (
-            ontology is not None
-            and ontology.metadata.tenant_id != command.tenant_id
-        ):
+        ontology = active_gol_lease()
+        if ontology is not None and ontology.tenant_id != command.tenant_id:
             raise ValueError("Evidence ontology tenant mismatch")
-        for start in range(0, len(units), 8):
-            batch = units[start : start + 8]
-            extracted = Extracted.model_validate_json(
-                await self._operation(
-                    "extract",
-                    {
-                        "passages": cast(list[JsonValue], batch),
-                        "ontology": ontology.model_dump(mode="json")
-                        if ontology is not None
-                        else None,
-                    },
-                )
+        if ontology is None or not ontology.symbols:
+            raise GolDenied(
+                "Evidence processing requires an admitted GOL calculation"
             )
-            embedded = Embedded.model_validate_json(
-                await self._operation(
-                    "embed", {"texts": [unit["text"] for unit in batch]}
-                )
+        transfers = tuple(
+            GolEffect(
+                operation="transfer",
+                target=symbol.key,
+                destination="llm",
+                purpose="extraction",
             )
-            facts = {
-                passage.id: passage.facts for passage in extracted.passages
+            for symbol in ontology.symbols
+        )
+        async with protected_gol_effects(
+            transfers, tenant_id=command.tenant_id
+        ):
+            projection = ontology.projection().model_dump(mode="json")
+            for start in range(0, len(units), 8):
+                batch = units[start : start + 8]
+                extracted = Extracted.model_validate_json(
+                    await self._operation(
+                        "extract",
+                        {
+                            "passages": cast(list[JsonValue], batch),
+                            "ontology": projection,
+                        },
+                    )
+                )
+                embedded = Embedded.model_validate_json(
+                    await self._operation(
+                        "embed", {"texts": [unit["text"] for unit in batch]}
+                    )
+                )
+                facts = {
+                    passage.id: passage.facts for passage in extracted.passages
+                }
+                if (
+                    len(facts) != len(batch)
+                    or set(facts) != {unit["id"] for unit in batch}
+                    or len(embedded.vectors) != len(batch)
+                ):
+                    raise ValueError("Evidence inference source mismatch")
+                features.extend(
+                    (unit["id"], facts[unit["id"]], embedded.profile_id, vector)
+                    for unit, vector in zip(
+                        batch, embedded.vectors, strict=True
+                    )
+                )
+        parameters = step.params.model_extra or {}
+        derived_target = parameters.get("gol_derived_symbol_key")
+        derived_symbol = (
+            ontology.symbol(derived_target)
+            if isinstance(derived_target, str)
+            else None
+        )
+        if derived_symbol is None:
+            raise GolDenied(
+                "Evidence indexing requires an explicit derived GOL target"
+            )
+        derived_target = derived_symbol.key
+        unit_ids = {
+            unit["id"]: scoped_instance_id("memory:" + unit["id"])
+            for unit in units
+        }
+        values = tuple(
+            {
+                "source_id": record_id,
+                "facts": [fact.model_dump(mode="json") for fact in facts],
             }
-            if (
-                len(facts) != len(batch)
-                or set(facts) != {unit["id"] for unit in batch}
-                or len(embedded.vectors) != len(batch)
+            for _, facts, _, _ in features
+        )
+        writes = tuple(
+            GolEffect(
+                operation="write",
+                target=derived_target,
+                destination="eskg",
+                purpose="persistence",
+                proposal=value,
+                instance_id=unit_ids[unit_id],
+            )
+            for (unit_id, _, _, _), value in zip(features, values, strict=True)
+        )
+        if not writes:
+            return {**command.payload, "indexed_units": 0}
+        async with protected_gol_effects(
+            writes, tenant_id=command.tenant_id
+        ) as receipts:
+            unit_proofs: dict[str, dict[str, JsonValue]] = {}
+            for (unit_id, _, _, _), value, receipt in zip(
+                features, values, receipts, strict=True
             ):
-                raise ValueError("Evidence inference source mismatch")
-            features.extend(
-                (unit["id"], facts[unit["id"]], embedded.profile_id, vector)
-                for unit, vector in zip(batch, embedded.vectors, strict=True)
+                if not receipt:
+                    raise GolDenied("Evidence effect receipt unavailable")
+                unit_proofs[unit_id] = {
+                    "gol_value": value,
+                    "gol_receipt": receipt,
+                    "gol_instance_id": unit_ids[unit_id],
+                }
+            metadata["gol_provenance"] = {
+                "ontology_id": derived_symbol.key.partition("::")[0],
+                "ontology_version": derived_symbol.version,
+                "source_revision": ontology.source_revision,
+                "generation_id": ontology.generation_id,
+                "symbol_key": derived_target,
+                "context_id": ontology.context_id,
+            }
+            client, _, _ = await get_pg_stores(
+                self._config.postgres, self._state
             )
-        client, _, _ = await get_pg_stores(self._config.postgres, self._state)
-        pipeline = (
-            step.origin.pipeline_id
-            if step.origin
-            else self._config.ontology_pipeline_id
-        )
-        revision = (
-            step.origin.revision_id
-            if step.origin
-            else self._config.runtime_revision_id
-        )
-        if not pipeline or not revision:
-            raise ValueError("Evidence requires a published pipeline revision")
-        rows = [
-            (
-                command.tenant_id,
-                record_id,
-                unit["id"],
-                f"evt_{record_id}",
-                event_time,
-                checksum,
-                unit["text"],
-                orjson.dumps(metadata).decode(),
-                orjson.dumps([fact.model_dump() for fact in facts]).decode(),
-                profile,
-                list(vector),
-                pipeline,
-                revision,
+            pipeline = (
+                step.origin.pipeline_id
+                if step.origin
+                else self._config.ontology_pipeline_id
             )
-            for unit, (_, facts, profile, vector) in zip(
-                units, features, strict=True
+            revision = (
+                step.origin.revision_id
+                if step.origin
+                else self._config.runtime_revision_id
             )
-        ]
-        async with client.tenant_connection(command.tenant_id) as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute(
-                    "DELETE FROM pipeline_evidence WHERE tenant_id=%s AND source_id=%s AND NOT(unit_id=ANY(%s))",
-                    (
-                        command.tenant_id,
-                        record_id,
-                        [unit["id"] for unit in units],
-                    ),
+            if not pipeline or not revision:
+                raise ValueError(
+                    "Evidence requires a published pipeline revision"
                 )
-                await cursor.executemany(
-                    """
-                    INSERT INTO pipeline_evidence(tenant_id,source_id,unit_id,event_id,event_time,checksum,text,metadata,facts,profile_id,embedding,pipeline_id,revision_id)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s)
-                    ON CONFLICT(tenant_id,source_id,unit_id) DO UPDATE SET
-                      checksum=EXCLUDED.checksum,text=EXCLUDED.text,metadata=EXCLUDED.metadata,
-                      facts=EXCLUDED.facts,profile_id=EXCLUDED.profile_id,embedding=EXCLUDED.embedding,
-                      pipeline_id=EXCLUDED.pipeline_id,revision_id=EXCLUDED.revision_id,updated_at=now()
-                """,
-                    rows,
+            # PostgreSQL requires a hex digest. Preserve the original GOL
+            # instance separately so its receipt can be verified on reads.
+            rows = [
+                (
+                    command.tenant_id,
+                    record_id,
+                    hashlib.sha256(unit_ids[unit["id"]].encode()).hexdigest(),
+                    scoped_instance_id(f"evt_{record_id}"),
+                    event_time,
+                    checksum,
+                    unit["text"],
+                    orjson.dumps(
+                        {**metadata, **unit_proofs[unit["id"]]}
+                    ).decode(),
+                    orjson.dumps(
+                        [fact.model_dump() for fact in facts]
+                    ).decode(),
+                    profile,
+                    list(vector),
+                    pipeline,
+                    revision,
                 )
-        structlog.get_logger(__name__).info(
-            "pipeline.memory.indexed", units=len(rows)
-        )
-        return {**command.payload, "indexed_units": len(rows)}
+                for unit, (_, facts, profile, vector) in zip(
+                    units, features, strict=True
+                )
+            ]
+            async with client.tenant_connection(
+                command.tenant_id
+            ) as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.executemany(
+                        """
+                        INSERT INTO pipeline_evidence(tenant_id,source_id,unit_id,event_id,event_time,checksum,text,metadata,facts,profile_id,embedding,pipeline_id,revision_id)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s)
+                        ON CONFLICT(tenant_id,source_id,unit_id) DO UPDATE SET
+                          checksum=EXCLUDED.checksum,text=EXCLUDED.text,metadata=EXCLUDED.metadata,
+                          facts=EXCLUDED.facts,profile_id=EXCLUDED.profile_id,embedding=EXCLUDED.embedding,
+                          pipeline_id=EXCLUDED.pipeline_id,revision_id=EXCLUDED.revision_id,updated_at=now()
+                    """,
+                        rows,
+                    )
+            structlog.get_logger(__name__).info(
+                "pipeline.memory.indexed", units=len(rows)
+            )
+            return {**command.payload, "indexed_units": len(rows)}

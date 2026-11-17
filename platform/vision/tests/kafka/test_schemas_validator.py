@@ -287,5 +287,43 @@ def test_event_normalizer_preserves_li_eskg_observation_contract() -> None:
     assert record.spatial.covariance == (1.0, 0.0, 0.0, 1.0)
 
 
+def test_gol_admission_is_preserved_separately_from_model_payloads() -> None:
+    authz = {**_trusted_authz("tenant-a"), "gol_admission": "server-admission"}
+    payload = {
+        "id": "observation",
+        "tenant_id": "tenant-a",
+        "source": "input",
+        "storage_path": "s3://lake/tenant-a/source/object",
+        "authz": authz,
+    }
+    record = CanonicalRecord.model_validate(
+        EventNormalizer.normalize(payload, "text_source")
+    )
+    assert record.admission == "server-admission"
+    assert "admission" not in record.model_dump()
+    assert "gol_admission" not in record.raw_payload["authz"]
+    assert authz["gol_admission"] == "server-admission"
+
+
+def test_gol_admission_rejects_unbounded_handles_and_wrong_source_object() -> (
+    None
+):
+    for handle, uri in (
+        ("x" * 4097, "s3://lake/tenant-a/source/object"),
+        ("server-admission", "s3://lake/tenant-a/source/different"),
+    ):
+        payload = {
+            "id": "o",
+            "tenant_id": "tenant-a",
+            "source": "input",
+            "storage_path": uri,
+            "authz": {**_trusted_authz("tenant-a"), "gol_admission": handle},
+        }
+        with pytest.raises(ValueError):
+            CanonicalRecord.model_validate(
+                EventNormalizer.normalize(payload, "text_source")
+            )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

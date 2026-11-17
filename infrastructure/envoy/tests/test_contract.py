@@ -24,6 +24,74 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_local_gol_runtime_routes_are_exact_post_only(self) -> None:
+        configuration = yaml.safe_load((ROOT / "local.yaml").read_text())
+        listener = next(
+            item
+            for item in configuration["static_resources"]["listeners"]
+            if item["name"] == "egress_tools"
+        )
+        manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
+        routes = manager["route_config"]["virtual_hosts"][0]["routes"]
+        for path in ("/internal/gol/runtime", "/internal/gol/effect"):
+            route = next(
+                item for item in routes if item["match"].get("path") == path
+            )
+            self.assertEqual(
+                route["match"]["headers"],
+                [{"name": ":method", "string_match": {"exact": "POST"}}],
+            )
+            self.assertEqual(route["route"]["cluster"], "gateway_tools")
+
+    def test_only_gateway_can_resolve_gol_bindings(self) -> None:
+        method = "/galadril.registry.v1.Registry/GetGolBinding"
+        for filename in ("registry.yaml", "local.yaml"):
+            config = yaml.safe_load((ROOT / filename).read_text())
+            grants = []
+            for listener in config["static_resources"]["listeners"]:
+                for chain in listener.get("filter_chains", []):
+                    for item in chain["filters"]:
+                        for http_filter in item.get("typed_config", {}).get(
+                            "http_filters", []
+                        ):
+                            rules = http_filter.get("typed_config", {}).get(
+                                "rules", {}
+                            )
+                            if isinstance(rules, dict):
+                                for policy in rules.get(
+                                    "policies", {}
+                                ).values():
+                                    if method not in json.dumps(policy):
+                                        continue
+                                    if policy["principals"] == [{"any": True}]:
+                                        # Local workloads share a proxy namespace; Registry
+                                        # separately requires the Gateway-only credential.
+                                        self.assertEqual(filename, "local.yaml")
+                                        self.assertEqual(
+                                            listener["address"][
+                                                "socket_address"
+                                            ]["address"],
+                                            "127.0.0.1",
+                                        )
+                                    else:
+                                        grants.append(policy)
+            self.assertTrue(grants, filename)
+            self.assertTrue(
+                all(
+                    "spiffe://galadril/gateway"
+                    in json.dumps(policy["principals"])
+                    for policy in grants
+                )
+            )
+            self.assertTrue(
+                all(
+                    "spiffe://galadril/vision"
+                    not in json.dumps(policy["principals"])
+                    for policy in grants
+                )
+            )
+            self.assertNotIn("GetOntologySlice", (ROOT / filename).read_text())
+
     def test_workspace_oauth_cannot_authenticate_graphql_or_the_native_grant_route(
         self,
     ) -> None:

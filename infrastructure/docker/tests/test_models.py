@@ -220,6 +220,21 @@ class ComposeModelTest(unittest.TestCase):
         environment = cast(dict[str, str], fixture["gateway"]["environment"])
         self.assertEqual(environment["SCRIBE__ENABLED"], "true")
 
+    def test_vision_uses_shared_loopback_for_private_gol_requests(self) -> None:
+        """Keeps the GOL worker channel on Envoy's loopback-only listener."""
+        for path in (
+            "infrastructure/docker/docker-compose.yaml",
+            "tests/e2e/environment/compose.yaml",
+        ):
+            with self.subTest(path=path):
+                vision = model(path)["vision"]
+                environment = cast(dict[str, str], vision["environment"])
+                self.assertEqual(vision["network_mode"], "service:api-proxy")
+                self.assertEqual(
+                    environment.get("GOL_GATEWAY_ENDPOINT"),
+                    "http://127.0.0.1:8082",
+                )
+
     def test_proxy_settings_and_application_isolation_are_shared(self) -> None:
         shipped = model("infrastructure/docker/docker-compose.yaml")
         fixture = model("tests/e2e/environment/compose.yaml")

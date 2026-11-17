@@ -36,13 +36,15 @@ py_test(
     srcs = ["test_streaming_handlers.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
-        "//platform/vision/src/galadril_vision/streaming",
+        "//platform/vision/src/galadril_vision/streaming:core",
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//pytest",
+        "@pip//anyio",  # keep: async pytest contracts run on the production event loop
     ],
 )
 
@@ -53,7 +55,8 @@ py_test(
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/vision/src/galadril_vision/streaming",
+        "//platform/vision/src/galadril_vision/streaming:core",
         "@pip//pytest",
+        "@pip//anyio",  # keep: async pytest contracts run on the production event loop
     ],
 )

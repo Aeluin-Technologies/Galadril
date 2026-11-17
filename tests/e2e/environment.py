@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import os
+import secrets
 import signal
 import tarfile
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -36,6 +37,9 @@ _CONFIG_CATEGORIES = (
     "database",
     "proxy",
     "hydra",
+    "gol-secrets",
+    "registry-secrets",
+    "worker-secrets",
 )
 
 
@@ -82,6 +86,31 @@ def configuration_archive() -> bytes:
                 )
                 + relative_path,
             )
+        _add_archive_file(
+            archive,
+            runfile("tests/e2e/fixtures/gol-authorities.json"),
+            "application/gol-authorities.json",
+        )
+        _add_archive_file(
+            archive,
+            runfile("tests/e2e/fixtures/gol-runtime.json"),
+            "application/gol-runtime.json",
+        )
+        worker_key = secrets.token_bytes(32)
+        worker_metadata = tarfile.TarInfo("worker-secrets/worker-key")
+        worker_metadata.size = len(worker_key)
+        worker_metadata.mode = 0o444
+        archive.addfile(worker_metadata, io.BytesIO(worker_key))
+        gateway_key = secrets.token_bytes(32)
+        gateway_metadata = tarfile.TarInfo("registry-secrets/gateway-key")
+        gateway_metadata.size = len(gateway_key)
+        gateway_metadata.mode = 0o444
+        archive.addfile(gateway_metadata, io.BytesIO(gateway_key))
+        effect_key = secrets.token_bytes(32)
+        effect_metadata = tarfile.TarInfo("gol-secrets/gol-effect-key")
+        effect_metadata.size = len(effect_key)
+        effect_metadata.mode = 0o444
+        archive.addfile(effect_metadata, io.BytesIO(effect_key))
         _add_archive_file(
             archive,
             runfile("infrastructure/observability/tempo.yaml"),
@@ -339,7 +368,7 @@ class ComposeEnvironment:
                 "sh",
                 "-ec",
                 "tar -xf - -C /bundle; "
-                "for category in application observability database proxy hydra; do "
+                "for category in application observability database proxy hydra gol-secrets registry-secrets worker-secrets; do "
                 'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
             input_bytes=configuration_archive(),

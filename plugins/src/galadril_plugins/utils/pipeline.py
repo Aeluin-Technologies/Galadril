@@ -74,6 +74,8 @@ class EmailParticipants:
                     "resolved_entity_id": "email_party_" + identifier,
                     "label": address,
                     "entity_type": "email_party",
+                    "gol_symbol_key": "communication.people::Person",
+                    "gol_value": {"name": address},
                     "state_type": "email_participant",
                     "email": address,
                     "roles": roles,
@@ -84,16 +86,24 @@ class EmailParticipants:
                     "email_id": metadata.email_id,
                 }
             )
+        date: str | None = None
         try:
             timestamp = parsedate_to_datetime(metadata.date)
             if timestamp.tzinfo is not None:
-                record["timestamp"] = timestamp.astimezone(UTC).isoformat()
+                date = timestamp.astimezone(UTC).isoformat()
+                record["timestamp"] = date
         except (ValueError, TypeError, OverflowError):
             # A malformed Date header must not erase Intake's authenticated timestamp.
             structlog.get_logger(__name__).warning(
                 "email.pipeline.invalid_date"
             )
         record["event_type"] = "Observation"
+        record["gol_symbol_key"] = "communication.mail::Message"
+        record["gol_value"] = {
+            "subject": metadata.subject,
+            "id": metadata.message_id,
+            "date": date,
+        }
         return {**command.payload, "record": record, "data": data}
 
 

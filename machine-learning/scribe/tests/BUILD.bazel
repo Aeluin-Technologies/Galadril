@@ -260,6 +260,7 @@ py_test(
     legacy_create_init = False,
     deps = [
         "//machine-learning/scribe/python/galadril_scribe",
+        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/actors",
         "//platform/vision/src/galadril_vision/common",
         "//plugins:galadril_plugins",

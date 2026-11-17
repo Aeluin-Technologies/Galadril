@@ -1,11 +1,14 @@
 """Unit tests targeting the Apache AGE and TimescaleDB data access layer."""
 
 import pickle
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import orjson
 import pytest
+from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.common.types import (
     EntityStateRecord,
@@ -664,6 +667,159 @@ async def test_insert_entity_states_batch_execution(
 def anyio_backend() -> str:
     """Runs async contracts on the production asyncio backend."""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_causal_edge_denial_does_not_open_a_transaction(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    with pytest.raises(GolDenied):
+        await store.upsert_causal_link(
+            "a", "b", {"inference_id": "one"}, "tenant-a"
+        )
+    mock_postgres_client.tenant_connection.assert_not_called()
+
+
+@asynccontextmanager
+async def _unit_scope(**_kwargs: object) -> AsyncIterator[str]:
+    """Supplies a unit transport scope without claiming an authorization decision."""
+    yield "unit-receipt"
+
+
+@asynccontextmanager
+async def _unit_batch(
+    effects: list[GolEffect], **_kwargs: object
+) -> AsyncIterator[tuple[str, ...]]:
+    yield tuple("unit-receipt" for _ in effects)
+
+
+def _unit_state_effect(**kwargs: object) -> GolEffect:
+    return GolEffect.model_validate(
+        {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"tenant_id", "derived"}
+        }
+        | {"target": "tests.scope::Value"}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_causal_edge_denial_does_not_open_a_transaction"
+    ):
+        yield
+        return
+    with (
+        patch(
+            "galadril_vision.connectors.postgres.graph.protected_gol_state_effect",
+            new=_unit_scope,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.graph.protected_gol_effect",
+            new=_unit_scope,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.graph.protected_gol_effects",
+            new=_unit_batch,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.graph.make_gol_state_effect",
+            new=_unit_state_effect,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_vertex_sql_is_inside_the_live_effect_scope(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """A preliminary decision cannot protect a later AGE mutation."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(**_kwargs: object) -> AsyncIterator[str]:
+        nonlocal held
+        held = True
+        try:
+            yield "unit-receipt"
+        finally:
+            held = False
+
+    conn = _connection_mock()
+    result = MagicMock()
+    result.fetchall = AsyncMock(return_value=[])
+    result.fetchone = AsyncMock(return_value=("record",))
+
+    async def execute(*_args: object) -> MagicMock:
+        assert held, "AGE SQL escaped its live permit"
+        return result
+
+    conn.execute = AsyncMock(side_effect=execute)
+    with patch(
+        "galadril_vision.connectors.postgres.graph.protected_gol_state_effect",
+        new=scope,
+        create=True,
+    ):
+        await GraphStore(
+            mock_postgres_client, mock_config
+        ).ensure_vertex_on_connection(
+            conn,
+            GraphVertex(
+                "record",
+                "Entity",
+                "tenant-a",
+                {"gol_value": {}, "gol_receipt": "unit-receipt"},
+            ),
+        )
+    assert not held
+    assert conn.execute.await_count == 3
+
+
+@pytest.mark.anyio
+async def test_existing_typed_business_value_cannot_be_replaced(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Omitting a protected field cannot replace an already typed instance."""
+    from galadril_ontology import GolSymbolKind
+    from galadril_vision.common.eskg import GolReference
+
+    reference = GolReference(
+        tenant_id="tenant-a",
+        ontology_id="test.rules",
+        ontology_version="1.0.0",
+        source_revision="a" * 40,
+        generation_id="b" * 32,
+        symbol_key="test.rules::Record",
+        symbol_kind=GolSymbolKind.ENTITY,
+    )
+    conn = _connection_mock()
+    conn.execute.return_value.fetchall = AsyncMock(
+        return_value=[
+            (
+                "Entity",
+                reference.model_dump(mode="json"),
+                {"public": "old", "protected": "secret"},
+            )
+        ]
+    )
+    vertex = GraphVertex(
+        "record",
+        "Entity",
+        "tenant-a",
+        {"gol_value": {"public": "new"}, "gol_receipt": "unit-receipt"},
+        reference,
+    )
+    with pytest.raises(GraphOperationError, match="conflict"):
+        await GraphStore(
+            mock_postgres_client, mock_config
+        ).ensure_vertex_on_connection(conn, vertex)
+    assert conn.execute.await_count == 2
 
 
 if __name__ == "__main__":

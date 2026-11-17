@@ -155,8 +155,8 @@ impl KafkaProducerAdapter {
                 descriptor.fullname.clone(),
             );
             for alias in schema_path_aliases(&descriptor.path) {
-                if let Some(existing) = cache.get(&alias) &&
-                    existing != &descriptor.fullname
+                if let Some(existing) = cache.get(&alias)
+                    && existing != &descriptor.fullname
                 {
                     bail!("schema path alias '{alias}' is ambiguous");
                 }
@@ -284,8 +284,8 @@ fn schema_registration_plan(
         let object = value.as_object().ok_or_else(|| {
             anyhow!("Avro schema {:?} must be an object", path)
         })?;
-        if object.get("type").and_then(serde_json::Value::as_str) !=
-            Some("record")
+        if object.get("type").and_then(serde_json::Value::as_str)
+            != Some("record")
         {
             bail!("avro root inside {:?} must be a record", path);
         }

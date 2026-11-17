@@ -134,13 +134,13 @@ impl PipelineRouter {
             if rule
                 .group_id
                 .as_deref()
-                .is_none_or(|expected| Some(expected) == group) &&
-                (rule.content_types.is_empty() ||
-                    rule.content_types.iter().any(|expected| {
+                .is_none_or(|expected| Some(expected) == group)
+                && (rule.content_types.is_empty()
+                    || rule.content_types.iter().any(|expected| {
                         expected.eq_ignore_ascii_case(media_type)
-                    })) &&
-                rule.regex.is_match(s3_key) &&
-                !matches.contains(&&rule.route)
+                    }))
+                && rule.regex.is_match(s3_key)
+                && !matches.contains(&&rule.route)
             {
                 matches.push(&rule.route);
             }
@@ -153,8 +153,8 @@ impl PipelineRouter {
             1.. => {
                 for (index, route) in matches.iter().enumerate() {
                     if matches.iter().skip(index + 1).any(|candidate| {
-                        candidate.identity == route.identity &&
-                            candidate != route
+                        candidate.identity == route.identity
+                            && candidate != route
                     }) {
                         bail!(
                             "Ambiguous routing constraint within pipeline {}",
@@ -205,19 +205,19 @@ impl PipelineRouter {
             let config = parse_tenant_pipeline(&published.definition)?;
             for source in config.sources {
                 if source.group_id.as_deref().is_some_and(|value| {
-                    value.is_empty() ||
-                        value.len() > 64 ||
-                        !value.bytes().all(|byte| {
-                            byte.is_ascii_alphanumeric() ||
-                                byte == b'_' ||
-                                byte == b'-'
+                    value.is_empty()
+                        || value.len() > 64
+                        || !value.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric()
+                                || byte == b'_'
+                                || byte == b'-'
                         })
-                }) || source.content_types.len() > 16 ||
-                    source.content_types.iter().any(|value| {
-                        value.len() > 128 ||
-                            !value.contains('/') ||
-                            value.contains(';') ||
-                            value.chars().any(char::is_whitespace)
+                }) || source.content_types.len() > 16
+                    || source.content_types.iter().any(|value| {
+                        value.len() > 128
+                            || !value.contains('/')
+                            || value.contains(';')
+                            || value.chars().any(char::is_whitespace)
                     })
                 {
                     bail!("Invalid source ingestion filters");

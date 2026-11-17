@@ -23,6 +23,7 @@ const META_AUTHZ_PERMISSION: &str = "authz-permission";
 const META_AUTHZ_RESOURCE: &str = "authz-resource";
 const META_AUTHZ_ISSUER: &str = "authz-issuer";
 const META_AUTHZ_DELEGATION_ID: &str = "authz-delegation-id";
+const META_GOL_ADMISSION: &str = "authz-gol-admission";
 const S3_TAG_VALUE_MAX_LEN: usize = 256;
 const MAX_ALLOWED_DOWNLOAD_SIZE: i64 = 50 * 1024 * 1024;
 
@@ -318,6 +319,7 @@ impl BlobStorage for S3Adapter {
             resource: meta.get(META_AUTHZ_RESOURCE).cloned(),
             authentication_provenance: meta.get(META_AUTHZ_ISSUER).cloned(),
             delegation_id: meta.get(META_AUTHZ_DELEGATION_ID).cloned(),
+            gol_admission: meta.get(META_GOL_ADMISSION).cloned(),
         })
     }
 
@@ -363,6 +365,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert_eq!(S3Adapter::s3_tagging_query(&h).unwrap(), "");
     }
@@ -378,6 +381,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         let q = S3Adapter::s3_tagging_query(&h).unwrap();
         assert!(q.contains("tenant=tenant%3Aacme"));
@@ -399,6 +403,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert!(S3Adapter::s3_tagging_query(&h).is_err());
     }
@@ -414,6 +419,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         let (tenant, key) =
             S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)
@@ -433,6 +439,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert!(
             S3Adapter::resolve_tenant_and_key(
@@ -471,6 +478,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert!(
             S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)

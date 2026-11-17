@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import orjson
 import pytest
+from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.config import IdentityResolutionConfig
-from galadril_vision.identity.licorne import (
+from galadril_vision.identity.contracts import (
     CandidateEvidence,
-    LicorneActorRuntime,
     ResolutionRequest,
     SpatialEvidence,
+)
+from galadril_vision.identity.licorne import (
+    LicorneActorRuntime,
     _bounded_probability,
     _CalibratedPostgresProvider,
     _load_licorne,
@@ -302,5 +309,136 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.mark.anyio
+async def test_missing_state_admission_does_not_initialize_native_ledger() -> (
+    None
+):
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=_licorne(),
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-1",
+        observation_key="observation",
+        source="sensor",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.8,
+        candidates=(),
+    )
+    try:
+        with pytest.raises(GolDenied):
+            await runtime.resolve(request)
+        assert runtime._resolver is None
+        assert not runtime._providers
+    finally:
+        await runtime.close()
+
+
+@asynccontextmanager
+async def _unit_batch(
+    effects: tuple[GolEffect, ...], **_kwargs: object
+) -> AsyncIterator[tuple[str, ...]]:
+    """The native unit adapter exercises I/O ordering independently of policy engines."""
+    yield tuple("unit-receipt" for _ in effects)
+
+
+def _unit_state_effect(**kwargs: object) -> GolEffect:
+    return GolEffect.model_validate(
+        {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"tenant_id", "derived"}
+        }
+        | {"target": "tests.scope::Value"}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_missing_state_admission_does_not_initialize_native_ledger"
+    ):
+        yield
+        return
+    with (
+        patch(
+            "galadril_vision.identity.licorne.protected_gol_effects",
+            new=_unit_batch,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.make_gol_state_effect",
+            new=_unit_state_effect,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_native_ledger_io_and_results_remain_inside_the_live_effect_scope() -> (
+    None
+):
+    """Native background polling cannot outlive the admitted calculation."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(
+        *_args: object, **_kwargs: object
+    ) -> AsyncIterator[tuple[str, ...]]:
+        nonlocal held
+        held = True
+        try:
+            yield ("read-receipt", "write-receipt")
+        finally:
+            held = False
+
+    class Resolver(_AsyncResolver):
+        def register_tenant(self, tenant_id: str, **kwargs: object) -> None:
+            assert held, "Native ledger escaped its live permit"
+            super().register_tenant(tenant_id, **kwargs)
+
+        async def next_result(self) -> _Batch:
+            assert held, "Native result escaped its live permit"
+            return await super().next_result()
+
+    module = _licorne()
+    module.AsyncResolver = Resolver
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=module,
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-a",
+        observation_key="record",
+        source="source",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.9,
+        candidates=(),
+    )
+    with (
+        patch(
+            "galadril_vision.identity.licorne.protected_gol_effects",
+            new=scope,
+            create=True,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.make_gol_state_effect",
+            return_value=object(),
+            create=True,
+        ),
+    ):
+        try:
+            await runtime.resolve(request)
+            assert runtime._pump is None or runtime._pump.done()
+        finally:
+            await runtime.close()
+    assert not held
+
+
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+    raise SystemExit(
+        pytest.main([__file__, "--import-mode=importlib", *sys.argv[1:]])
+    )

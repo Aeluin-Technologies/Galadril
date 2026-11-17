@@ -15,6 +15,9 @@ services:
       otel-collector:
         condition: service_started
     environment:
+      REGISTRY_GATEWAY_KEY_PATH: /run/registry-secrets/gateway-key
+      GOL_ARTIFACT_BUCKET: ontology-artifacts
+      GOL_AUTHORITY_CONFIG_PATH: /etc/galadril/gol-authorities.json
       REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
@@ -28,6 +31,13 @@ services:
       DEPLOYMENT_ENVIRONMENT: development
     volumes:
       - ${GALADRIL_CONNECTORS_PATH:-./connectors.yaml}:/connectors.yaml:ro
+      - ${GALADRIL_GOL_AUTHORITY_PATH:-../gol/authorities.json}:/etc/galadril/gol-authorities.json:ro
+      - type: bind
+        source: ${GALADRIL_REGISTRY_GATEWAY_KEY_PATH:-./secrets/registry-gateway-key}
+        target: /run/registry-secrets/gateway-key
+        read_only: true
+        bind:
+          create_host_path: false
     stop_grace_period: 30s
 
   intake:
@@ -100,6 +110,8 @@ services:
         condition: service_started
     environment:
       UTILS_SERVICE_URL: http://127.0.0.1:8095
+      GOL_WORKER_KEY_PATH: /run/gol-worker-secrets/worker-key
+      GOL_GATEWAY_ENDPOINT: http://127.0.0.1:8082
       UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
@@ -118,6 +130,12 @@ services:
       - type: bind
         source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/service-key
         target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${GALADRIL_GOL_WORKER_KEY_PATH:-./secrets/gol-worker-key}
+        target: /run/gol-worker-secrets/worker-key
         read_only: true
         bind:
           create_host_path: false

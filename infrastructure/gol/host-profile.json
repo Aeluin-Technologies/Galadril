@@ -1,0 +1,284 @@
+{
+  "cedar_principal": "Gol::Principal",
+  "cedar_schema_fragments": [
+    "namespace Gol { entity Principal; }\n"
+  ],
+  "cedar_policies": "permit(principal is Gol::Principal, action, resource)\nwhen { context.hour_utc >= 0 && context.hour_utc <= 23 && context.location != \"untrusted\" };\n",
+  "cedar_context": {
+    "mfa": "Bool",
+    "hour_utc": "I64",
+    "location": "String"
+  },
+  "cedar_fields": [],
+  "resource_type": "gol_resource",
+  "relationship_permissions": [
+    "describe",
+    "execute",
+    "mailbox_owner",
+    "mailbox_owner_transfer",
+    "read",
+    "transfer",
+    "write"
+  ],
+  "operations": {
+    "Read": {
+      "permission": "read_access",
+      "cedar_action": "Gol::Action::\"read\""
+    },
+    "Write": {
+      "permission": "write_access",
+      "cedar_action": "Gol::Action::\"write\""
+    },
+    "Describe": {
+      "permission": "describe",
+      "cedar_action": "Gol::Action::\"describe\""
+    },
+    "Execute": {
+      "permission": "execute",
+      "cedar_action": "Gol::Action::\"execute\""
+    },
+    "Transfer": {
+      "permission": "transfer",
+      "cedar_action": "Gol::Action::\"transfer\""
+    },
+    "DescribeTransfer": {
+      "permission": "transfer",
+      "cedar_action": "Gol::Action::\"transfer\""
+    }
+  },
+  "baseline": {
+    "classification": "Public",
+    "compartments": [],
+    "destinations": null,
+    "purposes": null
+  },
+  "authoring_floor": {
+    "classification": "Restricted",
+    "compartments": [
+      "Legal",
+      "Mailbox"
+    ],
+    "destinations": null,
+    "purposes": null
+  },
+  "module_floors": {
+    "law.socle": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.ecritures": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.moyens": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.preuves": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.contentieux": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.administratif": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.judiciaire": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "law.penal": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "communication.people": {
+      "classification": "Internal",
+      "compartments": [],
+      "destinations": null,
+      "purposes": null
+    },
+    "communication.content": {
+      "classification": "Internal",
+      "compartments": [],
+      "destinations": null,
+      "purposes": null
+    },
+    "communication.threads": {
+      "classification": "Internal",
+      "compartments": [],
+      "destinations": null,
+      "purposes": null
+    },
+    "communication.mail": {
+      "classification": "Internal",
+      "compartments": [],
+      "destinations": null,
+      "purposes": null
+    },
+    "documents.attachments": {
+      "classification": "Internal",
+      "compartments": [],
+      "destinations": null,
+      "purposes": null
+    }
+  },
+  "target_floors": [
+    {
+      "target": {
+        "Symbol": {
+          "key": {
+            "ontology": "communication.mail",
+            "name": "MessageBcc"
+          },
+          "version": "1.0.0"
+        }
+      },
+      "flow": {
+        "classification": "Confidential",
+        "compartments": [
+          "Mailbox"
+        ],
+        "destinations": null,
+        "purposes": null
+      }
+    }
+  ],
+  "approved_types": [
+    {
+      "name": "gal.time.Instant",
+      "version": "1.0.0"
+    }
+  ],
+  "sinks": {
+    "browser": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "ontology_exploration",
+        "ontology_authoring"
+      ]
+    },
+    "registry": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "ontology_authoring",
+        "persistence"
+      ]
+    },
+    "eskg": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "persistence",
+        "extraction",
+        "identity_resolution",
+        "causal_analysis"
+      ]
+    },
+    "identity_state": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "identity_resolution"
+      ]
+    },
+    "llm": {
+      "kind": "External",
+      "clearance": "Internal",
+      "compartments": [],
+      "purposes": [
+        "classification",
+        "extraction"
+      ]
+    },
+    "kafka": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "pipeline_dispatch"
+      ]
+    },
+    "causal_state": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "causal_analysis"
+      ]
+    }
+  },
+  "module_owners": {
+    "law.socle": "law.socle",
+    "law.ecritures": "law.ecritures",
+    "law.moyens": "law.moyens",
+    "law.preuves": "law.preuves",
+    "law.contentieux": "law.contentieux",
+    "law.administratif": "law.administratif",
+    "law.judiciaire": "law.judiciaire",
+    "law.penal": "law.penal",
+    "communication.people": "communication.mail",
+    "communication.content": "communication.mail",
+    "communication.threads": "communication.mail",
+    "communication.mail": "communication.mail",
+    "documents.attachments": "communication.mail"
+  }
+}

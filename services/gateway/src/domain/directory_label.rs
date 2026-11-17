@@ -22,10 +22,10 @@ impl DirectorySubject {
 pub fn validate_display_name(value: &str) -> Result<&str> {
     let value = value.trim();
     ensure!(
-        !value.is_empty()
-            && value.len() <= 512
-            && value.chars().count() <= 128
-            && !value.chars().any(char::is_control),
+        !value.is_empty() &&
+            value.len() <= 512 &&
+            value.chars().count() <= 128 &&
+            !value.chars().any(char::is_control),
         "Choose a display name with 1 to 128 characters and no control characters"
     );
     Ok(value)

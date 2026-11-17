@@ -6,7 +6,8 @@ py_library(
         "__init__.py",
         "errors.py",
         "identity.py",
-        "model.py",
+        "contracts.py",
+        "client.py",
         "runtime.py",
     ],
     imports = [".."],
@@ -14,5 +15,8 @@ py_library(
     deps = [
         "@pip//pydantic",
         "@pip//structlog",
+        "@pip//httpx",
+        "@pip//orjson",
+        "@pip//opentelemetry_api",
     ],
 )

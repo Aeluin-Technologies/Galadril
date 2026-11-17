@@ -1,12 +1,14 @@
 """Tests for Vision's ESKG-to-Amarth observation bridge."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from unittest.mock import patch
 
 import pytest
+from galadril_ontology import GolDenied
 from galadril_vision.causal.runner import (
     _build_observation_window,
     _cache_get,
@@ -187,6 +189,86 @@ def test_root_estimates_do_not_publish_the_source_chain() -> None:
     assert estimates[0]["effect_size"] == 2.0
     assert "private-source" not in str(estimates)
     assert _root_estimates("other", (link,)) == []
+
+
+def test_causal_cache_denial_performs_no_database_read_or_write() -> None:
+    client = _Client()
+    now = datetime(2026, 9, 30, tzinfo=UTC)
+
+    async def denied() -> None:
+        with pytest.raises(GolDenied):
+            await _cache_get(cast(PostgresClient, client), "tenant-a", "cache")
+        with pytest.raises(GolDenied):
+            await _cache_put(
+                cast(PostgresClient, client),
+                tenant_id="tenant-a",
+                cache_key="cache",
+                target="entity:one",
+                window_start=now,
+                window_end=now,
+                status="success",
+                result_summary={},
+            )
+
+    asyncio.run(denied())
+    assert client.connection.statements == 0
+
+
+@asynccontextmanager
+async def _unit_scope(**_kwargs: object) -> AsyncIterator[str]:
+    """Supplies a unit transport scope without claiming an authorization decision."""
+    yield "unit-receipt"
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_causal_cache_denial_performs_no_database_read_or_write"
+    ):
+        yield
+        return
+    with patch(
+        "galadril_vision.causal.runner.protected_gol_state_effect",
+        new=_unit_scope,
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_causal_sql_is_inside_the_live_effect_scope() -> None:
+    """A cache lookup retains the permit until its result has been consumed."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(**_kwargs: object) -> AsyncIterator[str]:
+        nonlocal held
+        held = True
+        try:
+            yield "unit-receipt"
+        finally:
+            held = False
+
+    class Connection(_Connection):
+        async def execute(
+            self, query: str, parameters: tuple[object, ...]
+        ) -> _Cursor:
+            assert held, "Causal SQL escaped its live permit"
+            return await super().execute(query, parameters)
+
+    client = _Client()
+    client.connection = Connection()
+    with patch(
+        "galadril_vision.causal.runner.protected_gol_state_effect",
+        new=scope,
+        create=True,
+    ):
+        assert (
+            await _cache_get(cast(PostgresClient, client), "tenant-a", "cache")
+            is None
+        )
+    assert not held
 
 
 if __name__ == "__main__":

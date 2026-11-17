@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import structlog
 from croniter import croniter
+from galadril_ontology import GolDenied
 from galadril_pipeline.config import PipelineConfig, TriggerType
 from galadril_pipeline.events import (
     EventStatus,
@@ -21,6 +22,7 @@ from opentelemetry.trace import SpanKind
 from pydantic import JsonValue
 
 from galadril_vision.streaming.handlers import Publisher
+from galadril_vision.streaming.security import PublicationGate
 from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.context import current_trace_identifiers
 
@@ -128,7 +130,7 @@ class ScheduledCommandFactory:
 class CronCommandPublisher:
     """Publishes due cron events with confirmed Kafka writes and trace context."""
 
-    __slots__ = ("_factory", "_publisher", "_topics")
+    __slots__ = ("_factory", "_publisher", "_topics", "_publication_gate")
 
     def __init__(
         self,
@@ -136,10 +138,12 @@ class CronCommandPublisher:
         factory: ScheduledCommandFactory,
         publisher: Publisher,
         topics: TopicLayout,
+        publication_gate: PublicationGate | None = None,
     ) -> None:
         self._factory = factory
         self._publisher = publisher
         self._topics = topics
+        self._publication_gate = publication_gate
 
     async def run(self, stop: asyncio.Event) -> None:
         """Waits cooperatively and publishes every due deterministic timer event."""
@@ -178,13 +182,25 @@ class CronCommandPublisher:
             attributes={"galadril.pipeline.step": schedule.step},
         ):
             for command in self._factory.commands_for(schedule, scheduled_for):
-                await self._publisher.publish(
-                    command.model_dump(mode="json"),
-                    self._topics.commands_for(command.resource_class),
-                    key=str(command.event_id),
-                    correlation_id=str(command.correlation_id),
-                    no_confirm=False,
-                )
+                if self._publication_gate is None:
+                    logger.warning(
+                        "gol.publication.denied", operation="schedule"
+                    )
+                    continue
+                try:
+                    async with self._publication_gate.protect(command):
+                        await self._publisher.publish(
+                            command.model_dump(mode="json"),
+                            self._topics.commands_for(command.resource_class),
+                            key=str(command.event_id),
+                            correlation_id=str(command.correlation_id),
+                            no_confirm=False,
+                        )
+                except GolDenied:
+                    logger.warning(
+                        "gol.publication.denied", operation="schedule"
+                    )
+                    continue
                 trace_id, _ = current_trace_identifiers()
                 lineage = LineageEvent(
                     event_id=uuid5(command.event_id, "lineage:accepted:0"),
@@ -199,13 +215,20 @@ class CronCommandPublisher:
                     status=EventStatus.ACCEPTED,
                     trace_id=trace_id,
                 )
-                await self._publisher.publish(
-                    lineage.model_dump(mode="json"),
-                    self._topics.lineage,
-                    key=str(lineage.event_id),
-                    correlation_id=str(command.correlation_id),
-                    no_confirm=False,
-                )
+                try:
+                    async with self._publication_gate.protect(command):
+                        await self._publisher.publish(
+                            lineage.model_dump(mode="json"),
+                            self._topics.lineage,
+                            key=str(lineage.event_id),
+                            correlation_id=str(command.correlation_id),
+                            no_confirm=False,
+                        )
+                except GolDenied:
+                    logger.warning(
+                        "gol.publication.denied", operation="schedule"
+                    )
+                    continue
                 logger.info(
                     "scheduled_command_published",
                     pipeline=command.pipeline,

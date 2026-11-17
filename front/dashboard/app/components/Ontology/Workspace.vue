@@ -1,846 +1,429 @@
 <script setup lang="ts">
-import {
-  PlusIcon,
-  TrashIcon,
-  ArrowUturnLeftIcon,
-  PencilSquareIcon,
-  CubeIcon,
-  LinkIcon,
-  ListBulletIcon,
-  Squares2X2Icon,
-  ChevronRightIcon,
-} from "@heroicons/vue/24/outline";
-import { ontologyPrimaryAction, withOntologyLink } from "~/utils/ontology";
-import {
-  withUpdatedOntologyLink,
-  withoutOntologyLink,
-} from "~/utils/ontology-edit";
-import type {
-  OntologyTypeDraft,
-  OntologyLinkDraft,
-} from "~/utils/ontology-edit";
-const { t } = useI18n();
-const mode = ref("graph");
-const panel = ref("editor");
-const deleting = ref(false);
-const editing = ref(false);
-const creatingType = ref(false);
-const editedLink = ref<OntologyLinkDraft>();
+import type { GolDiagnostic } from "~/types/ontology";
 const props = defineProps<{ ontologyId?: string }>();
-const inspectedProperty = ref("");
-const propertyDetails = computed(() =>
-  properties.value.find((item) => item.resource_id === inspectedProperty.value),
-);
 const {
-  artifact,
-  branch,
-  deleted,
-  canDelete,
-  checkout,
-  author,
-  canManage,
-  canCreate,
-  canPublish,
-  packages,
-  ontologies,
-  selectedPackage,
-  document,
   id,
   name,
-  displayTitle,
-  resourceLabel,
-  revision,
-  published,
-  targetId,
-  targetRevision,
-  mappings,
-  selected,
-  search,
-  tab,
+  summary,
+  latest,
+  comparing,
+  reviewLatest,
+  keepDraft,
+  files,
+  current,
+  source,
+  activeFile,
+  projection,
+  validation,
+  diagnostics,
+  dependencies,
+  schema,
+  profile,
+  fields,
+  editing,
   busy,
-  error,
+  loading,
+  failed,
+  notice,
+  canEdit,
+  canPublish,
+  canDelete,
   reviewing,
-  pending,
+  deleting,
   dirty,
-  types,
-  properties,
-  resource,
-  links,
-  slots,
-  targetTypes,
-  graphNodes,
-  graphEdges,
-  toggleLayer,
-  newPropertyName,
-  newPropertyId,
-  newPropertyType,
-  newOntology,
-  discard,
-  review,
-  publish,
-  open,
-  start,
-  chooseTarget,
-  setMapping,
+  valid,
+  symbol,
+  selected,
+  graph,
+  load,
+  edit,
   save,
-  addType,
-  addProperty,
+  validate,
+  publish,
+  remove,
+  previewSchema,
+  addFile,
+  locate,
 } = useOntologyWorkspace(props.ontologyId);
-watch(id, () => {
-  panel.value = "editor";
-  deleting.value = false;
+const sourcePanel = ref<HTMLElement | null>(null);
+async function inspectDiagnostic(diagnostic: GolDiagnostic) {
+  const position = locate(diagnostic);
+  if (!position) return;
+  await nextTick();
+  const input = sourcePanel.value?.querySelector("textarea");
+  input?.focus();
+  input?.setSelectionRange(position.start, position.end);
+}
+watch(comparing, async (open) => {
+  if (open) return;
+  await nextTick();
+  sourcePanel.value?.querySelector("textarea")?.focus();
 });
-watch([revision, branch], () => {
-  editing.value = false;
-});
-watch(
-  () => document.value,
-  () => {
-    if (!document.value) {
-      creatingType.value = false;
-      editedLink.value = undefined;
-      editing.value = false;
-      return;
-    }
-    if (
-      document.value &&
-      !revision.value &&
-      !selectedPackage.value &&
-      !document.value.plugin_origin
-    )
-      editing.value = true;
-  },
-);
-const primary = computed(() =>
-  editing.value
-    ? "review"
-    : ontologyPrimaryAction({
-        revision: revision.value,
-        dirty: dirty.value,
-        published: branch.value !== "main" || published.value,
-      }),
-);
-const graphEditable = computed(
-  () =>
-    editing.value &&
-    canManage.value &&
-    !!document.value &&
-    !selectedPackage.value &&
-    !document.value.plugin_origin,
-);
-async function primaryAction() {
-  if (primary.value === "publish") await publish();
-  else if (primary.value === "edit") editing.value = true;
-  else await review();
-}
-function connect(source: string, target: string) {
-  if (!graphEditable.value) return;
-  error.value = "";
-  editedLink.value = {
-    id: `relation.${crypto.randomUUID().replaceAll("-", "")}`,
-    source,
-    target,
-    name: "",
-    existing: false,
-  };
-}
-function editLink(id: string) {
-  if (!graphEditable.value) return;
-  const link = document.value?.resources.find(
-    (resource) => resource.resource_id === id && resource.kind === "link_type",
-  );
-  if (
-    !link ||
-    typeof link.attributes.source_type !== "string" ||
-    typeof link.attributes.target_type !== "string"
-  )
-    return;
-  error.value = "";
-  editedLink.value = {
-    id,
-    source: link.attributes.source_type,
-    target: link.attributes.target_type,
-    name: link.display_name,
-    existing: true,
-  };
-}
-function saveLink(link: OntologyLinkDraft) {
-  if (!graphEditable.value || !document.value) return;
-  try {
-    const base = link.existing
-      ? document.value
-      : withOntologyLink(document.value, link.id, link.source, link.target);
-    document.value = withUpdatedOntologyLink(
-      base,
-      link.id,
-      link.source,
-      link.target,
-      link.name,
-    );
-    editedLink.value = undefined;
-  } catch {
-    error.value = t("ontologyManager.invalidConnection");
-  }
-}
-function removeLink(id: string) {
-  if (!graphEditable.value || !document.value) return;
-  try {
-    document.value = withoutOntologyLink(document.value, id);
-    editedLink.value = undefined;
-  } catch {
-    error.value = t("ontologyManager.invalidConnection");
-  }
-}
-function createType(input: OntologyTypeDraft) {
-  if (graphEditable.value && addType(input)) creatingType.value = false;
-}
-function selectResource(value: string) {
-  if (value.startsWith("package:")) {
-    toggleLayer(value.slice("package:".length));
-    return;
-  }
-  panel.value = "editor";
-
-  selected.value = selected.value === value ? "" : value;
-  if (!selected.value) tab.value = "overview";
-  mode.value = "graph";
+function selectField(name: string, checked: boolean) {
+  fields.value = checked
+    ? [...new Set([...fields.value, name])]
+    : fields.value.filter((value) => value !== name);
+  schema.value = undefined;
 }
 </script>
 <template>
-  <section
-    class="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-foreground"
-    :aria-label="$t('ontologyManager.ontology_manager')"
-  >
+  <section class="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
     <header
-      class="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-5 py-3"
+      class="shrink-0 border-b border-border bg-surface px-5 py-4 sm:px-8"
     >
-      <div>
-        <h1 class="sr-only">{{ $t("ontologyManager.ontology_manager") }}</h1>
-        <nav
-          class="flex min-w-0 items-center gap-2"
-          :aria-label="$t('ontologyManager.location')"
-        >
-          <UiButton
-            variant="ghost"
-            align="start"
-            :aria-current="!selected ? 'page' : undefined"
-            @click="selectResource('')"
-            ><Squares2X2Icon
-              class="mr-2 h-4 w-4 shrink-0"
-              aria-hidden="true"
-            />{{
-              displayTitle || $t("ontologyManager.ontology_manager")
-            }}</UiButton
-          >
-          <template v-if="resource"
-            ><ChevronRightIcon
-              class="h-4 w-4 shrink-0 text-muted"
-              aria-hidden="true"
-            /><span
-              aria-current="page"
-              class="truncate text-sm font-semibold"
-              >{{ resourceLabel(resource) }}</span
-            ></template
-          >
-        </nav>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <UiIconButton
-          v-if="dirty"
-          :icon="ArrowUturnLeftIcon"
-          :label="$t('ontologyManager.discard_changes')"
-          :disabled="busy"
-          variant="ghost"
-          @click="discard"
-        />
-        <UiIconButton
-          :icon="PlusIcon"
-          :label="$t('ontologyManager.new_ontology')"
-          :disabled="busy || dirty || !canCreate"
-          variant="ghost"
-          @click="
-            newOntology();
-            editing = true;
-          "
-        />
-        <UiIconButton
-          v-if="
-            revision &&
-            canDelete &&
-            !selectedPackage &&
-            !document?.plugin_origin &&
-            !deleted
-          "
-          :icon="TrashIcon"
-          :label="$t('ontologyManager.collaboration.deleteOntology')"
-          :disabled="busy || dirty"
-          @click="deleting = true"
-        />
-        <UiButton
-          :loading="busy"
-          :disabled="
-            busy ||
-            !document ||
-            deleted ||
-            !name.trim() ||
-            (primary === 'publish' ? !canPublish : !canManage) ||
-            (primary === 'review' && !!revision && !dirty)
-          "
-          @click="primaryAction"
-          >{{
-            $t(
-              primary === "publish"
-                ? "ontologyManager.publish_ontology"
-                : primary === "edit"
-                  ? "ontologyManager.editOntology"
-                  : "ontologyManager.review_changes",
-            )
-          }}</UiButton
-        >
-      </div>
-    </header>
-    <p
-      v-if="!busy && !canManage"
-      role="status"
-      class="border-b border-border px-5 py-2 text-sm text-muted"
-    >
-      {{ $t("ontologyManager.readOnly") }}
-    </p>
-    <p
-      v-if="busy && !document"
-      role="status"
-      class="px-5 py-2 text-sm text-muted"
-    >
-      {{ $t("ontologyManager.loading") }}
-    </p>
-    <p v-if="error" role="alert" class="px-5 text-sm text-danger">
-      {{ error }}
-    </p>
-    <div
-      class="grid min-h-0 flex-1 overflow-auto lg:grid-cols-[250px_minmax(0,1fr)] lg:overflow-hidden"
-    >
-      <OntologyCatalog
-        v-model:search="search"
-        v-model:view="tab"
-        :packages="packages"
-        :ontologies="ontologies"
-        :types="types"
-        :resource-label="resourceLabel"
-        :id="id"
-        :selected="selected"
-        :busy="busy"
-        :dirty="dirty"
-        :document="document"
-        @open="open"
-        @start="start"
-        @select="selectResource"
-      />
-      <main
-        v-if="document"
-        class="min-h-0 min-w-0 space-y-4 p-4 sm:p-6 lg:overflow-y-auto"
+      <UiPageHeader
+        :title="
+          name || $t(props.ontologyId ? 'gol.workspace' : 'gol.newOntology')
+        "
+        :description="$t('gol.workspaceHelp')"
       >
-        <nav
-          class="flex flex-wrap items-center gap-2 border-b border-border pb-3"
-          :aria-label="$t('ontologyManager.collaboration.navigation')"
-        >
+        <template #actions>
+          <NuxtLink to="/ontology"
+            ><UiButton variant="ghost">{{
+              $t("gol.catalog")
+            }}</UiButton></NuxtLink
+          >
           <UiButton
-            v-for="view in ['editor', 'branches', 'history']"
-            :key="view"
-            variant="ghost"
-            :aria-pressed="panel === view"
-            :disabled="view !== 'editor' && !revision"
-            @click="panel = view"
-            >{{ $t(`ontologyManager.collaboration.${view}`) }}</UiButton
+            v-if="canEdit && !editing"
+            variant="secondary"
+            :disabled="busy || loading"
+            :action="edit"
+            >{{ $t("gol.edit") }}</UiButton
           >
-          <span v-if="revision" class="ml-auto text-xs text-muted">{{
-            branch
-          }}</span>
-        </nav>
-        <div
-          v-if="deleted"
-          class="space-y-3 rounded-panel border border-border bg-surface p-4"
-        >
-          <p class="text-sm text-muted">
-            {{ $t("ontologyManager.collaboration.deleted") }}
-          </p>
           <UiButton
-            v-if="canManage"
-            :disabled="busy"
-            @click="author({ operation: 'restore' })"
-            >{{ $t("ontologyManager.collaboration.restore") }}</UiButton
+            v-if="editing"
+            variant="secondary"
+            :disabled="busy || loading || !dirty || !files.length"
+            :action="save"
+            >{{ $t("gol.save") }}</UiButton
           >
-        </div>
-        <OntologyCollaboration
-          v-if="panel !== 'editor' && artifact"
-          :key="id"
-          :id="id"
-          :artifact="artifact"
-          :branch="branch"
-          :mode="panel === 'history' ? 'history' : 'branches'"
-          :disabled="busy || dirty || deleted"
-          :writable="canManage && !deleted"
-          :error="error"
-          :command="author"
-          @checkout="checkout"
-        />
-        <div v-if="panel === 'editor' && !deleted" class="space-y-4">
-          <nav
-            class="flex flex-wrap items-center gap-2 border-b border-border pb-3"
-            :aria-label="$t('ontologyManager.editorViews')"
+          <UiButton
+            v-if="editing"
+            variant="secondary"
+            :disabled="busy || loading || dirty || !summary"
+            :action="validate"
+            >{{ $t("gol.validate") }}</UiButton
           >
+          <UiButton
+            v-if="editing"
+            :disabled="busy || !canPublish || !valid"
+            @click="reviewing = true"
+            >{{ $t("gol.publish") }}</UiButton
+          >
+        </template>
+      </UiPageHeader>
+    </header>
+    <div class="min-h-0 flex-1 overflow-auto p-5 sm:p-8">
+      <div class="mx-auto max-w-7xl space-y-5">
+        <p v-if="loading" role="status" class="text-sm text-muted">
+          {{ $t("gol.loading") }}
+        </p>
+        <UiAlert v-if="failed" tone="danger">
+          <p>{{ $t("gol.unavailable") }}</p>
+          <p v-if="editing" class="mt-2">{{ $t("gol.draftRetained") }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
             <UiButton
-              v-for="view in ['graph', 'code']"
-              :key="view"
               variant="ghost"
-              :aria-pressed="mode === view"
-              @click="mode = view"
-              >{{ $t(`pipeline.review.${view}`) }}</UiButton
+              :disabled="busy || loading"
+              :action="load"
+              >{{ $t("gol.retry") }}</UiButton
             >
             <UiButton
-              v-if="canManage && !selectedPackage && !document.plugin_origin"
+              v-if="editing && summary && canEdit"
               variant="secondary"
-              class="ml-auto"
-              :aria-pressed="editing"
-              @click="editing = !editing"
-              ><PencilSquareIcon class="mr-2 h-4 w-4" aria-hidden="true" />{{
-                $t("ontologyManager.editGraph")
-              }}</UiButton
+              :disabled="busy || loading"
+              :action="reviewLatest"
+              >{{ $t("gol.reviewLatest") }}</UiButton
             >
-          </nav>
-          <OntologyCode
-            v-show="mode === 'code'"
-            :document="document"
-            :editable="graphEditable"
-            :selected="selected"
-            :active="mode === 'code'"
-            @apply="(value) => (document = value)"
-          />
-          <template v-if="mode === 'graph'">
-            <div class="grid gap-3 sm:grid-cols-2">
-              <UiField
-                :label="$t('ontologyManager.ontology_name')"
-                v-slot="field"
-                ><UiInput
-                  v-model="name"
-                  :id="field.id"
-                  :disabled="busy || !canManage || (!editing && !!revision)"
-                  :aria-label="$t('ontologyManager.ontology_name')" /></UiField
-              ><UiField
-                :label="$t('ontologyManager.ontology_identifier')"
-                v-slot="field"
-                ><UiInput
-                  v-model="id"
-                  :id="field.id"
-                  :aria-label="$t('ontologyManager.ontology_identifier')"
-                  :disabled="!!revision || busy || !canManage"
-              /></UiField>
-            </div>
-            <div v-if="graphEditable" class="flex flex-wrap gap-2">
-              <UiButton
-                variant="secondary"
-                @click="
-                  error = '';
-                  creatingType = true;
-                "
-                ><PlusIcon class="mr-2 h-4 w-4" aria-hidden="true" />{{
-                  $t("ontologyManager.add_object_type")
-                }}</UiButton
-              >
-              <UiButton
-                variant="secondary"
-                @click="connect(selected || types[0]?.resource_id || '', '')"
-                ><LinkIcon class="mr-2 h-4 w-4" aria-hidden="true" />{{
-                  $t("ontologyManager.relationshipEditor.add")
-                }}</UiButton
-              >
-            </div>
-            <section
-              v-if="!resource"
-              class="rounded-panel border border-border bg-surface p-5"
-            >
-              <h2 class="flex items-center gap-2 text-xl font-semibold">
-                <Squares2X2Icon
-                  class="h-6 w-6 text-primary-foreground"
-                  aria-hidden="true"
-                />{{ displayTitle }}
-              </h2>
-              <p class="mt-2 text-sm text-muted">
-                {{ $t("ontologyManager.completeOverview") }}
-              </p>
-              <div class="mt-4 flex flex-wrap gap-5 text-sm">
-                <span class="flex items-center gap-2"
-                  ><CubeIcon class="h-4 w-4" aria-hidden="true" />{{
-                    $t("ontologyManager.typeCount", types.length)
-                  }}</span
-                ><span class="flex items-center gap-2"
-                  ><ListBulletIcon class="h-4 w-4" aria-hidden="true" />{{
-                    $t("ontologyManager.propertyCount", properties.length)
-                  }}</span
-                ><span class="flex items-center gap-2"
-                  ><LinkIcon class="h-4 w-4" aria-hidden="true" />{{
-                    $t("ontologyManager.linkCount", links.length)
-                  }}</span
-                >
-              </div>
-            </section>
-            <section
-              v-if="resource"
-              class="rounded-control border border-border bg-surface p-5"
-            >
-              <UiField
-                v-if="graphEditable"
-                :label="$t('ontologyManager.object_type_name')"
-                v-slot="field"
-                ><UiInput :id="field.id" v-model="resource.display_name"
-              /></UiField>
-              <h2 class="flex items-center gap-3 text-xl font-semibold">
-                <CubeIcon
-                  class="h-8 w-8 text-primary-foreground"
-                  aria-hidden="true"
-                />{{ resourceLabel(resource) }}
-              </h2>
-              <p class="mt-1 text-xs text-muted">
-                {{ resource.resource_id }} · {{ resource.kind }}
-              </p>
-              <div class="mt-4 grid gap-3 sm:grid-cols-3">
-                <div class="rounded-control border border-border p-3">
-                  <ListBulletIcon
-                    class="mb-2 h-4 w-4 text-muted"
-                    aria-hidden="true"
-                  />{{ $t("ontologyManager.properties_2")
-                  }}<strong class="block text-2xl">{{
-                    properties.length
-                  }}</strong>
-                </div>
-                <div class="rounded-control border border-border p-3">
-                  <ListBulletIcon
-                    class="mb-2 h-4 w-4 text-muted"
-                    aria-hidden="true"
-                  />{{ $t("ontologyManager.views.relationships")
-                  }}<strong class="block text-2xl">{{ links.length }}</strong>
-                </div>
-                <div class="rounded-control border border-border p-3">
-                  <ListBulletIcon
-                    class="mb-2 h-4 w-4 text-muted"
-                    aria-hidden="true"
-                  />{{ $t("ontologyManager.type")
-                  }}<span class="mt-1 block text-sm">{{ resource.kind }}</span>
-                </div>
-              </div>
-              <p
-                v-if="typeof resource.attributes.description === 'string'"
-                class="mt-4 text-sm text-muted"
-              >
-                {{ resource.attributes.description }}
-              </p>
-            </section>
-            <LazyOntologyRelations
-              v-if="tab === 'overview' || tab === 'relationships'"
-              :key="selected"
-              :nodes="graphNodes"
-              :editable="graphEditable"
-              @connect="connect"
-              @inspect="editLink"
-              :edges="graphEdges"
-              @select="selectResource"
+          </div>
+        </UiAlert>
+        <p v-if="notice" role="status" class="text-sm text-success">
+          {{ notice }}
+        </p>
+        <dl
+          v-if="summary || projection"
+          class="flex flex-wrap gap-5 rounded-panel border border-border bg-surface p-4 text-sm"
+        >
+          <div v-if="summary">
+            <dt class="text-muted">{{ $t("gol.sourceRevision") }}</dt>
+            <dd class="mt-1 break-all font-mono text-xs">
+              {{ summary.sourceRevision }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-muted">{{ $t("gol.activeGeneration") }}</dt>
+            <dd class="mt-1 break-all font-mono text-xs">
+              {{
+                summary?.activeGeneration ??
+                projection?.generation ??
+                $t("gol.notPublished")
+              }}
+            </dd>
+          </div>
+          <div v-if="validation">
+            <dt class="text-muted">{{ $t("gol.validationStatus") }}</dt>
+            <dd>{{ $t(`gol.validation.${validation.status}`) }}</dd>
+          </div>
+        </dl>
+        <section
+          v-if="editing && canEdit && !loading"
+          class="space-y-4 rounded-panel border border-border bg-surface p-4"
+          :aria-label="$t('gol.sourceEditor')"
+        >
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UiInput
+              v-model="id"
+              :label="$t('gol.id')"
+              :disabled="busy || !!summary"
             />
-            <section
-              v-if="(resource && tab === 'overview') || tab === 'properties'"
-              class="overflow-x-auto rounded-control border border-border bg-surface"
+            <UiInput v-model="name" :label="$t('gol.name')" :disabled="busy" />
+          </div>
+          <div class="flex flex-wrap items-end gap-3">
+            <UiSelect
+              v-model="activeFile"
+              :label="$t('gol.file')"
+              :disabled="busy"
+              :options="
+                files.map((file, index) => ({ value: index, label: file.path }))
+              "
+            />
+            <UiButton
+              variant="secondary"
+              :disabled="busy || files.length >= 32"
+              @click="addFile"
+              >{{ $t("gol.addFile") }}</UiButton
             >
-              <h2
-                class="border-b border-border px-4 py-3 text-sm font-semibold"
+          </div>
+          <UiInput
+            v-if="current"
+            v-model="current.path"
+            :label="$t('gol.path')"
+            :disabled="busy"
+          />
+          <div ref="sourcePanel">
+            <UiTextarea
+              v-model="source"
+              :label="$t('gol.source')"
+              :disabled="busy"
+              class="min-h-[420px] font-mono text-xs"
+              spellcheck="false"
+            />
+          </div>
+          <p class="text-sm text-muted">{{ $t("gol.sourceHelp") }}</p>
+          <UiButton
+            v-if="canDelete && summary"
+            variant="danger"
+            :disabled="busy || dirty"
+            @click="deleting = true"
+            >{{ $t("gol.delete") }}</UiButton
+          >
+        </section>
+        <section
+          v-if="editing && diagnostics.length"
+          class="rounded-panel border border-border bg-surface p-4"
+          :aria-label="$t('gol.diagnostics')"
+        >
+          <h2 class="mb-3 font-semibold">{{ $t("gol.diagnostics") }}</h2>
+          <ul class="space-y-2">
+            <li
+              v-for="(diagnostic, index) in diagnostics"
+              :key="`${diagnostic.path}:${diagnostic.start}:${index}`"
+            >
+              <UiButton
+                variant="ghost"
+                align="start"
+                class="w-full"
+                @click="inspectDiagnostic(diagnostic)"
+                ><span class="break-words text-left"
+                  ><strong>{{ diagnostic.code }}</strong> ·
+                  {{ diagnostic.path }} · {{ diagnostic.start }}–{{
+                    diagnostic.end
+                  }}<span class="block">{{ diagnostic.message }}</span></span
+                ></UiButton
               >
-                {{ $t("ontologyManager.properties_2") }}
-              </h2>
-              <table class="w-full text-left text-sm">
-                <thead class="bg-surface-muted text-muted">
+            </li>
+          </ul>
+        </section>
+        <section
+          v-if="dependencies.length"
+          class="rounded-panel border border-border bg-surface p-4"
+          :aria-label="$t('gol.dependencies')"
+        >
+          <h2 class="mb-3 font-semibold">{{ $t("gol.dependencies") }}</h2>
+          <ul class="space-y-2 text-sm">
+            <li
+              v-for="dependency in dependencies"
+              :key="`${dependency.ontologyId}:${dependency.generation}`"
+            >
+              <NuxtLink
+                :to="`/ontology/edit/${encodeURIComponent(dependency.ontologyId)}`"
+                class="text-primary-foreground"
+                >{{ dependency.ontologyId }}</NuxtLink
+              ><span class="ml-2 break-all font-mono text-xs text-muted">{{
+                dependency.generation
+              }}</span>
+            </li>
+          </ul>
+        </section>
+        <template v-if="projection">
+          <section
+            class="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]"
+            :aria-label="$t('gol.symbols')"
+          >
+            <nav
+              class="rounded-panel border border-border bg-surface p-3"
+              :aria-label="$t('gol.symbols')"
+            >
+              <UiButton
+                v-for="item in projection.symbols"
+                :key="item.key"
+                variant="ghost"
+                align="start"
+                class="w-full"
+                :aria-pressed="symbol?.key === item.key"
+                @click="selected = item.key"
+                >{{ item.name }}</UiButton
+              >
+            </nav>
+            <section
+              v-if="symbol"
+              class="min-w-0 space-y-4 rounded-panel border border-border bg-surface p-4"
+            >
+              <h2 class="text-lg font-semibold">{{ symbol.name }}</h2>
+              <p class="break-all text-xs text-muted">
+                {{ symbol.kind }} · {{ symbol.key }}
+              </p>
+              <table
+                v-if="symbol.properties.length"
+                class="w-full text-left text-sm"
+              >
+                <thead>
                   <tr>
-                    <th class="p-3">{{ $t("ontologyManager.name") }}</th>
-                    <th class="p-3">{{ $t("ontologyManager.type") }}</th>
-                    <th class="p-3">
-                      {{ $t("ontologyManager.identifier") }}
-                    </th>
+                    <th class="p-2">{{ $t("gol.property") }}</th>
+                    <th class="p-2">{{ $t("gol.type") }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr
-                    v-for="p in properties"
-                    :key="p.resource_id"
+                    v-for="property in symbol.properties"
+                    :key="property.key"
                     class="border-t border-border"
                   >
-                    <td class="p-3">
-                      <UiButton
-                        variant="ghost"
-                        align="start"
-                        @click="inspectedProperty = p.resource_id"
-                        ><ListBulletIcon
-                          aria-hidden="true"
-                          class="mr-2 h-4 w-4"
-                        />{{ resourceLabel(p) }}</UiButton
-                      >
+                    <td class="p-2">{{ property.name }}</td>
+                    <td class="p-2 font-mono text-xs">
+                      {{ property.typeName }}
                     </td>
-                    <td class="p-3">
-                      <OntologyValueType :value="p.value_type ?? p.kind" />
-                    </td>
-                    <td class="p-3 text-muted">{{ p.resource_id }}</td>
                   </tr>
                 </tbody>
               </table>
-              <div
-                v-if="graphEditable && selected"
-                class="flex flex-wrap gap-2 border-t border-border p-3"
+              <div v-if="symbol.references.length">
+                <h3 class="font-semibold">{{ $t("gol.references") }}</h3>
+                <ul class="mt-2 space-y-1 text-xs">
+                  <li
+                    v-for="reference in symbol.references"
+                    :key="reference"
+                    class="break-all font-mono"
+                  >
+                    {{ reference }}
+                  </li>
+                </ul>
+              </div>
+              <UiSelect
+                v-model="profile"
+                :label="$t('gol.profile')"
+                :options="
+                  (['STANDARD', 'OPEN_AI_STRICT', 'OUTLINES'] as const).map(
+                    (value) => ({ value, label: $t(`gol.profiles.${value}`) }),
+                  )
+                "
+              />
+              <div v-if="symbol.properties.length" class="flex flex-wrap gap-3">
+                <UiCheckbox
+                  v-for="property in symbol.properties"
+                  :key="property.key"
+                  :label="property.name"
+                  :model-value="fields.includes(property.name)"
+                  @update:model-value="
+                    (value) => selectField(property.name, value === true)
+                  "
+                />
+              </div>
+              <UiButton
+                variant="secondary"
+                :disabled="busy"
+                :action="previewSchema"
+                >{{ $t("gol.previewSchema") }}</UiButton
               >
-                <UiField
-                  :label="$t('ontologyManager.property_name')"
-                  v-slot="field"
-                  ><UiInput
-                    v-model="newPropertyName"
-                    :id="field.id"
-                    :disabled="busy"
-                    :aria-label="$t('ontologyManager.property_name')"
-                    :placeholder="
-                      $t('ontologyManager.property_name')
-                    " /></UiField
-                ><UiField
-                  :label="$t('ontologyManager.property_identifier')"
-                  v-slot="field"
-                  ><UiInput
-                    v-model="newPropertyId"
-                    :id="field.id"
-                    :disabled="busy"
-                    :aria-label="$t('ontologyManager.property_identifier')"
-                    :placeholder="
-                      $t('ontologyManager.organization_person_name')
-                    " /></UiField
-                ><UiField
-                  :label="$t('ontologyManager.property_type')"
-                  v-slot="field"
-                  ><UiSelect
-                    v-model="newPropertyType"
-                    :id="field.id"
-                    :disabled="busy"
-                    :aria-label="$t('ontologyManager.property_type')"
-                    :options="
-                      ['string', 'integer', 'boolean', 'datetime', 'json'].map(
-                        (value) => ({ value, label: value }),
-                      )
-                    " /></UiField
-                ><UiButton
-                  variant="secondary"
-                  :disabled="busy || !newPropertyName.trim()"
-                  @click="addProperty"
-                  >{{ $t("ontologyManager.add_property") }}</UiButton
-                >
-              </div>
+              <p class="text-xs text-muted">{{ $t("gol.schemaHelp") }}</p>
             </section>
-            <details
-              v-if="selectedPackage && !selected && tab === 'overview'"
-              class="rounded-control border border-border bg-surface p-4"
-              :aria-label="$t('ontologyManager.participant_mappings')"
-            >
-              <summary class="cursor-pointer font-semibold">
-                {{ $t("ontologyManager.contactConnections") }}
-              </summary>
-              <p class="my-2 text-sm text-muted">
-                {{ $t("ontologyManager.contactConnectionsHelp") }}
-              </p>
-              <UiField
-                :label="$t('ontologyManager.target_ontology')"
-                v-slot="field"
-                ><UiSelect
-                  :model-value="targetId"
-                  :id="field.id"
-                  :disabled="busy || !canManage || (!editing && !!revision)"
-                  :aria-label="$t('ontologyManager.target_ontology')"
-                  :options="[
-                    { value: '', label: $t('ontologyManager.keepIsolated') },
-                    ...ontologies
-                      .filter(
-                        (o) => o.productionPublication && o.ontologyId !== id,
-                      )
-                      .map((o) => ({
-                        value: o.ontologyId,
-                        label: o.displayName,
-                      })),
-                  ]"
-                  @update:model-value="chooseTarget"
-              /></UiField>
-              <div class="mt-4 grid gap-3 sm:grid-cols-2">
-                <label
-                  v-for="slot in slots"
-                  :key="slot.resource_id"
-                  class="text-sm"
-                  >{{ resourceLabel(slot)
-                  }}<UiSelect
-                    :disabled="busy || !canManage || (!editing && !!revision)"
-                    :model-value="mappings[slot.resource_id] ?? ''"
-                    :aria-label="
-                      $t('ontologyManager.participantType', {
-                        name: resourceLabel(slot),
-                      })
-                    "
-                    :options="[
-                      {
-                        value: '',
-                        label: $t('ontologyManager.isolatedPerson'),
-                      },
-                      ...targetTypes.map((r) => ({
-                        value: r.resource_id,
-                        label: r.display_name,
-                      })),
-                    ]"
-                    @update:model-value="
-                      (value) => setMapping(slot.resource_id, value)
-                    "
-                /></label>
-              </div>
-            </details>
-            <details
-              class="rounded-control border border-border bg-surface p-4 text-sm"
-            >
-              <summary>
-                {{ $t("ontologyManager.advanced_provenance_and_identifiers") }}
-              </summary>
-              <pre class="mt-3 overflow-x-auto text-xs">{{
-                JSON.stringify(
-                  {
-                    origin: document.plugin_origin,
-                    target: document.target_origin,
-                    mappings,
-                  },
-                  null,
-                  2,
-                )
-              }}</pre>
-            </details>
-          </template>
-        </div>
-      </main>
-      <main v-else class="p-8">
+          </section>
+          <LazyOntologyRelations
+            v-if="projection.symbols.length"
+            :nodes="graph.nodes"
+            :edges="graph.edges"
+            @select="selected = $event"
+          />
+        </template>
         <UiEmptyState
-          :title="$t('ontologyManager.connect_your_business_concepts')"
-          :description="
-            $t(
-              'ontologyManager.explore_a_plugin_model_or_create_an_ontology_for',
-            )
-          "
+          v-else-if="!loading && !failed && !editing"
+          :title="$t('gol.noSymbols')"
+          :description="$t('gol.noSymbolsHelp')"
         />
-      </main>
+        <section
+          v-if="schema !== undefined"
+          class="rounded-panel border border-border bg-surface p-4"
+          :aria-label="$t('gol.schema')"
+        >
+          <h2 class="mb-3 font-semibold">{{ $t("gol.schema") }}</h2>
+          <pre
+            class="max-h-[480px] overflow-auto whitespace-pre-wrap break-words text-xs"
+            >{{ JSON.stringify(schema, null, 2) }}</pre>
+        </section>
+      </div>
     </div>
+    <OntologySourceComparison
+      v-if="latest"
+      v-model:open="comparing"
+      :latest="latest.files"
+      :draft="files"
+      @keep="keepDraft"
+    />
+    <UiDialog
+      v-model:open="reviewing"
+      :title="$t('gol.review')"
+      :description="$t('gol.reviewHelp')"
+      ><div class="space-y-4">
+        <section v-for="file in files" :key="file.path">
+          <h3 class="font-semibold">{{ file.path }}</h3>
+          <pre
+            class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs"
+            >{{ file.text }}</pre>
+        </section>
+      </div>
+      <template #footer
+        ><UiButton variant="secondary" @click="reviewing = false">{{
+          $t("gol.cancel")
+        }}</UiButton
+        ><UiButton :disabled="busy || !valid" :action="publish">{{
+          $t("gol.confirmPublish")
+        }}</UiButton></template
+      ></UiDialog
+    >
     <UiDialog
       v-model:open="deleting"
-      :title="$t('ontologyManager.collaboration.deleteOntology')"
-      :description="$t('ontologyManager.collaboration.deleteHelp')"
-    >
-      <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
-      <template #footer
+      :title="$t('gol.delete')"
+      :description="$t('gol.deleteHelp')"
+      ><template #footer
         ><UiButton variant="secondary" @click="deleting = false">{{
-          $t("ontologyManager.cancel")
+          $t("gol.cancel")
         }}</UiButton
         ><UiButton
           variant="danger"
           :disabled="busy || dirty"
-          @click="
-            async () => {
-              if (await author({ operation: 'delete' })) deleting = false;
-            }
-          "
-          >{{ $t("ontologyManager.collaboration.deleteOntology") }}</UiButton
-        ></template
-      >
-    </UiDialog>
-    <OntologyObjectWizard
-      v-model:open="creatingType"
-      :error="error"
-      @create="createType"
-    />
-    <OntologyRelationshipEditor
-      :draft="editedLink"
-      :types="types"
-      :error="error"
-      @save="saveLink"
-      @remove="removeLink"
-      @close="editedLink = undefined"
-    />
-    <UiDialog
-      v-model:open="reviewing"
-      :title="$t('ontologyManager.review_ontology_changes')"
-      :description="
-        $t('ontologyManager.saving_creates_a_tenant_only_draft_publication_i')
-      "
-      ><p class="mb-3 text-sm">
-        <span
-          >{{ pending?.resources.length ?? 0 }}
-          {{ $t("ontologyManager.resources") }}</span
-        >
-        <span class="mx-2" aria-hidden="true">·</span>
-        <span
-          >{{ Object.keys(mappings).length }}
-          {{ $t("ontologyManager.explicit_participant_mappings") }}</span
-        >
-      </p>
-      <ul class="space-y-2 text-sm">
-        <li v-for="(value, key) in mappings" :key="key">
-          {{ key }} → {{ value }}
-        </li>
-      </ul>
-      <template #footer
-        ><UiButton variant="secondary" @click="reviewing = false">{{
-          $t("ontologyManager.cancel")
-        }}</UiButton
-        ><UiButton
-          :disabled="busy || !canManage || (!editing && !!revision)"
-          @click="save"
-          >{{ $t("ontologyManager.save_draft") }}</UiButton
+          :action="remove"
+          >{{ $t("gol.delete") }}</UiButton
         ></template
       ></UiDialog
     >
-    <UiDialog
-      :open="!!propertyDetails"
-      :title="propertyDetails ? resourceLabel(propertyDetails) : ''"
-      :description="propertyDetails?.resource_id"
-      @update:open="
-        (value) => {
-          if (!value) inspectedProperty = '';
-        }
-      "
-    >
-      <dl v-if="propertyDetails" class="space-y-4 text-sm">
-        <div>
-          <dt class="text-xs text-muted">{{ $t("ontologyManager.type") }}</dt>
-          <dd class="mt-1">
-            <OntologyValueType
-              :value="propertyDetails.value_type ?? propertyDetails.kind"
-            />
-          </dd>
-        </div>
-        <div v-if="typeof propertyDetails.attributes.description === 'string'">
-          <dt class="text-xs text-muted">
-            {{ $t("ontologyManager.resourceDescription") }}
-          </dt>
-          <dd>{{ propertyDetails.attributes.description }}</dd>
-        </div>
-        <div>
-          <dt class="text-xs text-muted">
-            {{ $t("ontologyManager.resourceOwner") }}
-          </dt>
-          <dd>{{ propertyDetails.owner_id ?? "—" }}</dd>
-        </div>
-        <div>
-          <dt class="text-xs text-muted">
-            {{ $t("ontologyManager.resourceReferences") }}
-          </dt>
-          <dd
-            v-for="reference in propertyDetails.references"
-            :key="reference"
-            class="mt-1 break-all font-mono text-xs"
-          >
-            {{ reference }}
-          </dd>
-          <dd v-if="!propertyDetails.references.length">—</dd>
-        </div>
-      </dl>
-    </UiDialog>
   </section>
 </template>

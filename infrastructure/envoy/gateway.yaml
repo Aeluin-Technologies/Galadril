@@ -224,6 +224,12 @@ static_resources:
               - '*'
               routes:
               - match:
+                  path: /internal/gol/runtime
+                route: {cluster: application, timeout: 30s}
+              - match:
+                  path: /internal/gol/effect
+                route: {cluster: application, timeout: 30s}
+              - match:
                   path: /internal/chat/tools
                 route:
                   cluster: application
@@ -310,6 +316,21 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /internal/chat/events
+                  gol_runtime:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/vision
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match: {exact: POST}
+                        - or_rules:
+                            rules:
+                            - url_path: {path: {exact: /internal/gol/runtime}}
+                            - url_path: {path: {exact: /internal/gol/effect}}
                   document_compiler:
                     principals:
                     - authenticated:
@@ -380,6 +401,9 @@ static_resources:
               - san_type: URI
                 matcher:
                   exact: spiffe://galadril/scribe
+              - san_type: URI
+                matcher:
+                  exact: spiffe://galadril/vision
               - san_type: URI
                 matcher:
                   exact: spiffe://galadril/document-compiler

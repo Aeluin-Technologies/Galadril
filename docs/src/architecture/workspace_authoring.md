@@ -41,30 +41,25 @@ and the per-change review progression in
 [GitHub's review workflow](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/reviewing-proposed-changes-in-a-pull-request).
 Exact configuration remains available under advanced details.
 
-## Ontology access and navigation
+## GOL access and navigation
 
-`/ontology` lists authorized organization ontologies and isolated plugin originals.
-`/ontology/new` prepares a tenant draft, optionally from a selected package.
-`/ontology/edit/[id]` opens an existing tenant ontology. The editor's return link
-points to all ontologies. The email shortcut is labelled "Email ontology" and
-retains its ontology-creation permission check.
+The ontology catalog and editor now use the [GOL dashboard contract](gol-dashboard.md).
+`/ontology` lists authorized GOL publications, `/ontology/new` creates a source
+package and `/ontology/edit/[id]` explores one compiled generation. Full source
+authoring requires a separate explicit action and server disclosure admission.
+The removed ontology branches, YAML documents and plugin overlays are not retained.
 
-Global search combines its static ontology shortcut with a separate authorized
-ontology catalog request. Dynamic results have bounded canonical internal paths,
-are cancelled when superseded, and are cleared on account, tenant or access
-invalidation. An unavailable graph search does not erase ontology results.
-An unavailable plugin catalog or unrelated pipeline permission does not prevent
-opening an authorized custom ontology. These presentation changes introduce no
-new execution or ontology management permissions.
+Global search uses the authorized GOL catalog. Dynamic results have bounded
+canonical internal paths, are cancelled when superseded, and are cleared on
+account, tenant or access invalidation. Unrelated graph-search failures do not
+erase successfully authorized ontology results.
 
-Gateway's Compose default now matches its application default: Scribe is enabled
-unless explicitly disabled. `/plugin-ontologies` is routed through Gateway's egress
-proxy and allowed only for Gateway's authenticated GET catalog policy, including
-the Kubernetes equivalent. POST remains denied. Apply the updated configuration
-and proxy policies to running deployments; editing source does not update existing
-containers.
+## Pipeline workspace verification history
 
-## Verification scope
+The following measurements predate the GOL replacement. They are historical
+pipeline-workspace evidence and do not validate the current GOL implementation.
+Current GOL test targets and evidence boundaries are documented separately in
+[the GOL dashboard contract](gol-dashboard.md).
 
 BuildBuddy remote execution passed the affected Registry domain/unit tests,
 Compose and Envoy contracts, and the real Envoy proxy integration test. The

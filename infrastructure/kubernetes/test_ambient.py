@@ -76,6 +76,7 @@ class AmbientIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as workspace:
             target = Path(workspace)
             for relative in (
+                "infrastructure/gol",
                 "infrastructure/kubernetes",
                 "schemas/avro",
                 "schemas/spicedb",

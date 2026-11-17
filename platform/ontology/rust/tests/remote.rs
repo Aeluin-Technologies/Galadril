@@ -16,6 +16,16 @@ fn rejects_unbounded_or_zero_lifetimes() {
     assert!(options.validate().is_err());
 }
 
+#[test]
+fn publication_generations_reject_unparseable_identifiers()
+-> Result<(), Box<dyn std::error::Error>> {
+    use galadril_ontology::archive::remote::Generation;
+    assert!("invalid".parse::<Generation>().is_err());
+    let generation: Generation = "e2c31fa800614419aa21ccb13c009bff".parse()?;
+    assert_eq!(generation.to_string(), "e2c31fa800614419aa21ccb13c009bff");
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "starts the version-pinned local RustFS image"]
 async fn docker_rustfs_preconditions_reject_versioned_buckets()

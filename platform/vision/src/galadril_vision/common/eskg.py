@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum, unique
 
-from galadril_ontology import ResourceKind, active_ontology_slice
-from galadril_ontology.identity import normalize_tenant_id, validate_resource_id
+from galadril_ontology import GolSymbolKind, active_gol_lease
+from galadril_ontology.identity import normalize_tenant_id, validate_symbol_key
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -23,63 +23,65 @@ class GraphNodeKind(StrEnum):
     METRIC = "Metric"
 
 
-ONTOLOGY_KINDS: dict[GraphNodeKind, ResourceKind] = {
-    GraphNodeKind.ENTITY: ResourceKind.OBJECT_TYPE,
-    GraphNodeKind.EVENT: ResourceKind.EVENT_TYPE,
-    GraphNodeKind.STATE: ResourceKind.PROPERTY,
-    GraphNodeKind.LATENT_IDENTITY: ResourceKind.OBJECT_TYPE,
-    GraphNodeKind.CAUSAL_VARIABLE: ResourceKind.PROPERTY,
+ONTOLOGY_KINDS: dict[GraphNodeKind, GolSymbolKind] = {
+    GraphNodeKind.ENTITY: GolSymbolKind.ENTITY,
+    GraphNodeKind.EVENT: GolSymbolKind.ENTITY,
+    GraphNodeKind.STATE: GolSymbolKind.FIELD,
+    GraphNodeKind.LATENT_IDENTITY: GolSymbolKind.ENTITY,
+    GraphNodeKind.CAUSAL_VARIABLE: GolSymbolKind.FIELD,
 }
 
 
-class OntologyReference(BaseModel):
+class GolReference(BaseModel):
     """Pins classification without embedding an ontology definition in AGE."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     tenant_id: str
     ontology_id: str = Field(min_length=1, max_length=128)
-    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
-    resource_id: str
-    resource_kind: ResourceKind
+    ontology_version: str = Field(min_length=1, max_length=128)
+    source_revision: str = Field(min_length=1, max_length=128)
+    generation_id: str = Field(min_length=1, max_length=128)
+    symbol_key: str
+    symbol_kind: GolSymbolKind
 
     @field_validator("tenant_id")
     @classmethod
     def _tenant(cls, value: str) -> str:
         return normalize_tenant_id(value)
 
-    @field_validator("resource_id")
+    @field_validator("symbol_key")
     @classmethod
     def _resource(cls, value: str) -> str:
-        return validate_resource_id(value)
+        return validate_symbol_key(value)
 
 
-def resolve_ontology_reference(
+def resolve_gol_reference(
     resource_id: object, tenant_id: str, kind: GraphNodeKind
-) -> OntologyReference | None:
-    """Derives provenance exclusively from the active, validated Registry slice."""
+) -> GolReference | None:
+    """Derives provenance exclusively from the active, validated GOL calculation."""
     if resource_id is None:
         return None
     if not isinstance(resource_id, str) or not resource_id:
-        raise ValueError("ontology resource identifier is required")
-    active = active_ontology_slice()
+        raise ValueError("GOL symbol identifier is required")
+    active = active_gol_lease()
     if active is None:
-        raise ValueError("classification requires an active Registry slice")
-    if active.metadata.tenant_id != normalize_tenant_id(tenant_id):
+        raise ValueError("classification requires an active GOL calculation")
+    if active.tenant_id != normalize_tenant_id(tenant_id):
         raise ValueError("classification crosses the active ontology tenant")
-    resource = active.ontology.get(resource_id)
+    resource = active.symbol(resource_id)
     if resource is None:
         raise ValueError("ontology classification resource is unavailable")
     if ONTOLOGY_KINDS.get(kind) != resource.kind:
-        raise ValueError(
-            "ontology resource kind is incompatible with graph kind"
-        )
-    return OntologyReference(
-        tenant_id=active.metadata.tenant_id,
-        ontology_id=active.metadata.ontology_id,
-        revision_id=active.metadata.revision_id,
-        resource_id=resource.resource_id,
-        resource_kind=resource.kind,
+        raise ValueError("GOL symbol kind is incompatible with graph kind")
+    return GolReference(
+        tenant_id=active.tenant_id,
+        ontology_id=resource.key.partition("::")[0],
+        ontology_version=resource.version,
+        source_revision=active.source_revision,
+        generation_id=active.generation_id,
+        symbol_key=resource.key,
+        symbol_kind=resource.kind,
     )
 
 

@@ -116,6 +116,7 @@ async fn test_intake_pipeline_e2e_lifecycle() {
                     "https://issuer.example".to_string(),
                 ),
                 delegation_id: Some("delegation-test".to_string()),
+                gol_admission: Some("gateway-admission".to_owned()),
             })
         });
 
@@ -140,6 +141,7 @@ async fn test_intake_pipeline_e2e_lifecycle() {
                     "https://issuer.example".to_string(),
                 ),
                 delegation_id: Some("delegation-test".to_string()),
+                gol_admission: Some("gateway-admission".to_owned()),
             })
         });
 
@@ -165,16 +167,18 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              key: &str,
              payload: &Value,
              identity: &PipelineIdentity| {
-                topic == "finance.gold.transactions" &&
-                    *schema == Some("schemas/transaction.avsc") &&
-                    !key.is_empty() &&
-                    payload["id"] == "tx_201" &&
-                    payload["amount"] == 99.99 &&
-                    payload["currency"] == "EUR" &&
-                    payload["observation"]["input_type"] == "TABULAR" &&
-                    identity.tenant_id == "tenant-alpha" &&
-                    identity.pipeline_id == "ingest" &&
-                    identity.revision_id == "revision_1"
+                topic == "finance.gold.transactions"
+                    && *schema == Some("schemas/transaction.avsc")
+                    && !key.is_empty()
+                    && payload["id"] == "tx_201"
+                    && payload.pointer("/authz/gol_admission")
+                        == Some(&serde_json::json!("gateway-admission"))
+                    && payload["amount"] == 99.99
+                    && payload["currency"] == "EUR"
+                    && payload["observation"]["input_type"] == "TABULAR"
+                    && identity.tenant_id == "tenant-alpha"
+                    && identity.pipeline_id == "ingest"
+                    && identity.revision_id == "revision_1"
             },
         )
         .times(1)
@@ -188,13 +192,13 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              key: &str,
              payload: &Value,
              identity: &PipelineIdentity| {
-                topic == "finance.gold.transactions" &&
-                    *schema == Some("schemas/transaction.avsc") &&
-                    !key.is_empty() &&
-                    payload["id"] == "tx_202" &&
-                    payload["amount"] == 450.00 &&
-                    payload["status"] == "pending" &&
-                    identity.tenant_id == "tenant-alpha"
+                topic == "finance.gold.transactions"
+                    && *schema == Some("schemas/transaction.avsc")
+                    && !key.is_empty()
+                    && payload["id"] == "tx_202"
+                    && payload["amount"] == 450.00
+                    && payload["status"] == "pending"
+                    && identity.tenant_id == "tenant-alpha"
             },
         )
         .times(1)
@@ -208,13 +212,13 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              key: &str,
              payload: &Value,
              identity: &PipelineIdentity| {
-                topic == "iam.gold.events" &&
-                    schema.is_none() &&
-                    !key.is_empty() &&
-                    payload["user_id"] == "usr_abc123" &&
-                    payload["action"] == "login_attempt" &&
-                    payload["risk_score"] == 0.12 &&
-                    identity.tenant_id == "tenant-beta"
+                topic == "iam.gold.events"
+                    && schema.is_none()
+                    && !key.is_empty()
+                    && payload["user_id"] == "usr_abc123"
+                    && payload["action"] == "login_attempt"
+                    && payload["risk_score"] == 0.12
+                    && identity.tenant_id == "tenant-beta"
             },
         )
         .times(1)

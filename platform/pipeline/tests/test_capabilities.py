@@ -325,3 +325,19 @@ def test_execution_profiles_reject_unknown_policies_and_foreign_contexts(
                 "execution_profile": profile,
             }
         )
+
+
+def test_native_steps_expose_explicit_gol_effect_routes() -> None:
+    """Editors must not conceal contracts required at real effect boundaries."""
+    for capability in builtin_catalog().capabilities:
+        if capability.step_type in {None, "source"}:
+            continue
+        schema = capability.parameters_schema
+        properties = schema.get("properties")
+        assert isinstance(properties, dict)
+        assert {
+            "gol_transfer_symbol_key",
+            "gol_state_symbol_key",
+            "gol_derived_symbol_key",
+        } <= properties.keys()
+        assert "gol_transfer_symbol_key" in schema.get("required", [])

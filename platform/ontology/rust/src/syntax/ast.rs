@@ -502,49 +502,7 @@ pub enum Literal<'a> {
     Char(char),
 }
 
-/// A prefix operator.
-#[cfg_attr(feature = "archive", derive(serde::Serialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum UnaryOp {
-    /// Boolean negation.
-    Not,
-    /// Arithmetic negation.
-    Negate,
-}
-
-/// An infix operator.
-#[cfg_attr(feature = "archive", derive(serde::Serialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum BinaryOp {
-    /// Boolean disjunction.
-    Or,
-    /// Boolean conjunction.
-    And,
-    /// Equality.
-    Equal,
-    /// Inequality.
-    NotEqual,
-    /// Strict less-than comparison.
-    Less,
-    /// Inclusive less-than comparison.
-    LessEqual,
-    /// Strict greater-than comparison.
-    Greater,
-    /// Inclusive greater-than comparison.
-    GreaterEqual,
-    /// Addition.
-    Add,
-    /// Subtraction.
-    Subtract,
-    /// Multiplication.
-    Multiply,
-    /// Division.
-    Divide,
-    /// Remainder.
-    Remainder,
-}
+pub use crate::checked::{BinaryOp, UnaryOp};
 
 /// A continuation at one operator precedence level.
 #[derive(Debug, Clone, PartialEq, Eq)]

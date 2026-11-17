@@ -181,58 +181,65 @@ def test_registry_ontology_restricts_predicates_and_endpoint_types() -> None:
         OpenFacts,
         OpenInformationPipeline,
     )
-    from galadril_ontology import Ontology, OntologyResource, ResourceKind
+    from galadril_ontology import AuthorizedSymbol, GolProjection, GolSymbolKind
 
-    ontology = Ontology(
-        version="published-v1",
-        resources=(
-            OntologyResource(
-                resource_id="object.person",
-                kind=ResourceKind.OBJECT_TYPE,
-                display_name="Person",
+    ontology = GolProjection(
+        tenant_id="tenant-a",
+        ontology_id="core",
+        ontology_version="1.0.0",
+        source_revision="source",
+        generation_id="published-v1",
+        symbols=(
+            AuthorizedSymbol(
+                key="core::Person",
+                kind=GolSymbolKind.ENTITY,
+                version="1.0.0",
+                name="Person",
             ),
-            OntologyResource(
-                resource_id="object.place",
-                kind=ResourceKind.OBJECT_TYPE,
-                display_name="Place",
+            AuthorizedSymbol(
+                key="core::Place",
+                kind=GolSymbolKind.ENTITY,
+                version="1.0.0",
+                name="Place",
             ),
-            OntologyResource(
-                resource_id="link.visits",
-                kind=ResourceKind.LINK_TYPE,
-                display_name="visits",
-                attributes={
-                    "source_type": "object.person",
-                    "target_type": "object.place",
+            AuthorizedSymbol(
+                key="core::Visits",
+                kind=GolSymbolKind.RELATION,
+                version="1.0.0",
+                name="visits",
+                roles={
+                    "source": "core::Person",
+                    "target": "core::Place",
                 },
             ),
         ),
     )
-    policy = ExtractionPolicy.from_registry(ontology)
+    policy = ExtractionPolicy.from_gol(ontology)
     facts = OpenFacts.model_validate(
         {
             "facts": [
                 {
                     "subject": "Alice",
-                    "subject_type": "object.person",
-                    "predicate": "link.visits",
+                    "subject_type": "core::Person",
+                    "predicate": "core::Visits",
                     "object": "Paris",
-                    "object_type": "object.place",
+                    "object_type": "core::Place",
                     "evidence": "Alice visits Paris",
                 },
                 {
                     "subject": "Alice",
-                    "subject_type": "object.place",
-                    "predicate": "link.visits",
+                    "subject_type": "core::Place",
+                    "predicate": "core::Visits",
                     "object": "Paris",
-                    "object_type": "object.person",
+                    "object_type": "core::Person",
                     "evidence": "Alice visits Paris",
                 },
                 {
                     "subject": "Alice",
-                    "subject_type": "object.person",
+                    "subject_type": "core::Person",
                     "predicate": "invented",
                     "object": "Paris",
-                    "object_type": "object.place",
+                    "object_type": "core::Place",
                     "evidence": "Alice visits Paris",
                 },
             ]
@@ -242,7 +249,7 @@ def test_registry_ontology_restricts_predicates_and_endpoint_types() -> None:
         "Alice visits Paris", (), facts, policy
     )
     assert len(result.facts) == 1
-    assert result.facts[0].predicate == "link.visits"
+    assert result.facts[0].predicate == "core::Visits"
     assert result.rejected == 2
 
 
@@ -252,9 +259,17 @@ def test_empty_registry_ontology_never_becomes_unrestricted() -> None:
         OpenFacts,
         OpenInformationPipeline,
     )
-    from galadril_ontology import Ontology
+    from galadril_ontology import GolProjection
 
-    policy = ExtractionPolicy.from_registry(Ontology(version="empty"))
+    policy = ExtractionPolicy.from_gol(
+        GolProjection(
+            tenant_id="tenant-a",
+            ontology_id="core",
+            ontology_version="1.0.0",
+            source_revision="s",
+            generation_id="empty",
+        )
+    )
     proposed = OpenFacts.model_validate(
         {
             "facts": [
@@ -276,49 +291,38 @@ def test_empty_registry_ontology_never_becomes_unrestricted() -> None:
     assert result.rejected == 1
 
 
-def test_pipeline_consumes_task_bound_registry_ontology_without_global_state() -> (
+def test_pipeline_consumes_bound_gol_projection_without_semantic_resolution() -> (
     None
 ):
     import asyncio
-    from datetime import UTC, datetime
 
     from eru.documents import OpenInformationPipeline
-    from galadril_ontology import (
-        Ontology,
-        OntologyRuntimeManager,
-        OntologySlice,
-        OntologySliceMetadata,
-        OntologySliceRequest,
-    )
+    from galadril_ontology import GolLease, GolRequest, GolRuntimeManager
 
-    class Store:
-        async def load_runtime_slice(
-            self, request: OntologySliceRequest
-        ) -> OntologySlice:
-            return OntologySlice(
-                ontology=Ontology(version="closed"),
-                metadata=OntologySliceMetadata(
-                    tenant_id=request.tenant_id,
-                    ontology_id="ontology",
-                    publication_id="published",
-                    revision_id="a" * 32,
-                    base_version="1",
-                    base_hash="b" * 64,
-                    effective_hash="c" * 64,
-                    published_at=datetime.now(UTC),
-                ),
+    class Gateway:
+        async def open(self, request: GolRequest, admission: str) -> GolLease:
+            return GolLease(
+                tenant_id=request.tenant_id,
+                ontology_id="core",
+                ontology_version="1.0.0",
+                source_revision="source",
+                generation_id="generation",
+                context_id="context",
             )
 
     backend = Backend()
 
     async def extract() -> None:
-        request = OntologySliceRequest(
+        request = GolRequest(
+            source_object_id="raw:tenant-a/source/object",
             tenant_id="tenant-a",
             pipeline_id="pipeline",
             pipeline_revision_id="revision",
             block_id="extract",
         )
-        async with OntologyRuntimeManager(Store()).bind(request):
+        async with GolRuntimeManager(Gateway()).bind(
+            request, admission="opaque"
+        ):
             result = OpenInformationPipeline(backend).extract(
                 "Alice works in Lorraine"
             )

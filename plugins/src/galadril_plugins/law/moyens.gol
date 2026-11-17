@@ -1,0 +1,118 @@
+// Authored GOL contract; security identities remain external.
+
+ontology law.moyens version "0.4.0" {
+    import law.ecritures version "0.4.0" as LawEcritures;
+    import law.socle version "0.4.0" as LawSocle;
+    security label LegalData {
+        classification: Restricted;
+        compartments: [Legal];
+    }
+    entity Plea {
+        field title: String @label(LegalData);
+        field text: String @label(LegalData);
+    }
+    relation FilingPleas {
+        role source: law.ecritures.Filing [1..1];
+        role target: Plea [0..*];
+    }
+    relation PleaProvisions {
+        role source: Plea [1..1];
+        role target: law.socle.Provision [0..*];
+    }
+    relation PleaJurisprudence {
+        role source: Plea [1..1];
+        role target: law.socle.JudicialDecision [0..*];
+    }
+    access Plea {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access FilingPleas {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access PleaProvisions {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access PleaJurisprudence {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}

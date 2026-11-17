@@ -196,125 +196,191 @@ class GetRuntimePipelineRequest(_message.Message):
     revision_id: str
     def __init__(self, tenant_id: _Optional[str] = ..., pipeline_id: _Optional[str] = ..., revision_id: _Optional[str] = ...) -> None: ...
 
-class OntologyRevision(_message.Message):
-    __slots__ = ("ontology_id", "display_name", "revision_id", "ontology_json", "author", "message", "created_at_ms", "authoring_json")
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_JSON_FIELD_NUMBER: _ClassVar[int]
-    AUTHOR_FIELD_NUMBER: _ClassVar[int]
+class GolFile(_message.Message):
+    __slots__ = ("path", "text")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    text: str
+    def __init__(self, path: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class GolDiagnostic(_message.Message):
+    __slots__ = ("code", "message", "path", "start", "end", "severity")
+    CODE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    AUTHORING_JSON_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    code: str
+    message: str
+    path: str
+    start: int
+    end: int
+    severity: str
+    def __init__(self, code: _Optional[str] = ..., message: _Optional[str] = ..., path: _Optional[str] = ..., start: _Optional[int] = ..., end: _Optional[int] = ..., severity: _Optional[str] = ...) -> None: ...
+
+class GolDependency(_message.Message):
+    __slots__ = ("ontology_id", "generation", "source_revision")
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    ontology_id: str
+    generation: str
+    source_revision: str
+    def __init__(self, ontology_id: _Optional[str] = ..., generation: _Optional[str] = ..., source_revision: _Optional[str] = ...) -> None: ...
+
+class GolSummary(_message.Message):
+    __slots__ = ("ontology_id", "display_name", "source_revision", "active_generation", "active_source_revision", "status")
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
     ontology_id: str
     display_name: str
-    revision_id: str
-    ontology_json: bytes
-    author: str
-    message: str
-    created_at_ms: int
-    authoring_json: bytes
-    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., revision_id: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., authoring_json: _Optional[bytes] = ...) -> None: ...
+    source_revision: str
+    active_generation: str
+    active_source_revision: str
+    status: str
+    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., source_revision: _Optional[str] = ..., active_generation: _Optional[str] = ..., active_source_revision: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
 
-class PutOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "display_name", "ontology_json", "author", "message", "expected_revision_id", "create_only", "authoring_command_json")
+class GolWorkspace(_message.Message):
+    __slots__ = ("summary", "files", "diagnostics", "dependencies")
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    DIAGNOSTICS_FIELD_NUMBER: _ClassVar[int]
+    DEPENDENCIES_FIELD_NUMBER: _ClassVar[int]
+    summary: GolSummary
+    files: _containers.RepeatedCompositeFieldContainer[GolFile]
+    diagnostics: _containers.RepeatedCompositeFieldContainer[GolDiagnostic]
+    dependencies: _containers.RepeatedCompositeFieldContainer[GolDependency]
+    def __init__(self, summary: _Optional[_Union[GolSummary, _Mapping]] = ..., files: _Optional[_Iterable[_Union[GolFile, _Mapping]]] = ..., diagnostics: _Optional[_Iterable[_Union[GolDiagnostic, _Mapping]]] = ..., dependencies: _Optional[_Iterable[_Union[GolDependency, _Mapping]]] = ...) -> None: ...
+
+class GolValidation(_message.Message):
+    __slots__ = ("ontology_id", "source_revision", "status", "diagnostics", "dependencies")
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    DIAGNOSTICS_FIELD_NUMBER: _ClassVar[int]
+    DEPENDENCIES_FIELD_NUMBER: _ClassVar[int]
+    ontology_id: str
+    source_revision: str
+    status: str
+    diagnostics: _containers.RepeatedCompositeFieldContainer[GolDiagnostic]
+    dependencies: _containers.RepeatedCompositeFieldContainer[GolDependency]
+    def __init__(self, ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., status: _Optional[str] = ..., diagnostics: _Optional[_Iterable[_Union[GolDiagnostic, _Mapping]]] = ..., dependencies: _Optional[_Iterable[_Union[GolDependency, _Mapping]]] = ...) -> None: ...
+
+class GolPublication(_message.Message):
+    __slots__ = ("ontology_id", "source_revision", "generation")
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    ontology_id: str
+    source_revision: str
+    generation: str
+    def __init__(self, ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., generation: _Optional[str] = ...) -> None: ...
+
+class SaveGolOntologyRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "display_name", "files", "author", "expected_revision")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_JSON_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    CREATE_ONLY_FIELD_NUMBER: _ClassVar[int]
-    AUTHORING_COMMAND_JSON_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     ontology_id: str
     display_name: str
-    ontology_json: bytes
+    files: _containers.RepeatedCompositeFieldContainer[GolFile]
     author: str
-    message: str
-    expected_revision_id: str
-    create_only: bool
-    authoring_command_json: bytes
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., expected_revision_id: _Optional[str] = ..., create_only: bool = ..., authoring_command_json: _Optional[bytes] = ...) -> None: ...
+    expected_revision: str
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., files: _Optional[_Iterable[_Union[GolFile, _Mapping]]] = ..., author: _Optional[str] = ..., expected_revision: _Optional[str] = ...) -> None: ...
 
-class GetOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "revision_id")
+class GetGolWorkspaceRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "source_revision")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     ontology_id: str
-    revision_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., revision_id: _Optional[str] = ...) -> None: ...
+    source_revision: str
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ...) -> None: ...
 
-class OntologyPublication(_message.Message):
-    __slots__ = ("ontology_id", "display_name", "publication_id", "revision_id", "lifecycle", "metadata_json", "base_version", "base_hash", "effective_hash", "author", "message", "published_at_ms", "retired_at_ms")
+class ValidateGolOntologyRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "source_revision", "plan_pin", "approved_owners")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
-    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    LIFECYCLE_FIELD_NUMBER: _ClassVar[int]
-    METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    BASE_VERSION_FIELD_NUMBER: _ClassVar[int]
-    BASE_HASH_FIELD_NUMBER: _ClassVar[int]
-    EFFECTIVE_HASH_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    PLAN_PIN_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_OWNERS_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    ontology_id: str
+    source_revision: str
+    plan_pin: str
+    approved_owners: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., plan_pin: _Optional[str] = ..., approved_owners: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class PublishGolOntologyRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "source_revision", "expected_generation", "author_id", "plan_pin", "approved_owners")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_ID_FIELD_NUMBER: _ClassVar[int]
+    PLAN_PIN_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_OWNERS_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    ontology_id: str
+    source_revision: str
+    expected_generation: str
+    author_id: str
+    plan_pin: str
+    approved_owners: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., expected_generation: _Optional[str] = ..., author_id: _Optional[str] = ..., plan_pin: _Optional[str] = ..., approved_owners: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class PreviewGolDependenciesRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "source_revision", "approved_owners")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_OWNERS_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    ontology_id: str
+    source_revision: str
+    approved_owners: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., approved_owners: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class GolDependencyPreview(_message.Message):
+    __slots__ = ("required_owners", "plan_pin", "dependencies")
+    REQUIRED_OWNERS_FIELD_NUMBER: _ClassVar[int]
+    PLAN_PIN_FIELD_NUMBER: _ClassVar[int]
+    DEPENDENCIES_FIELD_NUMBER: _ClassVar[int]
+    required_owners: _containers.RepeatedScalarFieldContainer[str]
+    plan_pin: str
+    dependencies: _containers.RepeatedCompositeFieldContainer[GolDependency]
+    def __init__(self, required_owners: _Optional[_Iterable[str]] = ..., plan_pin: _Optional[str] = ..., dependencies: _Optional[_Iterable[_Union[GolDependency, _Mapping]]] = ...) -> None: ...
+
+class DeleteGolOntologyRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "expected_revision", "author")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    PUBLISHED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    RETIRED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
     ontology_id: str
-    display_name: str
-    publication_id: str
-    revision_id: str
-    lifecycle: str
-    metadata_json: bytes
-    base_version: str
-    base_hash: str
-    effective_hash: str
+    expected_revision: str
     author: str
-    message: str
-    published_at_ms: int
-    retired_at_ms: int
-    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., publication_id: _Optional[str] = ..., revision_id: _Optional[str] = ..., lifecycle: _Optional[str] = ..., metadata_json: _Optional[bytes] = ..., base_version: _Optional[str] = ..., base_hash: _Optional[str] = ..., effective_hash: _Optional[str] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., published_at_ms: _Optional[int] = ..., retired_at_ms: _Optional[int] = ...) -> None: ...
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., expected_revision: _Optional[str] = ..., author: _Optional[str] = ...) -> None: ...
 
-class PublishOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "display_name", "publication_id", "revision_id", "metadata_json", "create_only")
-    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
-    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    CREATE_ONLY_FIELD_NUMBER: _ClassVar[int]
-    tenant_id: str
-    ontology_id: str
-    display_name: str
-    publication_id: str
-    revision_id: str
-    metadata_json: bytes
-    create_only: bool
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., publication_id: _Optional[str] = ..., revision_id: _Optional[str] = ..., metadata_json: _Optional[bytes] = ..., create_only: bool = ...) -> None: ...
+class DeleteGolOntologyResponse(_message.Message):
+    __slots__ = ("revision",)
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    revision: str
+    def __init__(self, revision: _Optional[str] = ...) -> None: ...
 
-class RetireOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "publication_id", "revision_id")
-    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    tenant_id: str
-    ontology_id: str
-    publication_id: str
-    revision_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., publication_id: _Optional[str] = ..., revision_id: _Optional[str] = ...) -> None: ...
-
-class RetireOntologyResponse(_message.Message):
-    __slots__ = ("head_revision_id",)
-    HEAD_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    head_revision_id: str
-    def __init__(self, head_revision_id: _Optional[str] = ...) -> None: ...
-
-class ListOntologiesRequest(_message.Message):
+class ListGolOntologiesRequest(_message.Message):
     __slots__ = ("tenant_id", "limit")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
@@ -322,79 +388,31 @@ class ListOntologiesRequest(_message.Message):
     limit: int
     def __init__(self, tenant_id: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
 
-class OntologyCatalogEntry(_message.Message):
-    __slots__ = ("ontology_id", "display_name", "production_publication")
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
-    PRODUCTION_PUBLICATION_FIELD_NUMBER: _ClassVar[int]
-    ontology_id: str
-    display_name: str
-    production_publication: OntologyPublication
-    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., production_publication: _Optional[_Union[OntologyPublication, _Mapping]] = ...) -> None: ...
-
-class ListOntologiesResponse(_message.Message):
+class ListGolOntologiesResponse(_message.Message):
     __slots__ = ("ontologies",)
     ONTOLOGIES_FIELD_NUMBER: _ClassVar[int]
-    ontologies: _containers.RepeatedCompositeFieldContainer[OntologyCatalogEntry]
-    def __init__(self, ontologies: _Optional[_Iterable[_Union[OntologyCatalogEntry, _Mapping]]] = ...) -> None: ...
+    ontologies: _containers.RepeatedCompositeFieldContainer[GolSummary]
+    def __init__(self, ontologies: _Optional[_Iterable[_Union[GolSummary, _Mapping]]] = ...) -> None: ...
 
-class ListOntologyHistoryRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "limit", "after_revision_id")
-    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    LIMIT_FIELD_NUMBER: _ClassVar[int]
-    AFTER_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    tenant_id: str
-    ontology_id: str
-    limit: int
-    after_revision_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., limit: _Optional[int] = ..., after_revision_id: _Optional[str] = ...) -> None: ...
-
-class OntologyHistoryEntry(_message.Message):
-    __slots__ = ("revision_id", "author", "message", "branch", "operation", "created_at_ms")
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    AUTHOR_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    BRANCH_FIELD_NUMBER: _ClassVar[int]
-    OPERATION_FIELD_NUMBER: _ClassVar[int]
-    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    revision_id: str
-    author: str
-    message: str
-    branch: str
-    operation: str
-    created_at_ms: int
-    def __init__(self, revision_id: _Optional[str] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., branch: _Optional[str] = ..., operation: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
-
-class ListOntologyHistoryResponse(_message.Message):
-    __slots__ = ("items", "next_revision_id")
-    ITEMS_FIELD_NUMBER: _ClassVar[int]
-    NEXT_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    items: _containers.RepeatedCompositeFieldContainer[OntologyHistoryEntry]
-    next_revision_id: str
-    def __init__(self, items: _Optional[_Iterable[_Union[OntologyHistoryEntry, _Mapping]]] = ..., next_revision_id: _Optional[str] = ...) -> None: ...
-
-class OntologyBinding(_message.Message):
-    __slots__ = ("pipeline_id", "block_id", "ontology_id", "resource_ids", "resource_kinds", "include_dependencies", "metadata_json", "updated_at_ms", "head_revision_id")
+class GolBinding(_message.Message):
+    __slots__ = ("pipeline_id", "block_id", "ontology_id", "generation", "source_revision", "symbols", "updated_at_ms", "head_revision_id")
     PIPELINE_ID_FIELD_NUMBER: _ClassVar[int]
     BLOCK_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    RESOURCE_IDS_FIELD_NUMBER: _ClassVar[int]
-    RESOURCE_KINDS_FIELD_NUMBER: _ClassVar[int]
-    INCLUDE_DEPENDENCIES_FIELD_NUMBER: _ClassVar[int]
-    METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    SYMBOLS_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     HEAD_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
     pipeline_id: str
     block_id: str
     ontology_id: str
-    resource_ids: _containers.RepeatedScalarFieldContainer[str]
-    resource_kinds: _containers.RepeatedScalarFieldContainer[str]
-    include_dependencies: bool
-    metadata_json: bytes
+    generation: str
+    source_revision: str
+    symbols: _containers.RepeatedScalarFieldContainer[str]
     updated_at_ms: int
     head_revision_id: str
-    def __init__(self, pipeline_id: _Optional[str] = ..., block_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., resource_ids: _Optional[_Iterable[str]] = ..., resource_kinds: _Optional[_Iterable[str]] = ..., include_dependencies: bool = ..., metadata_json: _Optional[bytes] = ..., updated_at_ms: _Optional[int] = ..., head_revision_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, pipeline_id: _Optional[str] = ..., block_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., generation: _Optional[str] = ..., source_revision: _Optional[str] = ..., symbols: _Optional[_Iterable[str]] = ..., updated_at_ms: _Optional[int] = ..., head_revision_id: _Optional[str] = ...) -> None: ...
 
 class PutBindingRequest(_message.Message):
     __slots__ = ("tenant_id", "binding", "expected_revision_id")
@@ -402,9 +420,9 @@ class PutBindingRequest(_message.Message):
     BINDING_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
-    binding: OntologyBinding
+    binding: GolBinding
     expected_revision_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., binding: _Optional[_Union[OntologyBinding, _Mapping]] = ..., expected_revision_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, tenant_id: _Optional[str] = ..., binding: _Optional[_Union[GolBinding, _Mapping]] = ..., expected_revision_id: _Optional[str] = ...) -> None: ...
 
 class ListBindingsRequest(_message.Message):
     __slots__ = ("tenant_id", "pipeline_id", "limit", "revision_id")
@@ -421,10 +439,10 @@ class ListBindingsRequest(_message.Message):
 class ListBindingsResponse(_message.Message):
     __slots__ = ("bindings",)
     BINDINGS_FIELD_NUMBER: _ClassVar[int]
-    bindings: _containers.RepeatedCompositeFieldContainer[OntologyBinding]
-    def __init__(self, bindings: _Optional[_Iterable[_Union[OntologyBinding, _Mapping]]] = ...) -> None: ...
+    bindings: _containers.RepeatedCompositeFieldContainer[GolBinding]
+    def __init__(self, bindings: _Optional[_Iterable[_Union[GolBinding, _Mapping]]] = ...) -> None: ...
 
-class GetOntologySliceRequest(_message.Message):
+class GetGolBindingRequest(_message.Message):
     __slots__ = ("tenant_id", "pipeline_id", "pipeline_revision_id", "block_id")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     PIPELINE_ID_FIELD_NUMBER: _ClassVar[int]
@@ -435,101 +453,3 @@ class GetOntologySliceRequest(_message.Message):
     pipeline_revision_id: str
     block_id: str
     def __init__(self, tenant_id: _Optional[str] = ..., pipeline_id: _Optional[str] = ..., pipeline_revision_id: _Optional[str] = ..., block_id: _Optional[str] = ...) -> None: ...
-
-class OntologySlice(_message.Message):
-    __slots__ = ("ontology_id", "publication_id", "revision_id", "ontology_json", "publication_metadata_json", "binding_metadata_json", "published_at_ms", "base_version", "base_hash", "effective_hash")
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
-    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_JSON_FIELD_NUMBER: _ClassVar[int]
-    PUBLICATION_METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    BINDING_METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
-    PUBLISHED_AT_MS_FIELD_NUMBER: _ClassVar[int]
-    BASE_VERSION_FIELD_NUMBER: _ClassVar[int]
-    BASE_HASH_FIELD_NUMBER: _ClassVar[int]
-    EFFECTIVE_HASH_FIELD_NUMBER: _ClassVar[int]
-    ontology_id: str
-    publication_id: str
-    revision_id: str
-    ontology_json: bytes
-    publication_metadata_json: bytes
-    binding_metadata_json: bytes
-    published_at_ms: int
-    base_version: str
-    base_hash: str
-    effective_hash: str
-    def __init__(self, ontology_id: _Optional[str] = ..., publication_id: _Optional[str] = ..., revision_id: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., publication_metadata_json: _Optional[bytes] = ..., binding_metadata_json: _Optional[bytes] = ..., published_at_ms: _Optional[int] = ..., base_version: _Optional[str] = ..., base_hash: _Optional[str] = ..., effective_hash: _Optional[str] = ...) -> None: ...
-
-class DiffOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "base_revision_id", "target_revision_id", "ontology_id")
-    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
-    BASE_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    TARGET_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    tenant_id: str
-    base_revision_id: str
-    target_revision_id: str
-    ontology_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., base_revision_id: _Optional[str] = ..., target_revision_id: _Optional[str] = ..., ontology_id: _Optional[str] = ...) -> None: ...
-
-class SemanticChange(_message.Message):
-    __slots__ = ("resource_id", "operation", "path", "before_json", "after_json")
-    RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
-    OPERATION_FIELD_NUMBER: _ClassVar[int]
-    PATH_FIELD_NUMBER: _ClassVar[int]
-    BEFORE_JSON_FIELD_NUMBER: _ClassVar[int]
-    AFTER_JSON_FIELD_NUMBER: _ClassVar[int]
-    resource_id: str
-    operation: str
-    path: _containers.RepeatedScalarFieldContainer[str]
-    before_json: bytes
-    after_json: bytes
-    def __init__(self, resource_id: _Optional[str] = ..., operation: _Optional[str] = ..., path: _Optional[_Iterable[str]] = ..., before_json: _Optional[bytes] = ..., after_json: _Optional[bytes] = ...) -> None: ...
-
-class SemanticDiff(_message.Message):
-    __slots__ = ("changes",)
-    CHANGES_FIELD_NUMBER: _ClassVar[int]
-    changes: _containers.RepeatedCompositeFieldContainer[SemanticChange]
-    def __init__(self, changes: _Optional[_Iterable[_Union[SemanticChange, _Mapping]]] = ...) -> None: ...
-
-class MergeOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "base_revision_id", "left_revision_id", "right_revision_id", "author", "message", "expected_revision_id")
-    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
-    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
-    BASE_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    LEFT_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    RIGHT_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    AUTHOR_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
-    tenant_id: str
-    ontology_id: str
-    base_revision_id: str
-    left_revision_id: str
-    right_revision_id: str
-    author: str
-    message: str
-    expected_revision_id: str
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., base_revision_id: _Optional[str] = ..., left_revision_id: _Optional[str] = ..., right_revision_id: _Optional[str] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., expected_revision_id: _Optional[str] = ...) -> None: ...
-
-class MergeConflict(_message.Message):
-    __slots__ = ("resource_id", "path", "base_json", "left_json", "right_json")
-    RESOURCE_ID_FIELD_NUMBER: _ClassVar[int]
-    PATH_FIELD_NUMBER: _ClassVar[int]
-    BASE_JSON_FIELD_NUMBER: _ClassVar[int]
-    LEFT_JSON_FIELD_NUMBER: _ClassVar[int]
-    RIGHT_JSON_FIELD_NUMBER: _ClassVar[int]
-    resource_id: str
-    path: _containers.RepeatedScalarFieldContainer[str]
-    base_json: bytes
-    left_json: bytes
-    right_json: bytes
-    def __init__(self, resource_id: _Optional[str] = ..., path: _Optional[_Iterable[str]] = ..., base_json: _Optional[bytes] = ..., left_json: _Optional[bytes] = ..., right_json: _Optional[bytes] = ...) -> None: ...
-
-class OntologyMerge(_message.Message):
-    __slots__ = ("revision", "conflicts")
-    REVISION_FIELD_NUMBER: _ClassVar[int]
-    CONFLICTS_FIELD_NUMBER: _ClassVar[int]
-    revision: OntologyRevision
-    conflicts: _containers.RepeatedCompositeFieldContainer[MergeConflict]
-    def __init__(self, revision: _Optional[_Union[OntologyRevision, _Mapping]] = ..., conflicts: _Optional[_Iterable[_Union[MergeConflict, _Mapping]]] = ...) -> None: ...

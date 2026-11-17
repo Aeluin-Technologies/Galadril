@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID, uuid4, uuid5
 
 import pytest
+from galadril_ontology import GolDenied, GolLease, GolRequest, GolRuntimeManager
 from galadril_pipeline.config import (
     PipelineConfig,
     PipelineStep,
@@ -21,6 +24,7 @@ from galadril_pipeline.events import (
     StepResult,
 )
 from galadril_pipeline.routing import PipelineRouteTable
+from galadril_vision.common.config import PipelineStepConfig, VisionConfig
 from galadril_vision.common.schemas import CanonicalRecord, ObservationLineage
 from galadril_vision.pipeline.ledger import MemoryExecutionLedger
 from galadril_vision.streaming.handlers import (
@@ -28,6 +32,7 @@ from galadril_vision.streaming.handlers import (
     CommandHandler,
     IngressHandler,
 )
+from galadril_vision.streaming.security import GatewayPublicationGate
 from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
@@ -83,6 +88,7 @@ class _Dispatcher:
             correlation_id=command.correlation_id,
             causation_id=command.event_id,
             tenant_id=command.tenant_id,
+            admission=command.admission,
             entity_id=command.entity_id,
             pipeline=command.pipeline,
             command_id=command.event_id,
@@ -138,10 +144,11 @@ def _envelope() -> AvroEnvelope:
             "id": "record-1",
             "timestamp": 1_700_000_000_000,
             "ingested_at": 1_700_000_000_100,
-            "storage_path": "s3://raw/image.jpg",
+            "storage_path": "s3://raw/tenant-1/source/object",
             "source": "camera-1",
             "authz": {
                 "tenant_id": "tenant-1",
+                "gol_admission": "opaque-server-handle",
                 "source_principal": "service:intake",
                 "execution_identity": "service:intake",
                 "authentication_provenance": "https://issuer.example",
@@ -169,10 +176,12 @@ def test_ingress_commands_preserve_intake_lineage_context() -> None:
         publisher=_Publisher(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     correlation_id = UUID("8a445b78-e6d5-57c0-98c4-cf2851ad25bc")
     record = CanonicalRecord(
         record_id="obs-1",
+        admission="server-admission",
         tenant_id="tenant-1",
         source="camera-east",
         input_type="image",
@@ -190,6 +199,9 @@ def test_ingress_commands_preserve_intake_lineage_context() -> None:
 
     commands = handler._commands("image_source", "vision.silver", record)
 
+    assert commands[0].admission == "server-admission"
+    assert "admission" not in commands[0].payload["record"]
+    assert "admission" not in commands[0].attributes
     assert commands[0].correlation_id == uuid5(
         correlation_id, "image_source:obs-1"
     )
@@ -211,6 +223,7 @@ def test_ingress_rows_from_one_object_have_distinct_command_ids() -> None:
         publisher=_Publisher(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     source_id = "8a445b78-e6d5-57c0-98c4-cf2851ad25bc"
 
@@ -253,6 +266,7 @@ async def test_ingress_validates_and_publishes_deterministic_entry_command() -> 
         publisher=publisher,
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
 
     first = await handler.handle(_envelope())
@@ -281,6 +295,7 @@ def test_pipeline_identity_separates_shared_ingress_command_ids() -> None:
         publisher=_Publisher(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )._commands("image_source", "raw", record)
     second = IngressHandler(
         pipeline="tenant-1/second/revision-b",
@@ -289,14 +304,15 @@ def test_pipeline_identity_separates_shared_ingress_command_ids() -> None:
         publisher=_Publisher(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )._commands("image_source", "raw", record)
 
     assert first[0].event_id != second[0].event_id
 
 
 @pytest.mark.anyio
-async def test_ingress_quarantines_schema_violation() -> None:
-    """Acknowledgement callers can safely commit after confirmed invalid publication."""
+async def test_invalid_ingress_records_no_raw_quarantine_payload() -> None:
+    """Malformed inputs have no authenticated release route for error metadata."""
     publisher = _Publisher()
     handler = IngressHandler(
         pipeline="vision",
@@ -304,6 +320,7 @@ async def test_ingress_quarantines_schema_violation() -> None:
         publisher=publisher,
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     invalid = _envelope().model_copy(
         update={"payload": {"id": "record-1", "source": "camera"}}
@@ -312,7 +329,7 @@ async def test_ingress_quarantines_schema_violation() -> None:
     commands = await handler.handle(invalid)
 
     assert commands == ()
-    assert [item.topic for item in publisher.items] == [TopicLayout().invalid]
+    assert publisher.items == []
 
 
 @pytest.mark.anyio
@@ -331,6 +348,7 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
         ledger=ledger,
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     command = PipelineCommand(
         correlation_id=uuid4(),
@@ -385,6 +403,7 @@ async def test_actor_failure_publishes_bounded_retry() -> None:
         ledger=MemoryExecutionLedger(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     command = PipelineCommand(
         correlation_id=uuid4(),
@@ -451,6 +470,7 @@ async def test_routing_decision_survives_replay_without_reclassifying() -> None:
         ledger=MemoryExecutionLedger(),
         topics=topics,
         metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
     )
     command = PipelineCommand(
         correlation_id=uuid4(),
@@ -476,5 +496,237 @@ async def test_routing_decision_survives_replay_without_reclassifying() -> None:
     )
 
 
+class _PublicationGate:
+    def __init__(self) -> None:
+        self.allowed = True
+        self.calls = 0
+
+    async def authorize_state(self, command: PipelineCommand) -> None:
+        return None
+
+    @asynccontextmanager
+    async def protect(self, command: PipelineCommand) -> AsyncIterator[None]:
+        self.calls += 1
+        if not self.allowed:
+            raise GolDenied("GOL publication unavailable")
+        yield
+
+
+@pytest.mark.anyio
+async def test_ingress_without_authority_publishes_no_payload() -> None:
+    publisher = _Publisher()
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )
+    assert await handler.handle(_envelope()) == ()
+    assert publisher.items == []
+
+
+@pytest.mark.anyio
+async def test_malformed_ingress_cannot_disclose_its_raw_error_or_payload() -> (
+    None
+):
+    publisher = _Publisher()
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )
+    envelope = _envelope().model_copy(
+        update={"payload": {"secret_field_name": "secret_value"}}
+    )
+    assert await handler.handle(envelope) == ()
+    assert publisher.items == []
+
+
+@pytest.mark.anyio
+async def test_completed_replay_rechecks_transfer_without_reexecuting_effects() -> (
+    None
+):
+    publisher = _Publisher()
+    gate = _PublicationGate()
+    dispatcher = _Dispatcher()
+    handler = CommandHandler(
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        dispatcher=dispatcher,
+        ledger=MemoryExecutionLedger(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+        publication_gate=gate,
+    )
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="infer",
+        step_type=StepType.INFERENCE,
+        resource_class=ResourceClass.GPU,
+        admission="opaque-server-handle",
+    )
+    await handler.handle(command)
+    first_count = len(publisher.items)
+    gate.allowed = False
+    assert await handler.handle(command) is None
+    assert len(publisher.items) == first_count
+    assert dispatcher.calls == 1
+    assert gate.calls > first_count
+
+
+@pytest.mark.anyio
+async def test_concrete_gate_preserves_scope_and_fresh_release_checks() -> None:
+    class Gateway:
+        def __init__(self) -> None:
+            self.opens: list[tuple[GolRequest, str]] = []
+            self.transfers = 0
+            self.allowed = True
+
+        async def open(self, request: GolRequest, admission: str) -> GolLease:
+            self.opens.append((request, admission))
+            return GolLease.model_validate(
+                {
+                    "tenantId": "tenant-1",
+                    "ontologyId": "communication.mail",
+                    "ontologyVersion": "1.0.0",
+                    "sourceRevision": "source-one",
+                    "generationId": "generation-one",
+                    "contextId": "same-context",
+                    "symbols": [
+                        {
+                            "key": "communication.mail::Message",
+                            "name": "Message",
+                            "kind": "entity",
+                            "version": "1.0.0",
+                        }
+                    ],
+                }
+            )
+
+        @asynccontextmanager
+        async def protected(
+            self,
+            request: GolRequest,
+            selected: GolLease,
+            admission: str,
+            *,
+            effects: object,
+        ) -> AsyncIterator[tuple[None]]:
+            self.transfers += 1
+            if not self.allowed:
+                raise GolDenied("GOL publication unavailable")
+            yield (None,)
+
+    gateway = Gateway()
+    config = VisionConfig.model_construct(
+        name="tenant-1/mail/revision-one",
+        runtime_tenant_id="tenant-1",
+        runtime_pipeline_id="mail",
+        runtime_revision_id="revision-one",
+        pipeline=[
+            PipelineStepConfig(
+                step="sink",
+                type="sink",
+                input_from=["infer"],
+                origin={
+                    "pipeline_id": "origin-mail",
+                    "revision_id": "origin-revision-1234567890",
+                    "block_id": "origin-sink",
+                },
+                params={
+                    "gol_transfer_symbol_key": "communication.mail::Message"
+                },
+            )
+        ],
+    )
+    gate = GatewayPublicationGate(config, GolRuntimeManager(gateway))
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        tenant_id="tenant-1",
+        pipeline=config.name,
+        step="sink",
+        step_type="sink",
+        resource_class="cpu",
+        admission="opaque-server-handle",
+        payload={"record": {"storage_path": "s3://raw/tenant-1/source/object"}},
+    )
+    await gate.authorize_state(command)
+    async with gate.protect(command):
+        pass
+    gateway.allowed = False
+    with pytest.raises(GolDenied):
+        async with gate.protect(command):
+            pass
+    assert gateway.transfers == 2
+    assert len(gateway.opens) == 3
+    assert all(
+        request.pipeline_id == "origin-mail"
+        and request.pipeline_revision_id == "origin-revision-1234567890"
+        and request.block_id == "origin-sink"
+        and request.source_object_id == "raw:tenant-1/source/object"
+        and admission == "opaque-server-handle"
+        for request, admission in gateway.opens
+    )
+    for untrusted in (
+        command.model_copy(update={"tenant_id": "tenant-2"}),
+        command.model_copy(update={"admission": None}),
+        command.model_copy(
+            update={
+                "payload": {
+                    "record": {"storage_path": "s3://raw/tenant-2/secret"}
+                }
+            }
+        ),
+    ):
+        with pytest.raises(GolDenied):
+            async with gate.protect(untrusted):
+                pass
+    assert len(gateway.opens) == 3
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+@pytest.mark.anyio
+async def test_kafka_io_remains_inside_the_live_permit() -> None:
+    class Gate(_PublicationGate):
+        held = False
+
+        @asynccontextmanager
+        async def protect(
+            self, command: PipelineCommand
+        ) -> AsyncIterator[None]:
+            self.held = True
+            try:
+                yield
+            finally:
+                self.held = False
+
+    gate = Gate()
+
+    class Publisher(_Publisher):
+        async def publish(
+            self, message: object, topic: str, **kwargs: object
+        ) -> object:
+            assert gate.held, (
+                "Kafka I/O escaped the host-retained effect boundary"
+            )
+            return await super().publish(message, topic, **kwargs)
+
+    publisher = Publisher()
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+        publication_gate=gate,
+    )
+    assert await handler.handle(_envelope())
+    assert len(publisher.items) == 2
+    assert not gate.held

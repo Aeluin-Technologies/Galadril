@@ -1,24 +1,17 @@
-"""Actor composition must not serialize open Registry transports."""
+"""Actor serialization must never retain a live Gateway transport."""
 
 import asyncio
 from unittest.mock import patch
 
 import cloudpickle
 import pytest
-from galadril_registry_api import RegistryConfig
-from galadril_vision.connectors.version.registry import (
-    VisionRegistryOntologyStore,
-)
+from galadril_ontology import GatewayGolClient
 
 
 def test_runtime_transport_is_created_inside_the_actor() -> None:
-    config = RegistryConfig(endpoint="http://registry:50052")
-    store = VisionRegistryOntologyStore(config)
-    restored = cloudpickle.loads(cloudpickle.dumps(store))
-    with patch(
-        "galadril_vision.connectors.version.registry.RegistryClient"
-    ) as factory:
-        factory.assert_not_called()
+    client = GatewayGolClient("http://api-proxy:8082")
+    restored = cloudpickle.loads(cloudpickle.dumps(client))
+    with patch("galadril_ontology.client.httpx.AsyncClient") as factory:
         asyncio.run(restored.close())
         factory.assert_not_called()
 

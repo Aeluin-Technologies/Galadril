@@ -1,149 +1,96 @@
-"""Data-only semantic packages shipped with trusted executable plugins."""
+"""Bounded GOL sources; only Registry compiles and resolves ontology modules."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
-
-
-def _module_resource_ids(ontology: dict[str, JsonValue]) -> tuple[str, ...]:
-    items = ontology.get("resources")
-    if not isinstance(items, list) or len(items) > 256:
-        raise ValueError("Invalid ontology resources")
-    identifiers: list[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            raise ValueError("Invalid ontology resource")
-        identifier = item.get("resource_id")
-        if not isinstance(identifier, str):
-            raise ValueError("Invalid ontology resource")
-        identifiers.append(identifier)
-    return tuple(identifiers)
-
-
-def _package_resource_ids(
-    ontologies: list[dict[str, JsonValue]] | tuple[dict[str, JsonValue], ...],
-) -> set[str]:
-    identifiers: set[str] = set()
-    for ontology in ontologies:
-        for identifier in _module_resource_ids(ontology):
-            if identifier in identifiers:
-                raise ValueError("Duplicate package resource")
-            identifiers.add(identifier)
-    return identifiers
-
-
-def _resource_objects(
-    module: dict[str, JsonValue],
-) -> list[dict[str, JsonValue]]:
-    items = module.get("resources")
-    if not isinstance(items, list) or not all(
-        isinstance(item, dict) for item in items
-    ):
-        raise ValueError("Invalid ontology resources")
-    return [item for item in items if isinstance(item, dict)]
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 
 class OntologyContract(BaseModel):
+    """Capability requirements select logical targets, never tenant identities."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
     mode: Literal["optional", "required"] = "optional"
-    resources: tuple[str, ...] = Field(default=(), max_length=256)
+    targets: tuple[str, ...] = Field(default=(), max_length=256)
 
 
-class OntologyPackageImport(BaseModel):
-    """Pins reusable plugin layers without granting tenant storage access."""
+class GolSource(BaseModel):
+    """A source path is descriptive and cannot select a filesystem outside a package."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    id: str = Field(pattern=r"^[a-z][a-z0-9_-]*[.][a-z][a-z0-9_-]*$")
+    path: str = Field(min_length=1, max_length=192)
+    text: str = Field(min_length=1, max_length=512 * 1024)
+
+    @field_validator("path")
+    @classmethod
+    def safe_path(cls, value: str) -> str:
+        if (
+            not value.endswith(".gol")
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+            or not all(
+                char.isascii() and (char.isalnum() or char in "_/.-")
+                for char in value
+            )
+        ):
+            raise ValueError("Invalid packaged GOL path")
+        return value
+
+
+class GolPackageManifest(BaseModel):
+    """Version and capability metadata do not duplicate the GOL semantic model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*(?:[.][a-z][a-z0-9_]*)+$")
+    name: str = Field(min_length=1, max_length=256)
     version: str = Field(min_length=1, max_length=64)
+    files: tuple[str, ...] = Field(min_length=1, max_length=32)
+    contracts: dict[str, OntologyContract] = Field(
+        default_factory=dict, max_length=128
+    )
+    bindings: dict[str, dict[str, JsonValue]] = Field(
+        default_factory=dict, max_length=128
+    )
+
+    @field_validator("files")
+    @classmethod
+    def source_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        for path in values:
+            GolSource.safe_path(path)
+        if len(set(values)) != len(values):
+            raise ValueError("Duplicate packaged GOL path")
+        return values
 
 
 class OntologyPackage(BaseModel):
+    """Catalog publication contains source files and explicit plugin metadata only."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
-    id: str = Field(pattern=r"^[a-z][a-z0-9_-]*[.][a-z][a-z0-9_-]*$")
-    name: str = Field(min_length=1, max_length=256)
-    version: str = Field(min_length=1, max_length=64)
-    ontologies: tuple[dict[str, JsonValue], ...] = Field(
-        default=(), max_length=32
-    )
-    imports: tuple[OntologyPackageImport, ...] = Field(
-        default=(), max_length=32, exclude=True
-    )
+    id: str
+    name: str
+    version: str
+    files: tuple[GolSource, ...] = Field(min_length=1, max_length=32)
     contracts: dict[str, OntologyContract] = Field(
+        default_factory=dict, max_length=128
+    )
+    bindings: dict[str, dict[str, JsonValue]] = Field(
         default_factory=dict, max_length=128
     )
 
     @model_validator(mode="after")
     def bounded(self) -> OntologyPackage:
-        import json
-
-        if len(json.dumps(self.model_dump(mode="json")).encode()) > 512 * 1024:
-            raise ValueError("Ontology package exceeds limit")
-        resources = _package_resource_ids(self.ontologies)
-        if not self.ontologies and not self.imports:
-            raise ValueError("Ontology package is empty")
-        if len(resources) > 512:
-            raise ValueError("Too many package resources")
-        if not self.imports and any(
-            identifier not in resources
-            for contract in self.contracts.values()
-            for identifier in contract.resources
+        if (
+            sum(len(source.text.encode("utf-8")) for source in self.files)
+            > 512 * 1024
         ):
-            raise ValueError("Unknown ontology contract resource")
+            raise ValueError("Ontology package exceeds limit")
+        if len({source.path for source in self.files}) != len(self.files):
+            raise ValueError("Duplicate packaged GOL path")
         return self
-
-
-def resolve_ontology_packages(
-    packages: tuple[OntologyPackage, ...],
-) -> tuple[OntologyPackage, ...]:
-    """Compiles pinned layers once while retaining their grouping provenance."""
-    sources = {package.id: package for package in packages}
-    if len(sources) != len(packages):
-        raise ValueError("Duplicate ontology package identity")
-    resolved: dict[str, OntologyPackage] = {}
-    visiting: set[str] = set()
-
-    def resolve(package: OntologyPackage) -> OntologyPackage:
-        if package.id in resolved:
-            return resolved[package.id]
-        if package.id in visiting:
-            raise ValueError("Cyclic ontology package imports")
-        visiting.add(package.id)
-        modules: dict[str, dict[str, JsonValue]] = {}
-        for reference in package.imports:
-            dependency = sources.get(reference.id)
-            if dependency is None or dependency.version != reference.version:
-                raise ValueError(
-                    "Pinned ontology package import is unavailable"
-                )
-            if reference.id.split(".", 1)[0] != package.id.split(".", 1)[0]:
-                raise ValueError(
-                    "Ontology package import crosses plugin ownership"
-                )
-            for module in resolve(dependency).ontologies:
-                imported = {
-                    "package_id": dependency.id,
-                    "package_name": dependency.name,
-                    **module,
-                }
-                key = str(imported["id"])
-                if key in modules and modules[key] != imported:
-                    raise ValueError("Conflicting ontology package layers")
-                modules[key] = imported
-        for module in package.ontologies:
-            key = str(module["id"])
-            if key in modules:
-                raise ValueError("Duplicate ontology package layer")
-            modules[key] = module
-        value = OntologyPackage.model_validate(
-            {
-                **package.model_dump(mode="json"),
-                "ontologies": tuple(modules.values()),
-            }
-        )
-        visiting.remove(package.id)
-        resolved[package.id] = value
-        return value
-
-    return tuple(resolve(package) for package in packages)

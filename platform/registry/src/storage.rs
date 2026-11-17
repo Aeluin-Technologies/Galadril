@@ -22,12 +22,13 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::state::{
-    OntologyBindingRecord, OntologyRecord, PipelineRecord, TenantState,
+    GolBindingRecord, GolSourceRecord, PipelineRecord, TenantState,
 };
 
-const ONTOLOGY_STATE_PATH: &str = "ontology/state.json";
+const ONTOLOGY_STATE_PATH: &str = "gol/sources.json";
 const PIPELINE_STATE_PATH: &str = "pipeline/state.json";
 const TENANT_MARKER_VERSION: u8 = 1;
+const WRITE_WITNESS_PATH: &str = "_registry/write.json";
 const MAX_STATE_BYTES: usize = 32 * 1024 * 1024;
 const TENANT_CACHE_CAPACITY: u64 = 1_024;
 const TENANT_CACHE_TTL: Duration = Duration::from_secs(10);
@@ -128,12 +129,31 @@ pub trait RevisionStore: Send + Sync {
     /// Irreversibly removes the tenant repository and its physical S3 data.
     async fn delete_tenant(&self, tenant_id: &str) -> Result<()>;
 
-    /// Loads the branch head or an explicitly pinned immutable revision.
+    /// Loads catalog metadata at an immutable revision without opening `.gol`
+    /// objects.
     async fn load(
         &self,
         tenant_id: &str,
         revision_id: Option<&str>,
     ) -> Result<Snapshot>;
+
+    /// Opens one admitted source package; callers must apply source disclosure
+    /// first.
+    async fn load_gol_sources(
+        &self,
+        tenant_id: &str,
+        revision_id: &str,
+        ontology_id: &str,
+    ) -> Result<Vec<crate::gol::GolFile>> {
+        let mut snapshot = self.load(tenant_id, Some(revision_id)).await?;
+        let record = snapshot
+            .state
+            .ontologies
+            .remove(ontology_id)
+            .context("ontology unavailable")?;
+        crate::gol::validate_files(&record.files)?;
+        Ok(record.files)
+    }
 
     /// Atomically commits validated state when the expected head still
     /// matches.
@@ -171,25 +191,25 @@ struct PipelineState {
     #[serde(default)]
     pipelines: BTreeMap<String, PipelineRecord>,
     #[serde(default)]
-    bindings: BTreeMap<String, OntologyBindingRecord>,
+    bindings: BTreeMap<String, GolBindingRecord>,
 }
 
 #[derive(Serialize)]
 struct PipelineStateRef<'a> {
     pipelines: &'a BTreeMap<String, PipelineRecord>,
-    bindings: &'a BTreeMap<String, OntologyBindingRecord>,
+    bindings: &'a BTreeMap<String, GolBindingRecord>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct OntologyState {
     #[serde(default)]
-    ontologies: BTreeMap<String, OntologyRecord>,
+    ontologies: BTreeMap<String, GolSourceRecord>,
 }
 
 #[derive(Serialize)]
 struct OntologyStateRef<'a> {
-    ontologies: &'a BTreeMap<String, OntologyRecord>,
+    ontologies: &'a BTreeMap<String, GolSourceRecord>,
 }
 
 /// Direct S3 boundary used for physical tenant existence and GDPR erasure.
@@ -209,7 +229,17 @@ struct LakeFsBranch {
     commit_id: String,
 }
 
+#[derive(Deserialize)]
+struct LakeFsMerge {
+    reference: String,
+}
+
 impl LakeFsStore {
+    /// Shares validated backend credentials with the separate artifact bucket.
+    pub fn artifact_client(&self) -> S3Client {
+        self.directory.client.clone()
+    }
+
     /// Validates storage configuration and builds a bounded HTTP client.
     pub fn new(config: LakeFsConfig, s3: S3Config) -> Result<Self> {
         let endpoint = reqwest::Url::parse(&config.endpoint)?;
@@ -499,6 +529,22 @@ impl LakeFsStore {
         let ontology: OntologyState = self
             .read_artifact(repository, reference, ONTOLOGY_STATE_PATH)
             .await?;
+        for (id, record) in &ontology.ontologies {
+            ensure!(
+                id == &record.ontology_id &&
+                    valid_source_digest(&record.source_digest),
+                "invalid Registry source catalog"
+            );
+            let paths = record
+                .paths
+                .iter()
+                .map(|path| crate::gol::GolFile {
+                    path: path.clone(),
+                    text: String::new(),
+                })
+                .collect::<Vec<_>>();
+            crate::gol::validate_files(&paths)?;
+        }
         Ok(TenantState {
             pipelines: pipeline.pipelines,
             ontologies: ontology.ontologies,
@@ -506,9 +552,220 @@ impl LakeFsStore {
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(operation = "registry.gol.source_read")
+    )]
+    async fn read_gol_sources(
+        &self,
+        repository: &str,
+        reference: &str,
+        ontology_id: &str,
+    ) -> Result<Vec<crate::gol::GolFile>> {
+        let catalog: OntologyState = self
+            .read_artifact(repository, reference, ONTOLOGY_STATE_PATH)
+            .await?;
+        let record = catalog
+            .ontologies
+            .get(ontology_id)
+            .filter(|record| record.deletion_base.is_none())
+            .context("ontology unavailable")?;
+        ensure!(
+            valid_source_digest(&record.source_digest),
+            "invalid Registry source digest"
+        );
+        let mut files = record
+            .paths
+            .iter()
+            .map(|path| crate::gol::GolFile {
+                path: path.clone(),
+                text: String::new(),
+            })
+            .collect::<Vec<_>>();
+        crate::gol::validate_files(&files)?;
+        let mut total = 0usize;
+        for file in &mut files {
+            let path =
+                source_path(ontology_id, &record.source_digest, &file.path);
+            let url = self.url(&format!(
+                "repositories/{repository}/refs/{reference}/objects"
+            ));
+            let request = self.http.get(url).query(&[("path", path.as_str())]);
+            let mut response = self.authorize(request).send().await?;
+            ensure!(response.status().is_success(), "GOL source unavailable");
+            let length = response
+                .content_length()
+                .filter(|bytes| *bytes <= 1024 * 1024)
+                .context("GOL source exceeds byte budget")?;
+            let mut bytes = Vec::with_capacity(usize::try_from(length)?);
+            while let Some(chunk) = response.chunk().await? {
+                total = total
+                    .checked_add(chunk.len())
+                    .filter(|total| *total <= 4 * 1024 * 1024)
+                    .context("GOL package exceeds byte budget")?;
+                ensure!(
+                    bytes
+                        .len()
+                        .checked_add(chunk.len())
+                        .is_some_and(|size| size <= 1024 * 1024),
+                    "GOL source exceeds byte budget"
+                );
+                bytes.extend_from_slice(&chunk);
+            }
+            file.text =
+                String::from_utf8(bytes).context("GOL source is not UTF-8")?;
+        }
+        crate::gol::validate_files(&files)?;
+        ensure!(
+            crate::gol::source_digest(&files)? == record.source_digest,
+            "GOL source integrity check failed"
+        );
+        tracing::debug!(
+            event.name = "registry.gol.source_opened",
+            file_count = files.len(),
+            byte_count = total
+        );
+        Ok(files)
+    }
+
+    async fn commit_isolated(
+        &self,
+        repository: &str,
+        branch: &str,
+        expected: &str,
+        state: &TenantState,
+        author: &str,
+        message: &str,
+    ) -> Result<String> {
+        for record in state.ontologies.values() {
+            if record.files.is_empty() {
+                continue;
+            }
+            crate::gol::validate_files(&record.files)?;
+            ensure!(
+                record
+                    .paths
+                    .iter()
+                    .map(String::as_str)
+                    .eq(record.files.iter().map(|file| file.path.as_str())),
+                "GOL source catalog does not match staged files"
+            );
+            ensure!(
+                record.source_digest ==
+                    crate::gol::source_digest(&record.files)?,
+                "GOL source digest does not match staged files"
+            );
+            for file in &record.files {
+                self.stage_bytes(
+                    repository,
+                    branch,
+                    &source_path(
+                        &record.ontology_id,
+                        &record.source_digest,
+                        &file.path,
+                    ),
+                    file.text.as_bytes().to_vec(),
+                )
+                .await?;
+            }
+        }
+        self.stage_artifact(
+            repository,
+            branch,
+            PIPELINE_STATE_PATH,
+            &PipelineStateRef {
+                pipelines: &state.pipelines,
+                bindings: &state.bindings,
+            },
+        )
+        .await?;
+        self.stage_artifact(
+            repository,
+            branch,
+            ONTOLOGY_STATE_PATH,
+            &OntologyStateRef {
+                ontologies: &state.ontologies,
+            },
+        )
+        .await?;
+        // Every writer changes the same witness, including disjoint
+        // pipeline/source edits. lakeFS therefore detects a concurrent
+        // tenant write during its three-way merge.
+        self.stage_artifact(
+            repository,
+            branch,
+            WRITE_WITNESS_PATH,
+            &json!({"base":expected,"write":branch}),
+        )
+        .await?;
+        let url = self.url(&format!(
+            "repositories/{repository}/branches/{branch}/commits"
+        ));
+        let body = json!({"message":message,"metadata":{"author":author,"tenant_digest":repository}});
+        let request = self.http.post(url).json(&body);
+        let response = self.authorize(request).send().await?;
+        ensure!(
+            response.status() == StatusCode::CREATED,
+            "lakeFS private commit failed"
+        );
+        let private = response.json::<LakeFsRef>().await?.id;
+        ensure!(
+            valid_revision(&private),
+            "lakeFS returned invalid commit ID"
+        );
+        ensure!(
+            self.branch_head(repository).await? == expected,
+            "registry revision changed"
+        );
+        let url = self.url(&format!(
+            "repositories/{repository}/refs/{private}/merge/{}",
+            self.config.branch
+        ));
+        let body = json!({"message":message,"metadata":{"author":author},"squash_merge":true});
+        let request = self.http.post(url).json(&body);
+        let response = self.authorize(request).send().await?;
+        if matches!(
+            response.status(),
+            StatusCode::CONFLICT | StatusCode::PRECONDITION_FAILED
+        ) {
+            bail!("registry revision changed");
+        }
+        ensure!(
+            response.status() == StatusCode::OK,
+            "lakeFS private merge failed"
+        );
+        let revision = response.json::<LakeFsMerge>().await?.reference;
+        ensure!(
+            valid_revision(&revision),
+            "lakeFS returned invalid merge reference"
+        );
+        Ok(revision)
+    }
+
+    async fn discard_write_branch(
+        &self,
+        repository: &str,
+        branch: &str,
+    ) -> Result<()> {
+        let response =
+            self.authorize(self.http.delete(self.url(&format!(
+                "repositories/{repository}/branches/{branch}"
+            ))))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await?;
+        ensure!(
+            response.status().is_success() ||
+                response.status() == StatusCode::NOT_FOUND,
+            "lakeFS private branch cleanup failed"
+        );
+        Ok(())
+    }
+
     async fn stage_artifact<T: Serialize + ?Sized>(
         &self,
         repository: &str,
+        branch: &str,
         path: &str,
         value: &T,
     ) -> Result<()> {
@@ -517,10 +774,19 @@ impl LakeFsStore {
             payload.len() <= MAX_STATE_BYTES,
             "registry state exceeds safety limit"
         );
+        self.stage_bytes(repository, branch, path, payload).await
+    }
+
+    async fn stage_bytes(
+        &self,
+        repository: &str,
+        branch: &str,
+        path: &str,
+        payload: Vec<u8>,
+    ) -> Result<()> {
         let upload = self
             .authorize(self.http.post(self.url(&format!(
-                "repositories/{repository}/branches/{}/objects",
-                self.config.branch
+                "repositories/{repository}/branches/{branch}/objects"
             ))))
             .query(&[("path", path)])
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
@@ -842,6 +1108,20 @@ impl RevisionStore for LakeFsStore {
         })
     }
 
+    async fn load_gol_sources(
+        &self,
+        tenant_id: &str,
+        revision_id: &str,
+        ontology_id: &str,
+    ) -> Result<Vec<crate::gol::GolFile>> {
+        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
+        ensure!(valid_revision(revision_id), "invalid source revision");
+        ontology_id.parse::<galadril_ontology::OntologyId>()?;
+        let repository = self.require_tenant(tenant_id).await?.repository;
+        self.read_gol_sources(&repository, revision_id, ontology_id)
+            .await
+    }
+
     async fn commit(
         &self,
         tenant_id: &str,
@@ -863,52 +1143,47 @@ impl RevisionStore for LakeFsStore {
         let repository = self.require_tenant(tenant_id).await?.repository;
         let head = self.branch_head(&repository).await?;
         ensure!(head == expected_revision_id, "registry revision changed");
-        self.stage_artifact(
-            &repository,
-            PIPELINE_STATE_PATH,
-            &PipelineStateRef {
-                pipelines: &state.pipelines,
-                bindings: &state.bindings,
-            },
-        )
-        .await?;
-        self.stage_artifact(
-            &repository,
-            ONTOLOGY_STATE_PATH,
-            &OntologyStateRef {
-                ontologies: &state.ontologies,
-            },
-        )
-        .await?;
-        let response = self
-            .authorize(self.http.post(self.url(&format!(
-                "repositories/{repository}/branches/{}/commits",
-                self.config.branch
-            ))))
-            .json(&json!({
-                "message": message,
-                "metadata": {"author": author, "tenant_digest": repository},
-            }))
-            .send()
-            .await?;
-        if response.status() == StatusCode::PRECONDITION_FAILED ||
-            response.status() == StatusCode::CONFLICT
-        {
-            bail!("registry revision changed");
-        }
-        ensure!(response.status().is_success(), "lakeFS commit failed");
-        let revision = response.json::<LakeFsRef>().await?.id;
+        let branch =
+            format!("registry-write-{}", uuid::Uuid::new_v4().simple());
+        let created=self.authorize(self.http.post(self.url(&format!("repositories/{repository}/branches")))).json(&json!({"name":branch,"source":expected_revision_id,"hidden":true})).send().await?;
         ensure!(
-            valid_revision(&revision),
-            "lakeFS returned invalid commit ID"
+            created.status().is_success(),
+            "lakeFS private branch creation failed"
         );
-        tracing::info!(
-            tenant_id,
-            revision_id = revision,
-            "registry_revision_committed"
-        );
-        Ok(revision)
+        let result = self
+            .commit_isolated(
+                &repository,
+                &branch,
+                expected_revision_id,
+                state,
+                author,
+                message,
+            )
+            .await;
+        if let Err(_cleanup_error) =
+            self.discard_write_branch(&repository, &branch).await
+        {
+            tracing::error!(event.name="registry.write_branch_cleanup_failed",write_branch=%branch);
+        }
+        if let Ok(revision) = &result {
+            tracing::info!(tenant_id,revision_id=%revision,"registry_revision_committed");
+        }
+        result
     }
+}
+
+fn source_path(ontology: &str, digest: &str, path: &str) -> String {
+    format!(
+        "gol/sources/{:x}/{digest}/{path}",
+        Sha256::digest(ontology.as_bytes())
+    )
+}
+
+fn valid_source_digest(digest: &str) -> bool {
+    digest.len() == 64 &&
+        digest.bytes().all(|byte| {
+            byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+        })
 }
 
 /// Reports whether a tenant identity is safe for server-side resolution.
@@ -1282,7 +1557,7 @@ mod tests {
                 .get(1)
                 .context("ontology request missing")?
                 .contains(&format!(
-                    "/refs/{HEAD}/objects?path=ontology%2Fstate.json"
+                    "/refs/{HEAD}/objects?path=gol%2Fsources.json"
                 ))
         );
         assert_eq!(s3_handle.await??.len(), 1);
@@ -1386,7 +1661,12 @@ mod tests {
             branch_response(HEAD),
             response("201 Created", "{}"),
             response("201 Created", "{}"),
+            response("201 Created", "{}"),
+            response("201 Created", "{}"),
             response("201 Created", format!(r#"{{"id":"{NEXT}"}}"#)),
+            branch_response(HEAD),
+            response("200 OK", format!(r#"{{"reference":"{NEXT}"}}"#)),
+            response("204 No Content", ""),
         ])
         .await?;
         let (s3_endpoint, s3_handle) =
@@ -1409,24 +1689,45 @@ mod tests {
         let requests = handle.await??;
         assert!(
             requests
-                .get(1)
+                .get(2)
                 .context("state upload missing")?
                 .starts_with("POST /api/v1/repositories/")
         );
         assert!(
             requests
-                .get(1)
+                .get(2)
                 .context("pipeline upload missing")?
                 .contains("path=pipeline%2Fstate.json")
         );
         assert!(
             requests
-                .get(2)
+                .get(3)
                 .context("ontology upload missing")?
-                .contains("path=ontology%2Fstate.json")
+                .contains("path=gol%2Fsources.json")
         );
-        let commit = requests.get(3).context("commit request missing")?;
-        assert!(commit.contains("/branches/main/commits "));
+        let commit = requests.get(5).context("commit request missing")?;
+        assert!(
+            commit.contains("/branches/registry-write-") &&
+                commit.contains("/commits ")
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.contains("/branches/main/objects"))
+        );
+        let witness = requests.get(4).context("write witness missing")?;
+        assert!(witness.contains("path=_registry%2Fwrite.json"));
+        let merge = requests.get(7).context("isolated merge missing")?;
+        assert!(
+            merge.contains(&format!("/refs/{NEXT}/merge/main")) &&
+                !merge.contains("strategy")
+        );
+        assert!(
+            requests
+                .get(8)
+                .context("branch cleanup missing")?
+                .starts_with("DELETE ")
+        );
         assert!(commit.contains(r#""tenant_digest":"galadril-"#));
         assert_eq!(s3_handle.await??.len(), 1);
         Ok(())
@@ -1460,7 +1761,12 @@ mod tests {
             branch_response(HEAD),
             response("201 Created", "{}"),
             response("201 Created", "{}"),
+            response("201 Created", "{}"),
+            response("201 Created", "{}"),
+            response("201 Created", format!(r#"{{"id":"{NEXT}"}}"#)),
+            branch_response(HEAD),
             response("409 Conflict", "{}"),
+            response("204 No Content", ""),
         ])
         .await?;
         let (conflict_s3, conflict_s3_handle) =
@@ -1482,7 +1788,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(conflict_handle.await??.len(), 4);
+        assert_eq!(conflict_handle.await??.len(), 9);
         assert_eq!(conflict_s3_handle.await??.len(), 1);
         Ok(())
     }

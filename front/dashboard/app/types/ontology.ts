@@ -1,67 +1,61 @@
-import type { Json } from "~/utils/pipeline";
-export interface OntologyResource {
-  resource_id: string;
-  kind: string;
-  display_name: string;
-  owner_id?: string;
-  value_type?: string;
-  references: string[];
-  attributes: Record<string, Json>;
+/** Browser contracts contain source only for explicitly authorized authoring. */
+export interface GolSourceFile {
+  path: string;
+  text: string;
 }
-export interface SemanticDocument {
-  version: string;
-  resources: OntologyResource[];
-  plugin_origin?: {
-    package_id: string;
-    plugin_version: string;
-    package_version: string;
-  };
-  participant_mappings?: Record<string, string>;
-  target_origin?: { ontology_id: string; revision_id: string };
-}
-export interface SemanticPackage {
-  id: string;
-  name: string;
-  version: string;
-  plugin_id: string;
-  plugin_version: string;
-  ontologies: Array<{ id: string; resources: OntologyResource[] }>;
-}
-export interface TenantOntology {
+export interface GolSummary {
   ontologyId: string;
   displayName: string;
-  productionPublication: { revisionId: string; publicationId: string } | null;
+  sourceRevision: string;
+  activeGeneration: string | null;
+  activeSourceRevision: string | null;
+  status: "draft" | "published";
 }
-export interface OntologyBranch {
-  parent_branch: string;
-  definition: SemanticDocument;
-  display_name: string;
-  base_revision_id: string;
-  author: string;
-  updated_at_ms: number;
-}
-export interface OntologyWorkspace {
-  revision_id: string;
-  ontology: SemanticDocument;
-  display_name?: string;
-  authoring: {
-    branches: Record<string, OntologyBranch>;
-    deleted_at_ms: number | null;
-  };
-}
-export type OntologyCommand =
-  | { operation: "create_branch"; branch: string; from_branch: string }
-  | { operation: "merge" | "delete_branch"; branch: string }
-  | { operation: "delete" | "restore" };
-export interface OntologyHistoryItem {
-  revision_id: string;
-  author: string;
+export interface GolDiagnostic {
+  code: string;
   message: string;
-  branch: string;
-  operation: string;
-  created_at_ms: number;
+  path: string;
+  start: number;
+  end: number;
+  severity: string;
 }
-export interface OntologyHistoryPage {
-  items: OntologyHistoryItem[];
-  next_revision_id: string | null;
+export interface GolDependency {
+  ontologyId: string;
+  generation: string;
+  sourceRevision: string;
 }
+export interface GolWorkspace {
+  summary: GolSummary;
+  files: GolSourceFile[];
+  diagnostics: GolDiagnostic[];
+  dependencies: GolDependency[];
+}
+export interface GolValidation {
+  ontologyId: string;
+  sourceRevision: string;
+  status: "valid" | "invalid" | "pending_authority";
+  diagnostics: GolDiagnostic[];
+  dependencies: GolDependency[];
+}
+export interface GolProperty {
+  key: string;
+  name: string;
+  typeName: string;
+}
+export interface GolSymbol {
+  key: string;
+  name: string;
+  kind: string;
+  references: string[];
+  properties: GolProperty[];
+}
+export interface GolSymbols {
+  generation: string;
+  symbols: GolSymbol[];
+}
+export interface GolPublication {
+  ontologyId: string;
+  sourceRevision: string;
+  generation: string;
+}
+export type GolSchemaProfile = "STANDARD" | "OPEN_AI_STRICT" | "OUTLINES";

@@ -18,6 +18,7 @@ from faststream.confluent import KafkaBroker, KafkaMessage
 from faststream.confluent.helpers.config import ConfluentConfig
 from faststream.confluent.opentelemetry import KafkaTelemetryMiddleware
 from faststream.middlewares import AckPolicy
+from galadril_ontology import GatewayGolClient, GolRuntimeManager
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace
@@ -41,6 +42,7 @@ from galadril_vision.streaming.handlers import (
     CommandInProgress,
     IngressHandler,
 )
+from galadril_vision.streaming.security import GatewayPublicationGate
 from galadril_vision.streaming.timer import (
     CronCommandPublisher,
     ScheduledCommandFactory,
@@ -140,6 +142,7 @@ class _Runtime:
                 ledger=ledger,
                 topics=self.topics,
                 metrics=self.metrics,
+                publication_gate=_publication_gate(config),
             )
             for config in self.registry.configs
         }
@@ -354,6 +357,7 @@ def build_stream_app(
                 publisher=broker,
                 topics=topic_layout,
                 metrics=pipeline_metrics,
+                publication_gate=_publication_gate(pipeline),
             )
             for pipeline in registry.configs
         },
@@ -402,6 +406,7 @@ def build_stream_app(
             ),
             publisher=broker,
             topics=topic_layout,
+            publication_gate=_publication_gate(pipeline),
         )
         for pipeline in registry.configs
         if registry.routes_for(pipeline.name).scheduled_steps
@@ -611,7 +616,7 @@ def _create_actor_pool(
     from galadril_vision.actors.processor import VisionCommandProcessor
     from galadril_vision.actors.worker import RayPipelineActor
     from galadril_vision.connectors.version import (
-        build_vision_ontology_runtime,
+        build_vision_gol_runtime,
     )
 
     handles: list[ActorHandle] = []
@@ -638,7 +643,10 @@ def _create_actor_pool(
         handle = RayPipelineActor.options(**options).remote(
             VisionCommandProcessor(
                 pipelines,
-                ontology_runtime=build_vision_ontology_runtime(config.registry),
+                ontology_runtime=build_vision_gol_runtime(
+                    config.gol_gateway_endpoint,
+                    worker_key_path=config.gol_worker_key_path,
+                ),
             ),
             telemetry,
         )
@@ -662,3 +670,16 @@ def _gpu_actor_requirement(config: VisionConfig) -> float:
     raw_gpu = cluster_resources().get("GPU", 0.0)
     detected = float(raw_gpu) if isinstance(raw_gpu, (int, float)) else 0.0
     return min(1.0, detected)
+
+
+def _publication_gate(config: VisionConfig) -> GatewayPublicationGate:
+    """Only bootstrap credentials can reach the worker-only release endpoint."""
+    return GatewayPublicationGate(
+        config,
+        GolRuntimeManager(
+            GatewayGolClient(
+                config.gol_gateway_endpoint,
+                worker_key_path=config.gol_worker_key_path,
+            )
+        ),
+    )

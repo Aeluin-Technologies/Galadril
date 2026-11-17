@@ -3,15 +3,23 @@ load("@rules_python//python:defs.bzl", "py_library")
 py_library(
     name = "identity",
     srcs = [
-        "__init__.py",
         "licorne.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
+        "//platform/ontology/src/galadril_ontology",
+        ":contracts",
         "//platform/vision/src/galadril_vision/common",
-        "@pip//licorne",  # keep: imported when the resolver starts
         "@pip//orjson",
+        "@pip//pydantic",
         "@pip//structlog",
     ],
+)
+
+py_library(
+    name = "contracts",
+    srcs = ["__init__.py", "contracts.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
 )

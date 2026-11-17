@@ -89,7 +89,8 @@ async def exercise_empirical_causal(
         """,
         {"key": staging_key},
     )
-    raw_key = f"{TENANT_ID}/raw/trial/trial-205.csv"
+    nonce = staging_key.rsplit("/", 1)[-1]
+    raw_key = f"{TENANT_ID}/raw/trial/{nonce}/trial-205.csv"
     assert promoted.get("completeUpload") == raw_key
     persisted = await eventually(
         _persisted_trial,

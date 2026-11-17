@@ -1,0 +1,12 @@
+// Authored GOL contract; security identities remain external.
+
+ontology law.contentieux version "0.4.0" {
+    import law.ecritures version "0.4.0" as LawEcritures;
+    import law.moyens version "0.4.0" as LawMoyens;
+    import law.preuves version "0.4.0" as LawPreuves;
+    import law.socle version "0.4.0" as LawSocle;
+    security label LegalData {
+        classification: Restricted;
+        compartments: [Legal];
+    }
+}
