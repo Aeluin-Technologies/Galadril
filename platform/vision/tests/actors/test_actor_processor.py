@@ -103,6 +103,7 @@ def test_builtin_capabilities_do_not_require_a_plugin_binding() -> None:
         params={
             "gol_symbol_key": "domain::Entity",
             "gol_event_symbol_key": "domain::Observation",
+            "gol_transfer_symbol_key": "domain::Entity",
         },
     )
     handler = AsyncMock()
