@@ -35,6 +35,7 @@ struct Lease {
     pipeline: String,
     revision: String,
     block: String,
+    binding_pipeline: String,
     ontology: String,
     source_revision: String,
     archive: Arc<RemoteArchive>,
@@ -257,6 +258,10 @@ impl GolService {
             .await
             .context("GOL binding unavailable")?
             .into_inner();
+        if binding.pipeline_id != request.pipeline_id {
+            self.verify_pipeline_execute(&worker, &binding.pipeline_id)
+                .await?;
+        }
         let existing = {
             worker
                 .leases
@@ -273,6 +278,7 @@ impl GolService {
         let (context_id, lease) = if let Some((id, lease)) = existing {
             ensure!(
                 lease.ontology == binding.ontology_id &&
+                    lease.binding_pipeline == binding.pipeline_id &&
                     lease.archive.generation().to_string() ==
                         binding.generation &&
                     lease.source_revision == binding.source_revision,
@@ -320,6 +326,7 @@ impl GolService {
                 pipeline: request.pipeline_id,
                 revision: request.pipeline_revision_id,
                 block: request.block_id,
+                binding_pipeline: binding.pipeline_id,
                 ontology: binding.ontology_id,
                 source_revision: binding.source_revision,
                 targets: binding.symbols.into_iter().collect(),
@@ -540,24 +547,41 @@ impl GolService {
                     Some(token),
             "GOL input changed"
         );
-        for (permission, kind, id) in [
-            (Permission::View, "raw", source),
-            (Permission::Execute, "pipeline", pipeline),
-        ] {
-            ensure!(
-                self.auth
-                    .is_authorized(
-                        user,
-                        tenant,
-                        permission,
-                        kind,
-                        id,
-                        Some(&worker.facts)
-                    )
-                    .await?,
-                "GOL input unavailable"
-            );
-        }
+        ensure!(
+            self.auth
+                .is_authorized(
+                    user,
+                    tenant,
+                    Permission::View,
+                    "raw",
+                    source,
+                    Some(&worker.facts)
+                )
+                .await?,
+            "GOL input unavailable"
+        );
+        self.verify_pipeline_execute(worker, pipeline).await
+    }
+
+    async fn verify_pipeline_execute(
+        &self,
+        worker: &Worker,
+        pipeline: &str,
+    ) -> Result<()> {
+        let actor = &worker.admission.actor;
+        ensure!(
+            self.auth
+                .is_authorized(
+                    &actor.subject_id,
+                    &actor.tenant,
+                    Permission::Execute,
+                    "pipeline",
+                    pipeline,
+                    Some(&worker.facts)
+                )
+                .await?,
+            "GOL pipeline unavailable"
+        );
         Ok(())
     }
 
@@ -755,6 +779,10 @@ impl GolService {
                     request.generation_id,
             "GOL lease unavailable"
         );
+        if lease.binding_pipeline != lease.pipeline {
+            self.verify_pipeline_execute(&worker, &lease.binding_pipeline)
+                .await?;
+        }
         self.recheck_dependencies(&worker).await?;
         let backend = self.backend()?;
         let actor = self

@@ -15,6 +15,13 @@ use crate::storage::{
 
 const MAX_TENANT_VALIDATIONS: usize = 100;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PipelineValidation {
+    Draft,
+    Release,
+    Runtime,
+}
+
 #[derive(Debug)]
 /// Tenant projection whose revision is resolved entirely by Registry.
 pub struct TenantView {
@@ -177,7 +184,7 @@ where
             input.pipeline_id,
             &snapshot.revision_id,
             &input.definition,
-            false,
+            PipelineValidation::Draft,
         )
         .await?;
 
@@ -289,15 +296,20 @@ where
             !candidate.authoring.enabled,
             "managed pipeline requires explicit approval and deployment"
         );
-        let bindings = bindings_for(&pinned.state, pipeline_id);
-        validate_pipeline(&candidate.definition, &bindings)?;
-        validate_pipeline_ontology_dependencies(&pinned.state, pipeline_id)?;
+        self.validate_pipeline_bindings(
+            tenant_id,
+            &pinned.state,
+            pipeline_id,
+            &candidate.definition,
+            PipelineValidation::Release,
+        )
+        .await?;
         self.compile_composition(
             tenant_id,
             pipeline_id,
             revision_id,
             &candidate.definition,
-            true,
+            PipelineValidation::Release,
         )
         .await?;
 
@@ -367,7 +379,7 @@ where
             .await
     }
 
-    /// Reconstructs a pipeline from an explicitly pinned immutable revision.
+    /// Admits a root pipeline only at its current deployed revision.
     pub async fn runtime_pipeline(
         &self,
         tenant_id: &str,
@@ -376,22 +388,64 @@ where
     ) -> Result<PipelineRecord> {
         validate_identity(tenant_id, pipeline_id)?;
         ensure!(valid_revision(revision_id), "invalid revision ID");
+        let current = self.store.load(tenant_id, None).await?;
+        let deployed =
+            current
+                .state
+                .pipelines
+                .get(pipeline_id)
+                .is_some_and(|record| {
+                    record.deleted_at_ms.is_none() &&
+                        record.published_revision_id.as_deref() ==
+                            Some(revision_id)
+                });
+        if !deployed {
+            tracing::debug!(
+                event.name = "registry.pipeline.deployment_unavailable"
+            );
+            anyhow::bail!("pipeline deployment unavailable");
+        }
+        self.compile_pipeline_revision(
+            tenant_id,
+            pipeline_id,
+            revision_id,
+            PipelineValidation::Runtime,
+        )
+        .await
+    }
+
+    /// Compiles a revision selected by a deployment snapshot or a release
+    /// check.
+    pub(crate) async fn compile_pipeline_revision(
+        &self,
+        tenant_id: &str,
+        pipeline_id: &str,
+        revision_id: &str,
+        validation: PipelineValidation,
+    ) -> Result<PipelineRecord> {
         let mut snapshot =
             self.store.load(tenant_id, Some(revision_id)).await?;
-        validate_pipeline_ontology_dependencies(&snapshot.state, pipeline_id)?;
         let mut record = snapshot
             .state
             .pipelines
             .remove(pipeline_id)
             .filter(|pipeline| pipeline.deleted_at_ms.is_none())
             .context("pipeline unavailable at revision")?;
+        self.validate_pipeline_bindings(
+            tenant_id,
+            &snapshot.state,
+            pipeline_id,
+            &record.definition,
+            validation,
+        )
+        .await?;
         record.definition = self
             .compile_composition(
                 tenant_id,
                 pipeline_id,
                 revision_id,
                 &record.definition,
-                true,
+                validation,
             )
             .await?;
         Ok(record)
@@ -405,7 +459,7 @@ where
         pipeline_id: &str,
         revision_id: &str,
         definition: &Value,
-        require_ontologies: bool,
+        validation: PipelineValidation,
     ) -> Result<Value> {
         let mut pending = crate::composition::references(definition)?;
         let mut definitions = std::collections::BTreeMap::new();
@@ -423,18 +477,22 @@ where
                 .store
                 .load(tenant_id, Some(&reference.revision_id))
                 .await?;
-            if require_ontologies {
-                validate_pipeline_ontology_dependencies(
-                    &snapshot.state,
-                    &reference.pipeline_id,
-                )?;
-            }
             let child = snapshot
                 .state
                 .pipelines
                 .get(&reference.pipeline_id)
                 .filter(|record| record.deleted_at_ms.is_none())
                 .context("Referenced pipeline unavailable")?;
+            if validation != PipelineValidation::Draft {
+                self.validate_pipeline_bindings(
+                    tenant_id,
+                    &snapshot.state,
+                    &reference.pipeline_id,
+                    &child.definition,
+                    validation,
+                )
+                .await?;
+            }
             pending.extend(crate::composition::references(&child.definition)?);
             definitions.insert(key, child.definition.clone());
         }
@@ -468,7 +526,12 @@ where
         let mut result = Vec::with_capacity(published.len());
         for (pipeline_id, revision) in published {
             let record = self
-                .runtime_pipeline(tenant_id, &pipeline_id, &revision)
+                .compile_pipeline_revision(
+                    tenant_id,
+                    &pipeline_id,
+                    &revision,
+                    PipelineValidation::Runtime,
+                )
                 .await?;
             result.push(PipelineView {
                 head_revision_id: revision,
@@ -476,6 +539,33 @@ where
             });
         }
         Ok(result)
+    }
+
+    pub(crate) async fn validate_pipeline_bindings(
+        &self,
+        tenant: &str,
+        state: &TenantState,
+        pipeline_id: &str,
+        definition: &Value,
+        validation: PipelineValidation,
+    ) -> Result<()> {
+        validate_pipeline(definition, &bindings_for(state, pipeline_id))?;
+        let pins = state
+            .bindings
+            .values()
+            .filter(|binding| binding.pipeline_id == pipeline_id);
+        for binding in pins.clone() {
+            ensure!(
+                !binding.generation.is_empty() &&
+                    !binding.source_revision.is_empty() &&
+                    !binding.symbols.is_empty(),
+                "unpublished GOL ontology dependency"
+            );
+        }
+        if validation == PipelineValidation::Release {
+            self.check_active_gol_bindings(tenant, pins).await?;
+        }
+        Ok(())
     }
 }
 
@@ -508,31 +598,6 @@ fn bindings_for<'a>(
             ontology_id: &binding.ontology_id,
         })
         .collect()
-}
-
-fn validate_pipeline_ontology_dependencies(
-    state: &TenantState,
-    pipeline_id: &str,
-) -> Result<()> {
-    let pipeline = state
-        .pipelines
-        .get(pipeline_id)
-        .context("pipeline unavailable")?;
-    let bindings = bindings_for(state, pipeline_id);
-    validate_pipeline(&pipeline.definition, &bindings)?;
-    for binding in state
-        .bindings
-        .values()
-        .filter(|binding| binding.pipeline_id == pipeline_id)
-    {
-        ensure!(
-            !binding.generation.is_empty() &&
-                !binding.source_revision.is_empty() &&
-                !binding.symbols.is_empty(),
-            "unpublished GOL ontology dependency"
-        );
-    }
-    Ok(())
 }
 
 pub(crate) fn validate_identity(

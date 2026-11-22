@@ -149,6 +149,14 @@ async def load_published_pipeline(
             artifact = await client.get_runtime_pipeline(
                 tenant_id, pipeline_id, revision_id
             )
+            if (
+                artifact.pipeline_id != pipeline_id
+                or artifact.revision_id != revision_id
+            ):
+                logger.warning("pipeline_publication_identity_mismatch")
+                raise PipelineUnavailable(
+                    "Registry publication identity mismatch"
+                )
             return _load_artifact(bootstrap, tenant_id, artifact)
         artifacts = await client.list_published_pipelines(tenant_id)
         for artifact in artifacts:

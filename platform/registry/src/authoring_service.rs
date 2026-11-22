@@ -9,7 +9,7 @@ use crate::authoring::{
     PipelineRelease, definition_hash, merge_definitions, valid_branch,
     validate_draft, validate_executable,
 };
-use crate::domain::{PipelineView, PutPipeline, Registry};
+use crate::domain::{PipelineValidation, PipelineView, PutPipeline, Registry};
 use crate::state::{GolBindingRecord, PipelineRecord, TenantState};
 use crate::storage::{RevisionStore, valid_tenant};
 
@@ -336,7 +336,7 @@ impl<S: RevisionStore> Registry<S> {
                     input.pipeline_id,
                     &snapshot.revision_id,
                     &record.definition,
-                    false,
+                    PipelineValidation::Draft,
                 )
                 .await?;
                 record.authoring.approval = Some(ContentReview {
@@ -356,12 +356,20 @@ impl<S: RevisionStore> Registry<S> {
                         definition_hash(&record.definition)?,
                     "pipeline approval stale"
                 );
+                self.validate_pipeline_bindings(
+                    input.tenant_id,
+                    &state,
+                    input.pipeline_id,
+                    &record.definition,
+                    PipelineValidation::Release,
+                )
+                .await?;
                 self.compile_composition(
                     input.tenant_id,
                     input.pipeline_id,
                     &snapshot.revision_id,
                     &record.definition,
-                    true,
+                    PipelineValidation::Release,
                 )
                 .await?;
                 record.authoring.release = Some(PipelineRelease {
@@ -389,18 +397,11 @@ impl<S: RevisionStore> Registry<S> {
                         definition_hash(&pinned.record.definition)?,
                     "pipeline publication invalid"
                 );
-                self.compile_composition(
+                self.compile_pipeline_revision(
                     input.tenant_id,
                     input.pipeline_id,
                     &release.revision_id,
-                    &pinned.record.definition,
-                    true,
-                )
-                .await?;
-                self.runtime_pipeline(
-                    input.tenant_id,
-                    input.pipeline_id,
-                    &release.revision_id,
+                    PipelineValidation::Release,
                 )
                 .await?;
                 record.published_revision_id =

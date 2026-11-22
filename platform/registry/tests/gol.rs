@@ -289,3 +289,178 @@ async fn deleting_pipeline_releases_only_current_bindings_and_preserves_pinned_h
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn runtime_binding_resolves_compiled_step_from_deployed_root()
+-> anyhow::Result<()> {
+    use galadril_registry::domain::{PutPipeline, Registry};
+    use galadril_registry::gol_service::SaveGolOntology;
+    use galadril_registry::state::{GolBindingRecord, TenantState};
+    use galadril_registry::storage::RevisionStore;
+    use serde_json::json;
+
+    let tenant = "tenant_a";
+    let store = memory::MemoryStore::default();
+    let registry = Registry::new(store.clone());
+    registry.save_gol_ontology(SaveGolOntology {
+        tenant_id: tenant,
+        ontology_id: "communication.mail",
+        display_name: "Mail",
+        files: vec![GolFile {
+            path: "mail.gol".into(),
+            text: "ontology communication.mail version \"1.0.0\" { entity Message { field title: String; } }".into(),
+        }],
+        author: "alice",
+        expected_revision: None,
+    }).await?;
+    let child_definition = json!({
+        "sources": [{"id": "input"}],
+        "pipeline": [{"step": "sink", "type": "sink", "input_from": ["input"], "ontology_required": true}]
+    });
+    let child = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: tenant,
+            pipeline_id: "child",
+            name: "Child",
+            owner_id: "alice",
+            definition: child_definition,
+            author: "alice",
+            message: "Create",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    let mut snapshot =
+        store.load(tenant, Some(&child.head_revision_id)).await?;
+    snapshot.state.bindings.insert(
+        TenantState::binding_key("child", "sink"),
+        GolBindingRecord {
+            pipeline_id: "child".into(),
+            block_id: "sink".into(),
+            ontology_id: "communication.mail".into(),
+            generation: "a".repeat(32),
+            source_revision: "b".repeat(40),
+            symbols: vec!["communication.mail::Message".into()],
+            updated_at_ms: 0,
+        },
+    );
+    let child_revision = store
+        .commit(
+            tenant,
+            &snapshot.revision_id,
+            &snapshot.state,
+            "alice",
+            "Bind",
+        )
+        .await?;
+    assert!(
+        registry
+            .gol_binding(tenant, "child", &child_revision, "sink")
+            .await
+            .is_err()
+    );
+    assert!(
+        registry
+            .publish_pipeline(tenant, "child", &child_revision)
+            .await
+            .is_err(),
+        "well-formed pins require a published archive"
+    );
+    assert_eq!(
+        registry
+            .current_pipeline(tenant, "child")
+            .await?
+            .head_revision_id,
+        child_revision
+    );
+    mark_fixture_deployed(&store, tenant, "child", &child_revision).await?;
+    let root = registry.put_pipeline(PutPipeline {
+        tenant_id: tenant,
+        pipeline_id: "root",
+        name: "Root",
+        owner_id: "alice",
+        definition: json!({
+            "sources": [{"id": "input"}],
+            "pipeline": [{"step": "transfer", "type": "pipeline", "input_from": ["input"], "pipeline_ref": {
+                "pipeline_id": "child", "revision_id": child_revision, "input_source": "input"
+            }}]
+        }),
+        author: "alice",
+        message: "Compose",
+        expected_revision_id: None,
+        create_only: true,
+    }).await?;
+    assert!(
+        registry
+            .publish_pipeline(tenant, "root", &root.head_revision_id)
+            .await
+            .is_err(),
+        "a composed release also requires the child's archive"
+    );
+    mark_fixture_deployed(&store, tenant, "root", &root.head_revision_id)
+        .await?;
+    let binding = registry
+        .gol_binding(tenant, "root", &root.head_revision_id, "__linked_1")
+        .await?;
+    assert_eq!(binding.pipeline_id, "child");
+    assert_eq!(binding.block_id, "sink");
+    assert_eq!(binding.generation, "a".repeat(32));
+    assert!(
+        registry
+            .gol_binding(tenant, "root", &root.head_revision_id, "sink")
+            .await
+            .is_err()
+    );
+    assert!(
+        registry
+            .gol_binding(
+                "tenant_b",
+                "root",
+                &root.head_revision_id,
+                "__linked_1"
+            )
+            .await
+            .is_err()
+    );
+    let head = store.load(tenant, None).await?.revision_id;
+    let head = registry.delete_pipeline(tenant, "child", &head).await?;
+    let deletion = registry
+        .delete_gol_ontology(tenant, "communication.mail", &head, "alice")
+        .await;
+    assert!(deletion.is_err_and(|error| {
+        error.to_string().contains("pipeline dependents")
+    }));
+    let head = registry.delete_pipeline(tenant, "root", &head).await?;
+    registry
+        .delete_gol_ontology(tenant, "communication.mail", &head, "alice")
+        .await?;
+    Ok(())
+}
+
+async fn mark_fixture_deployed(
+    store: &memory::MemoryStore,
+    tenant: &str,
+    pipeline: &str,
+    revision: &str,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use galadril_registry::storage::RevisionStore as _;
+
+    let mut snapshot = store.load(tenant, Some(revision)).await?;
+    snapshot
+        .state
+        .pipelines
+        .get_mut(pipeline)
+        .context("fixture pipeline")?
+        .published_revision_id = Some(revision.to_owned());
+    store
+        .commit(
+            tenant,
+            revision,
+            &snapshot.state,
+            "fixture",
+            "Simulate an earlier deployment",
+        )
+        .await?;
+    Ok(())
+}

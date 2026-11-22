@@ -18,6 +18,7 @@ use galadril_ontology::{
 };
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::domain::{Registry, validate_identity};
@@ -700,6 +701,12 @@ impl<S: RevisionStore> Registry<S> {
                     .any(|binding| binding.ontology_id == ontology),
                 "ontology has pipeline dependents"
             );
+            self.ensure_no_deployed_gol_dependents(
+                tenant,
+                ontology,
+                &snapshot.state,
+            )
+            .await?;
             let mut owned_modules = record.declared_modules.clone();
             owned_modules.insert(ontology.to_owned());
             if let Some(config) = &self.gol {
@@ -766,6 +773,56 @@ impl<S: RevisionStore> Registry<S> {
                 "Complete GOL source deletion",
             )
             .await
+    }
+
+    /// Old pipeline revisions can keep a binding after a draft removes it.
+    async fn ensure_no_deployed_gol_dependents(
+        &self,
+        tenant: &str,
+        ontology: &str,
+        current: &TenantState,
+    ) -> Result<()> {
+        let mut pending = current
+            .pipelines
+            .values()
+            .filter(|pipeline| pipeline.deleted_at_ms.is_none())
+            .filter_map(|pipeline| {
+                Some((
+                    pipeline.pipeline_id.clone(),
+                    pipeline.published_revision_id.as_ref()?.clone(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let mut visited = BTreeSet::new();
+        while let Some((pipeline, revision)) = pending.pop() {
+            if !visited.insert((pipeline.clone(), revision.clone())) {
+                continue;
+            }
+            let snapshot = self.store.load(tenant, Some(&revision)).await?;
+            if snapshot.state.bindings.values().any(|binding| {
+                binding.pipeline_id == pipeline &&
+                    binding.ontology_id == ontology
+            }) {
+                tracing::warn!(
+                    event.name = "registry.gol.deployed_dependency"
+                );
+                anyhow::bail!("ontology has pipeline dependents");
+            }
+            let record = snapshot
+                .state
+                .pipelines
+                .get(&pipeline)
+                .filter(|record| record.deleted_at_ms.is_none())
+                .context("deployed pipeline dependency unavailable")?;
+            pending.extend(
+                crate::composition::references(&record.definition)?
+                    .into_iter()
+                    .map(|reference| {
+                        (reference.pipeline_id, reference.revision_id)
+                    }),
+            );
+        }
+        Ok(())
     }
 
     async fn gol_mutation(
@@ -1211,6 +1268,51 @@ impl<S: RevisionStore> Registry<S> {
         Ok(())
     }
 
+    /// Checks the exact generation before releasing a pipeline that uses it.
+    pub(crate) async fn check_active_gol_bindings<'a>(
+        &self,
+        tenant: &str,
+        bindings: impl Iterator<Item = &'a GolBindingRecord>,
+    ) -> Result<()> {
+        let mut checked = BTreeSet::new();
+        for binding in bindings {
+            if !checked.insert((
+                &binding.ontology_id,
+                &binding.generation,
+                &binding.source_revision,
+            )) {
+                continue;
+            }
+            let config = self.gol.as_ref().context(
+                "approved GOL publication configuration unavailable",
+            )?;
+            let archive = match config
+                .store(tenant, &binding.ontology_id)
+                .await?
+                .open_generation(binding.generation.parse()?)
+                .await
+            {
+                Ok(archive) => archive,
+                Err(error) => {
+                    tracing::warn!(
+                        event.name =
+                            "registry.pipeline.gol_generation_unavailable"
+                    );
+                    return Err(error)
+                        .context("bound GOL generation unavailable");
+                },
+            };
+            ensure!(
+                archive.provenance().is_some_and(|provenance| {
+                    provenance.source_revision.as_ref() ==
+                        binding.source_revision.as_str()
+                }),
+                "bound GOL source revision mismatch"
+            );
+        }
+        Ok(())
+    }
+
     /// Atomically stores the selected immutable generation with pipeline
     /// state.
     pub async fn put_binding(
@@ -1282,8 +1384,7 @@ impl<S: RevisionStore> Registry<S> {
             .collect())
     }
 
-    /// Resolves only server-owned immutable pins for an admitted runtime
-    /// block.
+    /// Resolves a deployed root's compiled block to its owning revision.
     pub async fn gol_binding(
         &self,
         tenant: &str,
@@ -1291,7 +1392,34 @@ impl<S: RevisionStore> Registry<S> {
         revision: &str,
         block: &str,
     ) -> Result<GolBindingRecord> {
-        self.runtime_pipeline(tenant, pipeline, revision).await?;
+        let compiled =
+            self.runtime_pipeline(tenant, pipeline, revision).await?;
+        let step = compiled
+            .definition
+            .get("pipeline")
+            .and_then(Value::as_array)
+            .and_then(|steps| {
+                steps.iter().find(|step| {
+                    step.get("step").and_then(Value::as_str) == Some(block)
+                })
+            })
+            .context("GOL runtime block unavailable")?;
+        let (pipeline, revision, block) = match step.get("origin") {
+            None | Some(Value::Null) => (pipeline, revision, block),
+            Some(origin) => {
+                let part = |key| {
+                    origin
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .context("GOL block origin unavailable")
+                };
+                (
+                    part("pipeline_id")?,
+                    part("revision_id")?,
+                    part("block_id")?,
+                )
+            },
+        };
         let mut snapshot = self.store.load(tenant, Some(revision)).await?;
         snapshot
             .state

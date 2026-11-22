@@ -32,9 +32,6 @@ class PublicationGate(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _Binding:
-    pipeline_id: str
-    revision_id: str
-    block_id: str
     step_type: str
     target: str | None
 
@@ -42,7 +39,14 @@ class _Binding:
 class GatewayPublicationGate:
     """Gateway retains flow and all historical authorization dependencies."""
 
-    __slots__ = ("_runtime", "_execution", "_tenant", "_bindings")
+    __slots__ = (
+        "_runtime",
+        "_execution",
+        "_tenant",
+        "_pipeline",
+        "_revision",
+        "_bindings",
+    )
 
     def __init__(
         self, config: VisionConfig, runtime: GolRuntimeManager
@@ -50,16 +54,11 @@ class GatewayPublicationGate:
         self._runtime = runtime
         self._execution = config.name
         self._tenant = config.runtime_tenant_id
+        self._pipeline = config.ontology_pipeline_id
+        self._revision = config.runtime_revision_id
         self._bindings: Mapping[str, _Binding] = MappingProxyType(
             {
                 step.step: _Binding(
-                    step.origin.pipeline_id
-                    if step.origin
-                    else config.ontology_pipeline_id,
-                    step.origin.revision_id
-                    if step.origin
-                    else config.runtime_revision_id or "",
-                    step.origin.block_id if step.origin else step.step,
                     step.type,
                     value
                     if isinstance(
@@ -78,7 +77,7 @@ class GatewayPublicationGate:
         if (
             binding is None
             or not binding.target
-            or not binding.revision_id
+            or not self._revision
             or not self._tenant
             or command.tenant_id != self._tenant
             or command.pipeline != self._execution
@@ -92,9 +91,9 @@ class GatewayPublicationGate:
             )
             request = GolRequest(
                 tenant_id=command.tenant_id,
-                pipeline_id=binding.pipeline_id,
-                pipeline_revision_id=binding.revision_id,
-                block_id=binding.block_id,
+                pipeline_id=self._pipeline,
+                pipeline_revision_id=self._revision,
+                block_id=command.step,
                 source_object_id=source,
             )
         except ValueError:

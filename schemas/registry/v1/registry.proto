@@ -263,7 +263,9 @@ message ListBindingsRequest {
 message ListBindingsResponse { repeated GolBinding bindings = 1; }
 message GetGolBindingRequest {
   string tenant_id = 1;
+  // The execution root and exact deployed revision select the composition.
   string pipeline_id = 2;
   string pipeline_revision_id = 3;
+  // A step ID from the compiled composition, including generated IDs.
   string block_id = 4;
 }

@@ -83,6 +83,37 @@ def test_published_loader_scopes_transaction_and_pins_runtime_identity() -> (
     client.close.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("pipeline_id", "revision_id"),
+    [("other", "a" * 32), ("daily", "b" * 32)],
+)
+def test_pinned_loader_rejects_mismatched_response(
+    pipeline_id: str, revision_id: str
+) -> None:
+    client = MagicMock()
+    client.get_runtime_pipeline = AsyncMock(
+        return_value=PipelineArtifact(
+            pipeline_id=pipeline_id,
+            revision_id=revision_id,
+            definition_json=b'{"name":"daily","sources":[],"pipeline":[]}',
+        )
+    )
+    client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(
+        return_value=(MagicMock(tenant_id="tenant_a", exists=True),)
+    )
+    with patch(
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
+    ):
+        with pytest.raises(PipelineUnavailable, match="identity"):
+            asyncio.run(
+                load_published_pipeline(
+                    bootstrap(), "tenant_a", "daily", "a" * 32
+                )
+            )
+    client.close.assert_awaited_once()
+
+
 def test_missing_publication_fails_closed() -> None:
     client = MagicMock()
     client.list_published_pipelines = AsyncMock(return_value=())

@@ -126,15 +126,9 @@ class PipelineExecutor:
         request = GolRequest(
             tenant_id=command.tenant_id,
             source_object_id=source_scope,
-            pipeline_id=binding.step.origin.pipeline_id
-            if binding.step.origin
-            else route.pipeline_id,
-            pipeline_revision_id=binding.step.origin.revision_id
-            if binding.step.origin
-            else route.revision_id,
-            block_id=binding.step.origin.block_id
-            if binding.step.origin
-            else command.step,
+            pipeline_id=route.pipeline_id,
+            pipeline_revision_id=route.revision_id,
+            block_id=command.step,
         )
         try:
             async with self._ontology_runtime.bind(

@@ -105,6 +105,10 @@ uses `GOL_ARTIFACT_BUCKET` for unversioned compiled artifacts. That bucket must
 be distinct from the lakeFS source bucket. Credentials and storage coordinates
 stay in trusted service configuration.
 
+GOL source declares the business types, constraints and security obligations.
+The deployment configuration supplies the trusted authorities, context and
+destination ceilings used to check those obligations.
+
 `infrastructure/gol` contains the explicit deployment profile and fingerprints
 of its relationship schema, bridge, Cedar schema and policies. Its authoring
 floor is distinct from the caller's clearance. External LLM transfer is limited
@@ -116,11 +120,23 @@ requires the trusted location context and denies access when it is absent.
 ## Runtime boundary
 
 Pipeline bindings record an indivisible ontology/source/generation/symbol
-selection at an immutable pipeline revision. `GetGolBinding` returns those
-backend pins; it does not return an ontology graph or confer authorization.
-Gateway admits the workload and uses the common sparse reader and GOL security
-gate before describing symbols, properties, references or JSON Schemas. The
-private manifest candidate list is never a user-visible catalog.
+selection at an immutable pipeline revision. Registry checks that each
+binding in a release and its transferred steps points to an active GOLC
+generation with the recorded source provenance. The managed workflow repeats
+that check at deployment. Removing an ontology also checks deployed revisions
+and their transitive references, even after the corresponding draft changes.
+`GetRuntimePipeline` admits only
+the tenant's current deployed root revision. A managed pipeline must reach
+deployment before its release is visible through this RPC. A caller selecting
+a draft, a replaced deployment or a deleted root receives `NOT_FOUND`.
+
+`GetGolBinding` takes that deployed root and a step ID in its compiled graph.
+Registry resolves transferred steps to their compiler-owned origin and reads
+the exact binding from that origin's immutable revision. The root keeps this
+pin across child updates. Gateway checks live execution permissions on both
+the root and the binding's owning pipeline, then uses the common sparse reader
+and compiled security contract to admit metadata and data access. The RPC and
+the manifest candidate list are private backend interfaces.
 
 Every GOL RPC additionally requires the Gateway-only credential loaded from
 `REGISTRY_GATEWAY_KEY_PATH` or the client's explicit `gateway_key_file`.

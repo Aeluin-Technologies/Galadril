@@ -637,7 +637,7 @@ async def test_concrete_gate_preserves_scope_and_fresh_release_checks() -> None:
         runtime_revision_id="revision-one",
         pipeline=[
             PipelineStepConfig(
-                step="sink",
+                step="__linked_1",
                 type="sink",
                 input_from=["infer"],
                 origin={
@@ -656,7 +656,7 @@ async def test_concrete_gate_preserves_scope_and_fresh_release_checks() -> None:
         correlation_id=uuid4(),
         tenant_id="tenant-1",
         pipeline=config.name,
-        step="sink",
+        step="__linked_1",
         step_type="sink",
         resource_class="cpu",
         admission="opaque-server-handle",
@@ -672,9 +672,9 @@ async def test_concrete_gate_preserves_scope_and_fresh_release_checks() -> None:
     assert gateway.transfers == 2
     assert len(gateway.opens) == 3
     assert all(
-        request.pipeline_id == "origin-mail"
-        and request.pipeline_revision_id == "origin-revision-1234567890"
-        and request.block_id == "origin-sink"
+        request.pipeline_id == "mail"
+        and request.pipeline_revision_id == "revision-one"
+        and request.block_id == "__linked_1"
         and request.source_object_id == "raw:tenant-1/source/object"
         and admission == "opaque-server-handle"
         for request, admission in gateway.opens

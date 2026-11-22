@@ -374,6 +374,13 @@ async fn publication_pins_an_immutable_pipeline_revision_per_tenant()
             create_only: true,
         })
         .await?;
+    ensure!(
+        registry
+            .runtime_pipeline("tenant_a", "daily", &first.head_revision_id)
+            .await
+            .is_err(),
+        "draft must be unavailable to runtime"
+    );
     registry
         .publish_pipeline("tenant_a", "daily", &first.head_revision_id)
         .await?;
@@ -397,6 +404,23 @@ async fn publication_pins_an_immutable_pipeline_revision_per_tenant()
         .await?;
     assert_eq!(published.definition.get("name"), Some(&json!("v1")));
     assert_eq!(updated.record.definition.get("name"), Some(&json!("v2")));
+    ensure!(
+        registry
+            .runtime_pipeline("tenant_a", "daily", &updated.head_revision_id)
+            .await
+            .is_err(),
+        "a new draft must not inherit the previous publication"
+    );
+    registry
+        .delete_pipeline("tenant_a", "daily", &updated.head_revision_id)
+        .await?;
+    ensure!(
+        registry
+            .runtime_pipeline("tenant_a", "daily", &first.head_revision_id)
+            .await
+            .is_err(),
+        "removing the deployment must revoke runtime discovery"
+    );
     assert!(
         registry
             .runtime_pipeline("tenant_b", "daily", &first.head_revision_id)
@@ -548,6 +572,13 @@ async fn authoring_branches_merge_by_block_and_require_review_before_deployment(
         .context("release missing")?
         .revision_id
         .clone();
+    ensure!(
+        registry
+            .runtime_pipeline("tenant_a", "mail", &published)
+            .await
+            .is_err(),
+        "approval and publication must not replace explicit deployment"
+    );
     current = registry
         .author_pipeline(
             PutPipeline {
@@ -568,6 +599,9 @@ async fn authoring_branches_merge_by_block_and_require_review_before_deployment(
         current.record.published_revision_id.as_deref() ==
             Some(published.as_str())
     );
+    registry
+        .runtime_pipeline("tenant_a", "mail", &published)
+        .await?;
     ensure!(
         registry
             .list_published_pipelines("tenant_a", 100)

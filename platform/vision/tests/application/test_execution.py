@@ -197,9 +197,7 @@ def test_requires_at_least_one_route() -> None:
         PipelineExecutor(())
 
 
-def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> (
-    None
-):
+def test_compiled_child_requests_ontology_through_deployed_root() -> None:
     class Ontologies:
         requests: list[GolRequest] = []
 
@@ -218,7 +216,7 @@ def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> 
     handler = RecordingHandler("child")
     child = PipelineStep.model_validate(
         {
-            "step": "save",
+            "step": "__linked_1",
             "type": "sink",
             "input_from": ["source"],
             "origin": {
@@ -236,19 +234,21 @@ def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> 
                 "daily",
                 "rev1",
                 (child,),
-                {"save": handler},
+                {"__linked_1": handler},
             ),
         ),
         ontology_runtime=cast(GolRuntimeManager, ontology),
     )
     asyncio.run(
         executor.process(
-            _command(payload={"origin": {"pipeline_id": "forged"}})
+            _command(
+                step="__linked_1", payload={"origin": {"pipeline_id": "forged"}}
+            )
         )
     )
-    assert ontology.requests[0].pipeline_id == "child"
-    assert ontology.requests[0].pipeline_revision_id == "a" * 32
-    assert ontology.requests[0].block_id == "original"
+    assert ontology.requests[0].pipeline_id == "daily"
+    assert ontology.requests[0].pipeline_revision_id == "rev1"
+    assert ontology.requests[0].block_id == "__linked_1"
 
 
 if __name__ == "__main__":
