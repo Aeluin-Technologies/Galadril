@@ -1,13 +1,19 @@
 """Unit tests for actor-local command contract enforcement."""
 
 import asyncio
+import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 import structlog
-from galadril_ontology import GolLease, GolRequest, GolRuntimeManager
+from galadril_ontology import (
+    GolLease,
+    GolRequest,
+    GolRuntimeManager,
+    GolUnavailable,
+)
 from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_vision.actors.processor import (
@@ -379,6 +385,42 @@ def test_processor_injects_route_handlers_after_admission() -> None:
         )
     factory.assert_called_once()
     handler.execute.assert_awaited_once()
+
+
+def test_processor_records_gol_handler_failure_without_error_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reports a stable failure category without publishing protected details."""
+    handler = MagicMock()
+    handler.execute = AsyncMock(side_effect=GolUnavailable("protected detail"))
+    processor = VisionCommandProcessor(
+        _config(),
+        handler_factory=MagicMock(return_value={"transform": handler}),
+        ontology_runtime=_admitted_runtime(),
+    )
+    command = PipelineCommand(
+        payload={"record": {"storage_path": "s3://lake/default/source/object"}},
+        admission="test-admission",
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="transform",
+        step_type=StepType.DBT,
+        resource_class=ResourceClass.CPU,
+    )
+    with (
+        caplog.at_level(logging.WARNING),
+        pytest.raises(CommandProcessingError, match="GOL authorization"),
+    ):
+        asyncio.run(processor.process(command))
+
+    failure = next(
+        record
+        for record in caplog.records
+        if record.__dict__.get("event.name") == "pipeline.gol.failed"
+    )
+    assert failure.__dict__["phase"] == "handler"
+    assert failure.__dict__["error_type"] == "GolUnavailable"
+    assert "protected detail" not in caplog.text
 
 
 def test_builtin_resources_are_owned_by_each_route() -> None:

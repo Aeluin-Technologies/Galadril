@@ -913,11 +913,17 @@ otel-collector-1  | LogRecord #3
 otel-collector-1  | EventName: pipeline.command.failed
 otel-collector-1  |      -> error_type: Str(RayTaskError(CommandProcessingError))
 otel-collector-1  |      -> step: Str(resolve)
+otel-collector-1  | LogRecord #4
+otel-collector-1  | EventName: pipeline.gol.failed
+otel-collector-1  |      -> phase: Str(handler)
+otel-collector-1  |      -> error_type: Str(GolDenied)
+otel-collector-1  |      -> step: Str(sink)
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
         "ray.actor.task.failed error_type=VectorSearchError step=resolve",
         "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
+        "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
     ]
 
 

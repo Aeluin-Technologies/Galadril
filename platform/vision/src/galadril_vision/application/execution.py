@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -18,6 +19,8 @@ from pydantic import JsonValue
 
 from galadril_vision.application.errors import CommandProcessingError
 from galadril_vision.application.ontology import ontology_contract
+
+logger = logging.getLogger(__name__)
 
 
 class StepHandler(Protocol):
@@ -130,14 +133,25 @@ class PipelineExecutor:
             pipeline_revision_id=route.revision_id,
             block_id=command.step,
         )
+        phase = "runtime_open"
         try:
             async with self._ontology_runtime.bind(
                 request,
                 ontology_contract(binding.step),
                 admission=command.admission,
             ):
+                phase = "handler"
                 return await binding.handler.execute(command, binding.step)
         except GolError as error:
+            logger.warning(
+                "GOL authorization unavailable for pipeline command",
+                extra={
+                    "event.name": "pipeline.gol.failed",
+                    "phase": phase,
+                    "error_type": type(error).__name__,
+                    "step": command.step,
+                },
+            )
             raise CommandProcessingError(
                 "Block GOL authorization is unavailable"
-            ) from error
+            ) from None
