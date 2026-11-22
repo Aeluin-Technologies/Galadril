@@ -133,6 +133,68 @@ def _ontology() -> str:
     return f"""ontology {ONTOLOGY_ID} version "1.0.0" {{
     entity E2EEntity {{ field display_name: String; field confidence: f64; }}
     entity E2EObservation {{ field kind: String; }}
+    entity ObservationEdge {{
+        field tenant_id: String;
+        field source_id: String;
+        field target_id: String;
+        field edge_type: String;
+        field modality: String;
+        field raw_modality: Option<String>;
+        field confidence: Option<f64>;
+        field resolution_probability: Option<f64>;
+        field licorne_decision_id: Option<u64>;
+    }}
+    entity ObservationState {{
+        field tenant_id: String;
+        field entity_id: String;
+        field event_id: String;
+        field state_type: String;
+        field event_time: String;
+        field modality: String;
+        field model_name: String;
+        field confidence: Option<f64>;
+        field bbox: Option<List<f64>>;
+        field display_label: Option<String>;
+        field model_version: Option<String>;
+        field mime_type: Option<String>;
+        field raw_modality: Option<String>;
+        field source_field: Option<String>;
+        field is_unknown: Option<bool>;
+        field resolution_action: Option<String>;
+        field resolution_probability: Option<f64>;
+        field resolution_labels: Option<List<String>>;
+        field resolution_scores: Option<List<f64>>;
+        field licorne_identity_id: Option<u64>;
+        field licorne_observation_id: Option<u64>;
+        field licorne_decision_id: Option<u64>;
+        field licorne_inference_id: Option<u64>;
+        field licorne_version: Option<u64>;
+        field licorne_created_identity: Option<bool>;
+        field licorne_iterations: Option<u64>;
+        field licorne_residual: Option<f64>;
+        field licorne_exact: Option<bool>;
+        field h3_cell: Option<u64>;
+        field lat: Option<f64>;
+        field lon: Option<f64>;
+        field accuracy_meters: Option<f64>;
+        field scalar_names: Option<List<String>>;
+        field scalar_values: Option<List<f64>>;
+    }}
+    entity ObservationEmbedding {{
+        field tenant_id: String;
+        field entity_id: String;
+        field event_id: String;
+        field timestamp: String;
+        field state_type: String;
+        field entity_type: String;
+        field modality: String;
+        field raw_modality: Option<String>;
+        field model_name: String;
+        field model_version: Option<String>;
+        field licorne_identity_id: Option<u64>;
+        field licorne_version: Option<u64>;
+        field embedding: List<f64>;
+    }}
     entity IdentityPrototype {{
         field entity_id: String;
         field licorne_identity_id: String;
@@ -145,6 +207,9 @@ def _ontology() -> str:
     }}
     {gol_access("E2EEntity")}
     {gol_access("E2EObservation")}
+    {gol_access("ObservationEdge")}
+    {gol_access("ObservationState")}
+    {gol_access("ObservationEmbedding")}
     {gol_access("IdentityPrototype")}
 }}"""
 

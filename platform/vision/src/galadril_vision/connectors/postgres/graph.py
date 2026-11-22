@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, LiteralString
 import orjson
 import structlog
 from galadril_ontology import (
+    GolEffect,
     make_gol_state_effect,
     protected_gol_effect,
     protected_gol_effects,
@@ -18,12 +19,13 @@ from galadril_ontology import (
 )
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from galadril_vision.common.eskg import (
     ONTOLOGY_KINDS,
     RELATION_ENDPOINTS,
     GraphNodeKind,
+    eskg_write_effect,
     relation_endpoints,
 )
 from galadril_vision.common.exceptions import GraphOperationError
@@ -44,6 +46,8 @@ logger = structlog.get_logger(__name__)
 
 _SYSTEM_TENANT_ID = "galadril-system"
 _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PROBABILITIES = TypeAdapter(list[tuple[str, float]])
+_SCALAR_EVIDENCE = TypeAdapter(dict[str, int | float])
 
 
 def _cypher_identifier(value: str) -> LiteralString:
@@ -187,7 +191,8 @@ class GraphStore:
         props["id"] = vertex.vertex_id
         return props
 
-    def _edge_params(self, edge: GraphEdge) -> dict[str, JsonValue]:
+    @staticmethod
+    def _edge_params(edge: GraphEdge) -> dict[str, JsonValue]:
         """Normalizes tenant constraints and properties for a graph edge."""
         tenant_id = normalize_tenant_id(edge.tenant_id)
         props = edge.properties.copy()
@@ -197,6 +202,74 @@ class GraphStore:
         props["source_id"] = edge.source_vertex_id
         props["target_id"] = edge.target_vertex_id
         return props
+
+    @classmethod
+    def edge_write_effect(cls, edge: GraphEdge, target: str) -> GolEffect:
+        """Binds the relationship type and both endpoints to the admitted ID."""
+        return eskg_write_effect(
+            target,
+            f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
+            {**cls._edge_params(edge), "edge_type": edge.edge_type},
+        )
+
+    @staticmethod
+    def state_write_effect(state: EntityStateRecord, target: str) -> GolEffect:
+        """Separates numeric series and their labels without dropping any values."""
+        value = state.state_value.copy()
+        if {
+            "scalar_names",
+            "scalar_values",
+            "resolution_labels",
+            "resolution_scores",
+            "display_label",
+        } & value.keys():
+            raise GraphOperationError(
+                "graph_contract", "Conflicting state projection fields"
+            )
+        for key, expected in {
+            "tenant_id": state.tenant_id,
+            "entity_id": state.entity_id,
+            "event_id": state.event_id,
+            "state_type": state.state_type,
+            "event_time": state.event_time.isoformat(),
+        }.items():
+            if key in value and value[key] != expected:
+                raise GraphOperationError(
+                    "graph_contract", "Conflicting state provenance"
+                )
+        try:
+            if "scalar_evidence" in value:
+                evidence = _SCALAR_EVIDENCE.validate_python(
+                    value.pop("scalar_evidence")
+                )
+                value["scalar_names"] = list(evidence)
+                value["scalar_values"] = list(evidence.values())
+            if "resolution_probabilities" in value:
+                probabilities = _PROBABILITIES.validate_python(
+                    value.pop("resolution_probabilities")
+                )
+                value["resolution_labels"] = [name for name, _ in probabilities]
+                value["resolution_scores"] = [
+                    score for _, score in probabilities
+                ]
+        except ValidationError:
+            raise GraphOperationError(
+                "graph_contract", "Invalid numeric evidence"
+            ) from None
+        if "label" in value:
+            value["display_label"] = value.pop("label")
+        return eskg_write_effect(
+            target,
+            f"state:{state.entity_id}:{state.event_id}:{state.state_type}:{state.event_time.isoformat()}",
+            {
+                **value,
+                "entity_id": state.entity_id,
+                "event_id": state.event_id,
+                "state_type": state.state_type,
+                "event_time": state.event_time.isoformat(),
+                "tenant_id": state.tenant_id,
+            },
+        )
 
     def _vertex_scope(
         self, vertex: GraphVertex, props: dict[str, JsonValue]
@@ -343,19 +416,39 @@ class GraphStore:
                 raise GraphOperationError("ensure_vertex", str(exc)) from exc
 
     async def create_edge_on_connection(
-        self, conn: AsyncConnection[TupleRow], edge: GraphEdge
+        self,
+        conn: AsyncConnection[TupleRow],
+        edge: GraphEdge,
+        *,
+        gol_target: str | None = None,
     ) -> None:
         """Creates or updates a graph edge using an open connection transaction block."""
         props = self._edge_params(edge)
-        async with protected_gol_state_effect(
-            operation="write",
-            tenant_id=edge.tenant_id,
-            destination="eskg",
-            purpose="persistence",
-            derived=True,
-            instance_id=f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
-            proposal=props,
-        ):
+        effect = (
+            self.edge_write_effect(edge, gol_target) if gol_target else None
+        )
+        scope = (
+            protected_gol_effect(
+                operation="write",
+                target=effect.target,
+                tenant_id=edge.tenant_id,
+                destination=effect.destination,
+                purpose=effect.purpose,
+                instance_id=effect.instance_id,
+                proposal=effect.proposal,
+            )
+            if effect is not None
+            else protected_gol_state_effect(
+                operation="write",
+                tenant_id=edge.tenant_id,
+                destination="eskg",
+                purpose="persistence",
+                derived=True,
+                instance_id=f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
+                proposal=props,
+            )
+        )
+        async with scope as receipt:
             try:
                 pairs = relation_endpoints(edge.edge_type)
             except ValueError as exc:
@@ -365,6 +458,17 @@ class GraphStore:
                 for key, value in props.items()
                 if key not in {"source_id", "target_id"}
             }
+            if effect is not None:
+                if not receipt:
+                    raise GraphOperationError(
+                        "graph_contract", "GOL edge receipt unavailable"
+                    )
+                edge_props.update(
+                    edge_type=edge.edge_type,
+                    gol_symbol_key=effect.target,
+                    gol_value=effect.proposal,
+                    gol_receipt=receipt,
+                )
             set_clause, set_params = _cypher_set_clause("r", edge_props)
             params = {
                 "tenant_id": props["tenant_id"],
@@ -1035,14 +1139,24 @@ class GraphStore:
         states: list[EntityStateRecord],
         *,
         expected_tenant_id: str,
+        gol_target: str | None = None,
+        business_values: list[tuple[dict[str, JsonValue], str]] | None = None,
     ) -> None:
         """Executes a batch multi-row insertion into a database state hyper-table connection."""
         if not states:
             return
 
         tenant_id = normalize_tenant_id(expected_tenant_id)
+        if gol_target and (
+            business_values is None or len(business_values) != len(states)
+        ):
+            raise GraphOperationError(
+                "graph_contract", "GOL state provenance unavailable"
+            )
         effects = [
-            make_gol_state_effect(
+            self.state_write_effect(state, gol_target)
+            if gol_target
+            else make_gol_state_effect(
                 operation="write",
                 tenant_id=tenant_id,
                 destination="eskg",
@@ -1053,11 +1167,30 @@ class GraphStore:
             )
             for state in states
         ]
-        async with protected_gol_effects(effects, tenant_id=tenant_id):
+        async with protected_gol_effects(
+            effects, tenant_id=tenant_id
+        ) as receipts:
             params = []
-            for state in states:
+            for index, (state, effect, receipt) in enumerate(
+                zip(states, effects, receipts, strict=True)
+            ):
                 require_same_tenant(tenant_id, state.tenant_id)
-                state_json = orjson.dumps(state.state_value).decode()
+                value = state.state_value
+                if gol_target and business_values is not None:
+                    if not receipt:
+                        raise GraphOperationError(
+                            "graph_contract", "GOL state receipt unavailable"
+                        )
+                    business_value, business_receipt = business_values[index]
+                    value = {
+                        **value,
+                        "gol_value": business_value,
+                        "gol_receipt": business_receipt,
+                        "gol_state_symbol_key": gol_target,
+                        "gol_state_value": effect.proposal,
+                        "gol_state_receipt": receipt,
+                    }
+                state_json = orjson.dumps(value).decode()
                 geom_wkt = None
                 if "lat" in state.state_value and "lon" in state.state_value:
                     geom_wkt = f"SRID=4326;POINT({state.state_value['lon']} {state.state_value['lat']})"

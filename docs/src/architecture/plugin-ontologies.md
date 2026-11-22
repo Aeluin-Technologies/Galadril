@@ -59,7 +59,8 @@ ESKG keeps its existing Entity/Event/State and structural relation vocabulary.
 Business classifications record module, exact version, source revision, generation,
 symbol selector and GOL kind. Entity and Event refer to GOL entities; State refers
 to a GOL field. Existing evidence cannot be relabeled by a later generation.
-The database sink requires explicit `gol_symbol_key` and `gol_event_symbol_key`
+The database sink requires explicit `gol_symbol_key`, `gol_event_symbol_key`,
+`gol_edge_symbol_key`, `gol_entity_state_symbol_key`, and `gol_embedding_symbol_key`
 parameters. Each item supplies an explicit `gol_value`; the record supplies its
 event `gol_value`. Utils emits typed Person and Message values alongside ESKG
 metadata. The sink submits every exact value for trusted host validation and fresh

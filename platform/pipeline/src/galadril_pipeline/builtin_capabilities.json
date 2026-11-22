@@ -61,6 +61,18 @@
           "gol_event_symbol_key": {
             "type": "string"
           },
+          "gol_edge_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an ESKG relationship and its endpoints."
+          },
+          "gol_entity_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an entity state observation."
+          },
+          "gol_embedding_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an embedding and its provenance."
+          },
           "gol_transfer_symbol_key": {
             "type": "string",
             "description": "Authorized GOL target for Kafka release under the original admitted calculation."
@@ -77,6 +89,9 @@
         "required": [
           "gol_symbol_key",
           "gol_event_symbol_key",
+          "gol_edge_symbol_key",
+          "gol_entity_state_symbol_key",
+          "gol_embedding_symbol_key",
           "gol_transfer_symbol_key"
         ]
       },

@@ -40,10 +40,21 @@ def ontology_contract(step: PipelineStep) -> GolBlockContract:
         )
     state_key = parameters.get("gol_state_symbol_key")
     derived_key = parameters.get("gol_derived_symbol_key")
-    transfer_key = parameters.get("gol_transfer_symbol_key")
+    release_keys = tuple(
+        parameters[key]
+        for key in (
+            "gol_transfer_symbol_key",
+            "gol_symbol_key",
+            "gol_event_symbol_key",
+            "gol_edge_symbol_key",
+            "gol_entity_state_symbol_key",
+            "gol_embedding_symbol_key",
+        )
+        if key in parameters and parameters[key] is not None
+    )
     if any(
         value is not None and not isinstance(value, str)
-        for value in (state_key, derived_key, transfer_key)
+        for value in (state_key, derived_key, *release_keys)
     ):
         raise CommandProcessingError(
             "GOL effect targets must be symbol selectors"
@@ -54,6 +65,6 @@ def ontology_contract(step: PipelineStep) -> GolBlockContract:
         required_symbol_keys=tuple(
             cast(list[str] | tuple[str, ...], required_value)
         )
-        + ((transfer_key,) if isinstance(transfer_key, str) else ()),
+        + cast(tuple[str, ...], release_keys),
         allowed_kinds=allowed_kinds,
     )

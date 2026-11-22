@@ -395,11 +395,20 @@ class TestTasksDatabasePipelines:
 
         @asynccontextmanager
         async def protected(
-            effects: object, **kwargs: object
+            effects: tuple[object, ...], **kwargs: object
         ) -> AsyncIterator[tuple[str, ...]]:
             held[0] = True
             try:
-                yield ("receipt-event", "receipt-entity")
+                yield tuple(
+                    f"receipt-{kind}"
+                    for kind in (
+                        "event",
+                        "entity",
+                        "edge",
+                        "state",
+                        "embedding",
+                    )
+                )
             finally:
                 held[0] = False
 
@@ -464,6 +473,10 @@ class TestTasksDatabasePipelines:
                 return_value="scoped-event",
             ),
             patch(
+                "galadril_vision.common.eskg.scoped_instance_id",
+                side_effect=lambda value: value,
+            ),
+            patch(
                 "galadril_vision.compute.tasks.resolve_gol_reference",
                 return_value=reference,
             ),
@@ -487,6 +500,9 @@ class TestTasksDatabasePipelines:
                 state_type="s",
                 gol_symbol_key="domain::Entity",
                 gol_event_symbol_key="domain::Observation",
+                gol_edge_symbol_key="domain::Edge",
+                gol_entity_state_symbol_key="domain::State",
+                gol_embedding_symbol_key="domain::Embedding",
                 event_values=[{"source_id": "record"}],
                 event_times=["2026-09-30T12:00:00+00:00"],
             )
@@ -509,6 +525,15 @@ class TestTasksDatabasePipelines:
             assert event.properties["gol_receipt"] == "receipt-event"
             assert guard.call_args.args[0][0].instance_id == "scoped-event"
             assert guard.call_args.args[0][1].instance_id == "ent_1"
+            assert tuple(
+                effect.target for effect in guard.call_args.args[0]
+            ) == (
+                "domain::Observation",
+                "domain::Entity",
+                "domain::Edge",
+                "domain::State",
+                "domain::Embedding",
+            )
             assert guard.call_count == 1
             assert held == [False]
             mock_g_store.create_edge_on_connection.assert_called_once()
@@ -570,6 +595,10 @@ async def test_sink_missing_receipt_cannot_create_database_effects() -> None:
             side_effect=no_receipt,
         ),
         patch(
+            "galadril_vision.compute.tasks.resolve_gol_reference",
+            return_value=None,
+        ),
+        patch(
             "galadril_vision.compute.tasks.get_pg_stores", new=AsyncMock()
         ) as storage,
     ):
@@ -577,14 +606,7 @@ async def test_sink_missing_receipt_cannot_create_database_effects() -> None:
             await sink_to_db_batch(
                 state=PostgresRuntimeState(),
                 postgres_config=_postgres_config(),
-                resolved_items=[
-                    [
-                        {
-                            "resolved_entity_id": "entity-one",
-                            "gol_value": {"name": "Alice"},
-                        }
-                    ]
-                ],
+                resolved_items=[[{}]],
                 record_ids=["record"],
                 sources=["source"],
                 tenant_ids=["acme"],

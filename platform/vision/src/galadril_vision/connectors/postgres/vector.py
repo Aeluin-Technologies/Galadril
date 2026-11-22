@@ -26,6 +26,7 @@ from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from galadril_vision.common.eskg import eskg_write_effect
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import (
     EmbeddingModality,
@@ -515,18 +516,49 @@ class VectorStore:
         conn: AsyncConnection[TupleRow],
         records: list[tuple[EntityEmbedding, str]],
         expected_tenant_id: str,
+        *,
+        gol_target: str | None = None,
     ) -> None:
         """Retains the batch permit through codec setup and each SQL operation."""
         if not records:
             return
         tenant_id = normalize_tenant_id(expected_tenant_id)
-        prepared, effects = self._prepare_embeddings(records, tenant_id)
+        prepared, effects = self._prepare_embeddings(
+            records, tenant_id, gol_target
+        )
         await self._store_prepared_embeddings(
             conn, prepared, effects, tenant_id
         )
 
+    @staticmethod
+    def embedding_write_effect(
+        record: EntityEmbedding, entity_id: str, target: str
+    ) -> GolEffect:
+        """Authorizes the exact vector and its structural provenance together."""
+        if {
+            "tenant_id",
+            "entity_id",
+            "modality",
+            "embedding",
+        } & record.metadata.keys():
+            raise VectorSearchError("Conflicting embedding provenance")
+        return eskg_write_effect(
+            target,
+            f"embedding:{record.embedding_id}",
+            {
+                **record.metadata,
+                "tenant_id": normalize_tenant_id(record.tenant_id),
+                "entity_id": entity_id,
+                "modality": normalize_embedding_modality(record.modality),
+                "embedding": record.vector,
+            },
+        )
+
     def _prepare_embeddings(
-        self, records: list[tuple[EntityEmbedding, str]], tenant_id: str
+        self,
+        records: list[tuple[EntityEmbedding, str]],
+        tenant_id: str,
+        gol_target: str | None = None,
     ) -> tuple[list[_EmbeddingWrite], list[GolEffect]]:
         """Generate IDs once so nested SQL consumes the exact admitted batch."""
         effects: list[GolEffect] = []
@@ -545,9 +577,18 @@ class VectorStore:
                 "embedding": vector,
                 "metadata": metadata,
             }
-            row_id = f"emb_{uuid4().hex}"
-            effects.append(
-                make_gol_state_effect(
+            if gol_target:
+                effect = self.embedding_write_effect(
+                    record, entity_id, gol_target
+                )
+                if effect.instance_id is None or effect.proposal is None:
+                    raise VectorSearchError(
+                        "Embedding GOL proposal unavailable"
+                    )
+                row_id, value = effect.instance_id, effect.proposal
+            else:
+                row_id = f"emb_{uuid4().hex}"
+                effect = make_gol_state_effect(
                     operation="write",
                     tenant_id=tenant_id,
                     destination="eskg",
@@ -556,7 +597,7 @@ class VectorStore:
                     instance_id=row_id,
                     proposal=value,
                 )
-            )
+            effects.append(effect)
             created_at = record.metadata.get("timestamp") or datetime.now(UTC)
             if isinstance(created_at, str):
                 created_at = datetime.fromisoformat(created_at)

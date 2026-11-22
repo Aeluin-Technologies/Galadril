@@ -103,6 +103,9 @@ def test_builtin_capabilities_do_not_require_a_plugin_binding() -> None:
         params={
             "gol_symbol_key": "domain::Entity",
             "gol_event_symbol_key": "domain::Observation",
+            "gol_edge_symbol_key": "domain::Edge",
+            "gol_entity_state_symbol_key": "domain::State",
+            "gol_embedding_symbol_key": "domain::Embedding",
             "gol_transfer_symbol_key": "domain::Entity",
         },
     )

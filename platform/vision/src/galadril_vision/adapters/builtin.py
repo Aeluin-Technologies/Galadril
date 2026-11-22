@@ -355,6 +355,13 @@ class BuiltinStepAdapter:
             gol_event_symbol_key=_optional_string(
                 params, "gol_event_symbol_key"
             ),
+            gol_edge_symbol_key=_optional_string(params, "gol_edge_symbol_key"),
+            gol_entity_state_symbol_key=_optional_string(
+                params, "gol_entity_state_symbol_key"
+            ),
+            gol_embedding_symbol_key=_optional_string(
+                params, "gol_embedding_symbol_key"
+            ),
             event_values=[_required_object(record, "gol_value")],
         )
         return _json_object(

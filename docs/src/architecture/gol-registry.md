@@ -146,9 +146,8 @@ provide all required fields of the canonical GOLC value, including any fields
 outside the requested metadata projection.
 
 An admitted write batch fixes its effects before the transaction begins.
-The ESKG sink currently admits the event and entity writes in that batch.
-Edges, state snapshots and embeddings also need typed proposals admitted
-before the transaction can complete.
+The ESKG sink prepares typed proposals for the event, entities, edges, states,
+and embeddings before opening the transaction.
 
 Every GOL RPC additionally requires the Gateway-only credential loaded from
 `REGISTRY_GATEWAY_KEY_PATH` or the client's explicit `gateway_key_file`.

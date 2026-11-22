@@ -21,9 +21,14 @@ from galadril_vision.common.eskg import (
 )
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
+    EntityEmbedding,
+    EntityStateRecord,
+    EventRecord,
+    EventType,
+    GraphEdge,
+    GraphVertex,
     normalize_embedding_modality,
     normalize_tenant_id,
-    require_same_tenant,
 )
 from galadril_vision.compute.helpers import (
     _build_state_value,
@@ -595,6 +600,160 @@ async def _upsert_identity_link(
         )
 
 
+def _normalize_authz_tuple(
+    tuple_data: object, tenant_id_val: str
+) -> dict[str, object]:
+    """Validates an Intake relationship without dropping malformed grants."""
+    if not isinstance(tuple_data, dict):
+        raise TenantIsolationError("authorization tuple is not an object")
+
+    resource = tuple_data.get("resource") or tuple_data.get("object")
+    relation = tuple_data.get("relation") or tuple_data.get("permission")
+    subject = (
+        tuple_data.get("subject")
+        or tuple_data.get("principal")
+        or tuple_data.get("user")
+    )
+
+    if not isinstance(resource, str) or not resource:
+        raise TenantIsolationError("authorization resource is missing")
+    if not resource.startswith(f"raw:{tenant_id_val}/"):
+        raise TenantIsolationError(
+            "authorization resource crosses tenant boundary"
+        )
+    if relation not in {"parent", "owner", "reader", "processor"}:
+        raise TenantIsolationError("authorization relation is not Vision-owned")
+    if not isinstance(subject, str) or ":" not in subject:
+        raise TenantIsolationError("authorization subject is not typed")
+    subject_type, subject_id = subject.split(":", 1)
+    if not subject_type or not subject_id:
+        raise TenantIsolationError("authorization subject is incomplete")
+    if relation == "parent" and subject != f"tenant:{tenant_id_val}":
+        raise TenantIsolationError(
+            "authorization parent crosses tenant boundary"
+        )
+    if relation in {"owner", "reader"} and subject_type not in {
+        "user",
+        "role",
+        "group",
+    }:
+        raise TenantIsolationError("authorization grant subject is invalid")
+
+    normalized: dict[str, object] = {
+        "tenant_id": tenant_id_val,
+        "resource": resource,
+        "relation": relation,
+        "subject": subject,
+    }
+
+    source_principal = tuple_data.get("source_principal")
+    if isinstance(source_principal, str) and source_principal:
+        normalized["source_principal"] = source_principal
+
+    return normalized
+
+
+@dataclass(slots=True)
+class _SinkEntity:
+    vertex: GraphVertex
+    effect_index: int
+    edge: GraphEdge
+    state: EntityStateRecord
+    embedding: EntityEmbedding | None
+    licorne_identity_id: int | None
+    licorne_version: int
+
+
+@dataclass(slots=True)
+class _SinkObservation:
+    event: EventRecord
+    effect_index: int
+    record_id: str
+    raw_payload: dict[str, object] | None
+    entities: list[_SinkEntity]
+
+
+async def _write_observation_outbox(
+    conn: AsyncConnection[TupleRow], observation: _SinkObservation
+) -> None:
+    raw_payload = observation.raw_payload
+    tenant_id_val = observation.event.tenant_id
+    if isinstance(raw_payload, dict):
+        authz_block = raw_payload.get("authz")
+        if isinstance(authz_block, dict):
+            authz_tuples = authz_block.get("tuples")
+            if isinstance(authz_tuples, list) and authz_tuples:
+                canonical_tuples = [
+                    _normalize_authz_tuple(item, tenant_id_val)
+                    for item in authz_tuples
+                ]
+                source_resource = authz_block.get("requested_resource")
+                if not isinstance(
+                    source_resource, str
+                ) or not source_resource.startswith(f"raw:{tenant_id_val}/"):
+                    raise TenantIsolationError(
+                        "derived relationship source is not tenant scoped"
+                    )
+                tenant_subject = f"tenant:{tenant_id_val}"
+                event_resource = (
+                    f"event:{tenant_id_val}/{observation.event.event_id}"
+                )
+                canonical_tuples.extend(
+                    [
+                        {
+                            "tenant_id": tenant_id_val,
+                            "resource": event_resource,
+                            "relation": "parent",
+                            "subject": tenant_subject,
+                        },
+                        {
+                            "tenant_id": tenant_id_val,
+                            "resource": event_resource,
+                            "relation": "source",
+                            "subject": source_resource,
+                        },
+                    ]
+                )
+                entity_ids = {
+                    entry.vertex.vertex_id for entry in observation.entities
+                }
+                for entity_id in entity_ids:
+                    entity_resource = (
+                        f"entity_state:{tenant_id_val}/{entity_id}"
+                    )
+                    canonical_tuples.extend(
+                        [
+                            {
+                                "tenant_id": tenant_id_val,
+                                "resource": entity_resource,
+                                "relation": "parent",
+                                "subject": tenant_subject,
+                            },
+                            {
+                                "tenant_id": tenant_id_val,
+                                "resource": entity_resource,
+                                "relation": "source",
+                                "subject": source_resource,
+                            },
+                        ]
+                    )
+                await conn.execute(
+                    """
+                    INSERT INTO authz_outbox (
+                        tenant_id, object_id, tuples_json, attempts,
+                        next_retry_at, created_at, updated_at
+                    ) VALUES (%s, %s, %s, 0, NOW(), NOW(), NOW())
+                    ON CONFLICT (tenant_id, object_id) DO UPDATE
+                    SET tuples_json = EXCLUDED.tuples_json, updated_at = NOW()
+                    """,
+                    (
+                        tenant_id_val,
+                        observation.record_id,
+                        orjson.dumps(canonical_tuples).decode("utf-8"),
+                    ),
+                )
+
+
 async def sink_to_db_batch(
     *,
     state: PostgresRuntimeState,
@@ -613,6 +772,9 @@ async def sink_to_db_batch(
     state_type: str,
     gol_symbol_key: str | None = None,
     gol_event_symbol_key: str | None = None,
+    gol_edge_symbol_key: str | None = None,
+    gol_entity_state_symbol_key: str | None = None,
+    gol_embedding_symbol_key: str | None = None,
     event_values: list[dict[str, JsonValue]] | None = None,
 ) -> list[bool]:
     """Persists resolved model entity graph mappings, state properties, and structural embeddings.
@@ -634,6 +796,9 @@ async def sink_to_db_batch(
         state_type: Entity metadata classification string category identifier.
         gol_symbol_key: Entity selector in the admitted generation.
         gol_event_symbol_key: Entity selector classifying the structural event.
+        gol_edge_symbol_key: Contract for the structural relationship.
+        gol_entity_state_symbol_key: Contract for the persisted state observation.
+        gol_embedding_symbol_key: Contract for the persisted vector and provenance.
         event_values: Exact business values checked by the trusted GOL host.
 
     Returns:
@@ -679,32 +844,96 @@ async def sink_to_db_batch(
         ]
     except ValidationError:
         raise GolDenied("ESKG event proposal unavailable") from None
-    proposals: dict[int, dict[str, JsonValue]] = {}
     effects: list[GolEffect] = []
-    receipt_slots: list[tuple[str, int]] = []
-    event_receipts = [""] * len(resolved_items)
-    for index, (batch, event_value, record_id) in enumerate(
-        zip(resolved_items, event_values, record_ids, strict=True)
+    observations: list[_SinkObservation] = []
+    aligned_event_times = (
+        event_times if event_times is not None else [None] * len(resolved_items)
+    )
+    aligned_spatials = (
+        spatials if spatials is not None else [None] * len(resolved_items)
+    )
+    for (
+        batch,
+        record_id,
+        source,
+        event_type,
+        raw_payload,
+        event_time,
+        spatial,
+        event_value,
+    ) in zip(
+        resolved_items,
+        record_ids,
+        sources,
+        event_types,
+        raw_payloads,
+        aligned_event_times,
+        aligned_spatials,
+        event_values,
+        strict=True,
     ):
         if not batch:
             continue
+        tenant = batch_tenant_id
+        parsed_spatial = _spatial_evidence(spatial)
+        event_id = scoped_instance_id(f"evt_{record_id}")
+        event = EventRecord(
+            event_id=event_id,
+            tenant_id=tenant,
+            event_type=EventType.from_str(event_type)
+            if event_type
+            else EventType.OBSERVATION,
+            properties={
+                "document_evidence": _document_evidence(raw_payload),
+                "source_metadata": source_metadata(raw_payload),
+                "gol_symbol_key": gol_event_symbol_key,
+                "gol_value": event_value,
+                "source": source or "unknown",
+                "record_id": record_id,
+                "modality": modality,
+                "h3_cell": next(
+                    (
+                        item["h3_cell"]
+                        for item in batch
+                        if item.get("h3_cell") is not None
+                    ),
+                    None,
+                ),
+            },
+            timestamp=_event_datetime(event_time),
+            location_coords=[parsed_spatial.latitude, parsed_spatial.longitude]
+            if parsed_spatial
+            else None,
+            ontology_ref=resolve_gol_reference(
+                gol_event_symbol_key, tenant, GraphNodeKind.EVENT
+            ),
+        )
+        if event.ontology_ref is not None:
+            event.properties["ontology_id"] = event.ontology_ref.ontology_id
+        observation = _SinkObservation(
+            event, len(effects), record_id, raw_payload, []
+        )
+        observations.append(observation)
         effects.append(
             GolEffect(
                 operation="write",
                 target=gol_event_symbol_key,
                 destination="eskg",
                 purpose="persistence",
+                instance_id=event_id,
                 proposal=event_value,
-                instance_id=scoped_instance_id(f"evt_{record_id}"),
             )
         )
-        receipt_slots.append(("event", index))
-        for item in batch:
+        for ordinal, item in enumerate(batch):
             entity_id = item.get("resolved_entity_id")
-            if not entity_id:
+            if not isinstance(entity_id, str) or not entity_id:
                 continue
-            selected_target = item.get("gol_symbol_key") or gol_symbol_key
-            if not isinstance(selected_target, str):
+            if not gol_edge_symbol_key or not gol_entity_state_symbol_key:
+                raise GolDenied(
+                    "ESKG writes require edge and state GOL targets"
+                )
+            target = item.get("gol_symbol_key") or gol_symbol_key
+            if not isinstance(target, str):
                 raise GolDenied("ESKG classification unavailable")
             try:
                 value = _GOL_VALUE.validate_python(
@@ -712,18 +941,134 @@ async def sink_to_db_batch(
                 )
             except ValidationError:
                 raise GolDenied("ESKG business proposal unavailable") from None
-            proposals[id(item)] = value
-            effects.append(
-                GolEffect(
-                    operation="write",
-                    target=selected_target,
-                    destination="eskg",
-                    purpose="persistence",
-                    proposal=value,
-                    instance_id=str(entity_id),
+            vertex = GraphVertex(
+                vertex_id=entity_id,
+                label=GraphNodeKind.ENTITY,
+                tenant_id=tenant,
+                ontology_ref=resolve_gol_reference(
+                    target, tenant, GraphNodeKind.ENTITY
+                ),
+                properties=_GOL_VALUE.validate_python(
+                    {
+                        "gol_value": value,
+                        "observed_type": item.get("entity_type")
+                        or item.get("label_type")
+                        or entity_type,
+                        "is_unknown": item.get("is_unknown", True),
+                        "modality": item.get("modality") or modality,
+                        "raw_modality": item.get("raw_modality"),
+                        "label": item.get("label"),
+                        "licorne_identity_id": item.get("licorne_identity_id"),
+                        "resolution_probability": item.get(
+                            "resolution_probability"
+                        ),
+                    }
+                ),
+            )
+            edge = GraphEdge(
+                entity_id,
+                event_id,
+                str(item.get("edge_type") or edge_type),
+                tenant,
+                _GOL_VALUE.validate_python(
+                    {
+                        "modality": item.get("modality") or modality,
+                        "raw_modality": item.get("raw_modality"),
+                        "confidence": item.get("confidence"),
+                        "resolution_probability": item.get(
+                            "resolution_probability"
+                        ),
+                        "licorne_decision_id": item.get("licorne_decision_id"),
+                    }
+                ),
+            )
+            modality_key = normalize_embedding_modality(
+                item.get("modality") or item.get("model_name") or modality
+            )
+            state_name = str(item.get("state_type") or state_type)
+            state_record = EntityStateRecord(
+                entity_id,
+                event_id,
+                state_name,
+                _build_state_value(
+                    item,
+                    modality=modality_key,
+                    model_name=modality_key,
+                    event_id=event_id,
+                ),
+                event.timestamp,
+                tenant,
+            )
+            identity = item.get("licorne_identity_id")
+            vector = (
+                _pad_embedding_if_needed(
+                    item["embedding"],
+                    expected_dim=_get_vector_dimensions(postgres_config),
+                )
+                if item.get("embedding") is not None
+                else None
+            )
+            embedding = None
+            effect_index = len(effects)
+            effects.extend(
+                (
+                    GolEffect(
+                        operation="write",
+                        target=target,
+                        destination="eskg",
+                        purpose="persistence",
+                        instance_id=entity_id,
+                        proposal=value,
+                    ),
+                    GraphStore.edge_write_effect(edge, gol_edge_symbol_key),
+                    GraphStore.state_write_effect(
+                        state_record, gol_entity_state_symbol_key
+                    ),
                 )
             )
-            receipt_slots.append(("entity", id(item)))
+            if vector is not None:
+                if gol_embedding_symbol_key is None:
+                    raise GolDenied(
+                        "ESKG writes require an embedding GOL target"
+                    )
+                embedding = EntityEmbedding(
+                    embedding_id=f"{event_id}:{ordinal}",
+                    modality=modality_key,
+                    vector=vector,
+                    tenant_id=tenant,
+                    metadata=_GOL_VALUE.validate_python(
+                        {
+                            "event_id": event_id,
+                            "timestamp": event.timestamp.isoformat(),
+                            "state_type": state_name,
+                            "entity_type": item.get("entity_type")
+                            or entity_type,
+                            "raw_modality": item.get("raw_modality"),
+                            "model_name": modality_key,
+                            "model_version": item.get("model_version"),
+                            "licorne_identity_id": identity,
+                            "licorne_version": item.get("licorne_version"),
+                        }
+                    ),
+                )
+                effects.append(
+                    VectorStore.embedding_write_effect(
+                        embedding, entity_id, gol_embedding_symbol_key
+                    )
+                )
+            observation.entities.append(
+                _SinkEntity(
+                    vertex,
+                    effect_index,
+                    edge,
+                    state_record,
+                    embedding,
+                    identity if isinstance(identity, int) else None,
+                    int(item.get("licorne_version") or 0)
+                    if isinstance(identity, int)
+                    else 0,
+                )
+            )
     if not effects:
         if active_gol_lease() is None:
             raise GolDenied("ESKG processing requires GOL admission")
@@ -731,422 +1076,62 @@ async def sink_to_db_batch(
     async with protected_gol_effects(
         effects, tenant_id=batch_tenant_id
     ) as issued:
-        receipts: dict[int, str] = {}
-        for (kind, key), receipt in zip(receipt_slots, issued, strict=True):
-            if not receipt:
-                raise GolDenied("GOL effect receipt unavailable")
-            if kind == "event":
-                event_receipts[key] = receipt
-            else:
-                receipts[key] = receipt
-        logger.debug(
-            "before_get_pg", step="sink_to_db", items=len(resolved_items)
-        )
+        if len(issued) != len(effects) or any(
+            not receipt for receipt in issued
+        ):
+            raise GolDenied("GOL effect receipt unavailable")
         pg_client, vector_store, graph_store = await get_pg_stores(
             postgres_config, state
         )
-        logger.debug(
-            "after_get_pg", step="sink_to_db", items=len(resolved_items)
-        )
-        states_by_tenant: dict[str, list[EntityStateRecord]] = {}
-        embeddings_by_tenant: dict[str, list[tuple[EntityEmbedding, str]]] = {}
-        aligned_event_times = event_times or [None] * len(resolved_items)
-        aligned_spatials = spatials or [None] * len(resolved_items)
-
-        from galadril_vision.common.types import (
-            EntityEmbedding,
-            EntityStateRecord,
-            EventRecord,
-            EventType,
-            GraphEdge,
-            GraphVertex,
-            normalize_embedding_modality,
-        )
-
-        def _normalize_authz_tuple(
-            tuple_data: object, tenant_id_val: str
-        ) -> dict[str, object]:
-            """Validates an Intake relationship without dropping malformed grants."""
-            if not isinstance(tuple_data, dict):
-                raise TenantIsolationError(
-                    "authorization tuple is not an object"
-                )
-
-            resource = tuple_data.get("resource") or tuple_data.get("object")
-            relation = tuple_data.get("relation") or tuple_data.get(
-                "permission"
-            )
-            subject = (
-                tuple_data.get("subject")
-                or tuple_data.get("principal")
-                or tuple_data.get("user")
-            )
-
-            if not isinstance(resource, str) or not resource:
-                raise TenantIsolationError("authorization resource is missing")
-            if not resource.startswith(f"raw:{tenant_id_val}/"):
-                raise TenantIsolationError(
-                    "authorization resource crosses tenant boundary"
-                )
-            if relation not in {"parent", "owner", "reader", "processor"}:
-                raise TenantIsolationError(
-                    "authorization relation is not Vision-owned"
-                )
-            if not isinstance(subject, str) or ":" not in subject:
-                raise TenantIsolationError("authorization subject is not typed")
-            subject_type, subject_id = subject.split(":", 1)
-            if not subject_type or not subject_id:
-                raise TenantIsolationError(
-                    "authorization subject is incomplete"
-                )
-            if relation == "parent" and subject != f"tenant:{tenant_id_val}":
-                raise TenantIsolationError(
-                    "authorization parent crosses tenant boundary"
-                )
-            if relation in {"owner", "reader"} and subject_type not in {
-                "user",
-                "role",
-                "group",
-            }:
-                raise TenantIsolationError(
-                    "authorization grant subject is invalid"
-                )
-
-            normalized: dict[str, object] = {
-                "tenant_id": tenant_id_val,
-                "resource": resource,
-                "relation": relation,
-                "subject": subject,
-            }
-
-            source_principal = tuple_data.get("source_principal")
-            if isinstance(source_principal, str) and source_principal:
-                normalized["source_principal"] = source_principal
-
-            return normalized
-
-        async with pg_client.tenant_connection(batch_tenant_id) as conn:
-            async with conn.transaction():
-                if hasattr(graph_store, "prepare_connection"):
-                    await graph_store.prepare_connection(conn)
-
-                for (
-                    input_data,
-                    record_id,
-                    source,
-                    tenant_id,
-                    event_type,
-                    raw_payload,
-                    event_time,
-                    spatial,
-                    event_value,
-                    event_receipt,
-                ) in zip(
-                    resolved_items,
-                    record_ids,
-                    sources,
-                    tenant_ids,
-                    event_types,
-                    raw_payloads,
-                    aligned_event_times,
-                    aligned_spatials,
-                    event_values,
-                    event_receipts,
-                    strict=False,
-                ):
-                    if not input_data:
-                        continue
-
-                    tenant_id_val = require_same_tenant(
-                        batch_tenant_id, tenant_id
-                    )
-                    parsed_spatial = _spatial_evidence(spatial)
-                    event = EventRecord(
-                        event_id=scoped_instance_id(f"evt_{record_id}"),
-                        tenant_id=tenant_id_val,
-                        event_type=EventType.from_str(event_type)
-                        if event_type
-                        else EventType.OBSERVATION,
-                        properties={
-                            "document_evidence": _document_evidence(
-                                raw_payload
-                            ),
-                            "source_metadata": source_metadata(raw_payload),
-                            "gol_symbol_key": gol_event_symbol_key,
-                            "gol_value": event_value,
-                            "gol_receipt": event_receipt,
-                            "source": source or "unknown",
-                            "record_id": record_id,
-                            "modality": modality,
-                            "h3_cell": next(
-                                (
-                                    item.get("h3_cell")
-                                    for item in input_data
-                                    if item.get("h3_cell") is not None
-                                ),
-                                None,
-                            ),
-                        },
-                        timestamp=_event_datetime(event_time),
-                        location_coords=(
-                            [parsed_spatial.latitude, parsed_spatial.longitude]
-                            if parsed_spatial is not None
-                            else None
-                        ),
-                        ontology_ref=resolve_gol_reference(
-                            gol_event_symbol_key,
-                            tenant_id_val,
-                            GraphNodeKind.EVENT,
-                        ),
-                    )
-                    if event.ontology_ref is not None:
-                        event.properties["ontology_id"] = (
-                            event.ontology_ref.ontology_id
-                        )
-                    await graph_store.insert_event_on_connection(conn, event)
-
-                    if isinstance(raw_payload, dict):
-                        authz_block = raw_payload.get("authz")
-                        if isinstance(authz_block, dict):
-                            authz_tuples = authz_block.get("tuples")
-                            if isinstance(authz_tuples, list) and authz_tuples:
-                                canonical_tuples = [
-                                    _normalize_authz_tuple(item, tenant_id_val)
-                                    for item in authz_tuples
-                                ]
-                                source_resource = authz_block.get(
-                                    "requested_resource"
-                                )
-                                if not isinstance(
-                                    source_resource, str
-                                ) or not source_resource.startswith(
-                                    f"raw:{tenant_id_val}/"
-                                ):
-                                    raise TenantIsolationError(
-                                        "derived relationship source is not tenant scoped"
-                                    )
-                                tenant_subject = f"tenant:{tenant_id_val}"
-                                event_resource = (
-                                    f"event:{tenant_id_val}/{event.event_id}"
-                                )
-                                canonical_tuples.extend(
-                                    [
-                                        {
-                                            "tenant_id": tenant_id_val,
-                                            "resource": event_resource,
-                                            "relation": "parent",
-                                            "subject": tenant_subject,
-                                        },
-                                        {
-                                            "tenant_id": tenant_id_val,
-                                            "resource": event_resource,
-                                            "relation": "source",
-                                            "subject": source_resource,
-                                        },
-                                    ]
-                                )
-                                entity_ids = {
-                                    str(item["resolved_entity_id"])
-                                    for item in input_data
-                                    if item.get("resolved_entity_id")
-                                }
-                                for entity_id in entity_ids:
-                                    entity_resource = f"entity_state:{tenant_id_val}/{entity_id}"
-                                    canonical_tuples.extend(
-                                        [
-                                            {
-                                                "tenant_id": tenant_id_val,
-                                                "resource": entity_resource,
-                                                "relation": "parent",
-                                                "subject": tenant_subject,
-                                            },
-                                            {
-                                                "tenant_id": tenant_id_val,
-                                                "resource": entity_resource,
-                                                "relation": "source",
-                                                "subject": source_resource,
-                                            },
-                                        ]
-                                    )
-                                await conn.execute(
-                                    """
-                                    INSERT INTO authz_outbox (
-                                        tenant_id, object_id, tuples_json, attempts,
-                                        next_retry_at, created_at, updated_at
-                                    ) VALUES (%s, %s, %s, 0, NOW(), NOW(), NOW())
-                                    ON CONFLICT (tenant_id, object_id) DO UPDATE
-                                    SET tuples_json = EXCLUDED.tuples_json, updated_at = NOW()
-                                    """,
-                                    (
-                                        tenant_id_val,
-                                        str(record_id),
-                                        orjson.dumps(canonical_tuples).decode(
-                                            "utf-8"
-                                        ),
-                                    ),
-                                )
-
-                    for item in input_data:
-                        entity_id = item.get("resolved_entity_id")
-                        if not entity_id:
-                            continue
-
-                        await graph_store.ensure_vertex_on_connection(
+        states: list[EntityStateRecord] = []
+        business_values: list[tuple[dict[str, JsonValue], str]] = []
+        embeddings: list[tuple[EntityEmbedding, str]] = []
+        async with (
+            pg_client.tenant_connection(batch_tenant_id) as conn,
+            conn.transaction(),
+        ):
+            await graph_store.prepare_connection(conn)
+            for observation in observations:
+                event = observation.event
+                event.properties["gol_receipt"] = issued[
+                    observation.effect_index
+                ]
+                await graph_store.insert_event_on_connection(conn, event)
+                await _write_observation_outbox(conn, observation)
+                for entry in observation.entities:
+                    vertex = entry.vertex
+                    receipt = issued[entry.effect_index]
+                    value = effects[entry.effect_index].proposal
+                    if not receipt or value is None:
+                        raise GolDenied("GOL entity provenance unavailable")
+                    vertex.properties["gol_receipt"] = receipt
+                    await graph_store.ensure_vertex_on_connection(conn, vertex)
+                    if entry.licorne_identity_id is not None:
+                        await _upsert_identity_link(
                             conn,
-                            GraphVertex(
-                                vertex_id=entity_id,
-                                label=GraphNodeKind.ENTITY,
-                                tenant_id=tenant_id_val,
-                                ontology_ref=resolve_gol_reference(
-                                    item.get("gol_symbol_key")
-                                    or gol_symbol_key,
-                                    tenant_id_val,
-                                    GraphNodeKind.ENTITY,
-                                ),
-                                properties={
-                                    "gol_value": proposals[id(item)],
-                                    "gol_receipt": receipts[id(item)],
-                                    "observed_type": item.get("entity_type")
-                                    or item.get("label_type")
-                                    or entity_type,
-                                    "is_unknown": item.get("is_unknown", True),
-                                    "modality": item.get("modality")
-                                    or modality,
-                                    "raw_modality": item.get("raw_modality"),
-                                    "label": item.get("label"),
-                                    "licorne_identity_id": item.get(
-                                        "licorne_identity_id"
-                                    ),
-                                    "resolution_probability": item.get(
-                                        "resolution_probability"
-                                    ),
-                                },
-                            ),
+                            tenant_id=batch_tenant_id,
+                            entity_id=vertex.vertex_id,
+                            licorne_identity_id=entry.licorne_identity_id,
+                            licorne_version=entry.licorne_version,
                         )
-
-                        licorne_identity_id = item.get("licorne_identity_id")
-                        if isinstance(licorne_identity_id, int):
-                            await _upsert_identity_link(
-                                conn,
-                                tenant_id=tenant_id_val,
-                                entity_id=str(entity_id),
-                                licorne_identity_id=licorne_identity_id,
-                                licorne_version=int(
-                                    item.get("licorne_version") or 0
-                                ),
-                            )
-
-                        await graph_store.create_edge_on_connection(
-                            conn,
-                            GraphEdge(
-                                source_vertex_id=entity_id,
-                                target_vertex_id=event.event_id,
-                                edge_type=item.get("edge_type") or edge_type,
-                                tenant_id=tenant_id_val,
-                                properties={
-                                    "modality": item.get("modality")
-                                    or modality,
-                                    "raw_modality": item.get("raw_modality"),
-                                    "confidence": item.get("confidence"),
-                                    "resolution_probability": item.get(
-                                        "resolution_probability"
-                                    ),
-                                    "licorne_decision_id": item.get(
-                                        "licorne_decision_id"
-                                    ),
-                                },
-                            ),
-                        )
-
-                        modality_key = normalize_embedding_modality(
-                            item.get("modality")
-                            or item.get("model_name")
-                            or modality
-                        )
-                        states_by_tenant.setdefault(tenant_id_val, []).append(
-                            EntityStateRecord(
-                                entity_id=entity_id,
-                                event_id=event.event_id,
-                                state_type=item.get("state_type") or state_type,
-                                state_value={
-                                    "gol_value": proposals[id(item)],
-                                    "gol_receipt": receipts[id(item)],
-                                    **_build_state_value(
-                                        item,
-                                        modality=modality_key,
-                                        model_name=modality_key,
-                                        event_id=event.event_id,
-                                    ),
-                                },
-                                event_time=event.timestamp,
-                                tenant_id=tenant_id_val,
-                            )
-                        )
-
-                        if item.get("embedding") is not None:
-                            vector_val = _pad_embedding_if_needed(
-                                item.get("embedding"),
-                                expected_dim=_get_vector_dimensions(
-                                    postgres_config
-                                ),
-                            )
-                            if vector_val is not None:
-                                emb_record = EntityEmbedding(
-                                    modality=modality_key,
-                                    vector=vector_val,
-                                    metadata={
-                                        "event_id": event.event_id,
-                                        # Causal windows must not inherit variable sink latency.
-                                        "timestamp": event.timestamp.isoformat(),
-                                        "state_type": item.get("state_type")
-                                        or state_type,
-                                        "entity_type": item.get("entity_type")
-                                        or entity_type,
-                                        "raw_modality": item.get(
-                                            "raw_modality"
-                                        ),
-                                        "model_name": modality_key,
-                                        "model_version": item.get(
-                                            "model_version"
-                                        ),
-                                        "licorne_identity_id": item.get(
-                                            "licorne_identity_id"
-                                        ),
-                                        "licorne_version": item.get(
-                                            "licorne_version"
-                                        ),
-                                    },
-                                    tenant_id=tenant_id_val,
-                                )
-                                embeddings_by_tenant.setdefault(
-                                    tenant_id_val, []
-                                ).append((emb_record, entity_id))
-
-                for batch_tenant_id, states in states_by_tenant.items():
-                    if states:
-                        if hasattr(
-                            graph_store,
-                            "insert_entity_states_batch_on_connection",
-                        ):
-                            await graph_store.insert_entity_states_batch_on_connection(
-                                conn,
-                                states,
-                                expected_tenant_id=batch_tenant_id,
-                            )
-                        elif hasattr(graph_store, "insert_entity_states_batch"):
-                            await graph_store.insert_entity_states_batch(states)
-                for batch_tenant_id, embeddings in embeddings_by_tenant.items():
-                    if embeddings:
-                        if hasattr(
-                            vector_store, "store_embeddings_batch_on_connection"
-                        ):
-                            await vector_store.store_embeddings_batch_on_connection(
-                                conn,
-                                embeddings,
-                                expected_tenant_id=batch_tenant_id,
-                            )
-                        elif hasattr(vector_store, "store_embeddings_batch"):
-                            await vector_store.store_embeddings_batch(
-                                embeddings
-                            )
-        return [True] * len(resolved_items)
+                    await graph_store.create_edge_on_connection(
+                        conn, entry.edge, gol_target=gol_edge_symbol_key
+                    )
+                    states.append(entry.state)
+                    business_values.append((value, receipt))
+                    if entry.embedding is not None:
+                        embeddings.append((entry.embedding, vertex.vertex_id))
+            await graph_store.insert_entity_states_batch_on_connection(
+                conn,
+                states,
+                expected_tenant_id=batch_tenant_id,
+                gol_target=gol_entity_state_symbol_key,
+                business_values=business_values,
+            )
+            await vector_store.store_embeddings_batch_on_connection(
+                conn,
+                embeddings,
+                expected_tenant_id=batch_tenant_id,
+                gol_target=gol_embedding_symbol_key,
+            )
+    return [True] * len(resolved_items)

@@ -4,9 +4,31 @@ from __future__ import annotations
 
 from enum import StrEnum, unique
 
-from galadril_ontology import GolSymbolKind, active_gol_lease
+from galadril_ontology import (
+    GolEffect,
+    GolSymbolKind,
+    active_gol_lease,
+    scoped_instance_id,
+)
 from galadril_ontology.identity import normalize_tenant_id, validate_symbol_key
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+
+
+def eskg_write_effect(
+    target: str, local_id: str, proposal: dict[str, JsonValue]
+) -> GolEffect:
+    """Uses the worker's exact decimal encoding for integral structural fields."""
+    return GolEffect(
+        operation="write",
+        target=target,
+        destination="eskg",
+        purpose="persistence",
+        instance_id=scoped_instance_id(local_id),
+        proposal={
+            name: str(value) if type(value) is int else value
+            for name, value in proposal.items()
+        },
+    )
 
 
 @unique

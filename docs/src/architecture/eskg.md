@@ -34,7 +34,11 @@ module version and source revision are separate identities. Selectors use
 its admitted Gateway descriptor, never a caller-selected revision. Existing
 references remain immutable when a later generation becomes active.
 
-The Vision sink requires `gol_symbol_key` and `gol_event_symbol_key` parameters.
+The Vision sink uses `gol_symbol_key` and `gol_event_symbol_key` for the
+business entity and event. It uses `gol_edge_symbol_key`,
+`gol_entity_state_symbol_key`, and `gol_embedding_symbol_key` for the
+relationship, state observation, and embedding projections. Each selector
+must resolve to an admitted symbol in the deployed generation.
 Resolved items may select a different `gol_symbol_key` only when that exact target
 is in the admitted projection and its live write obligations succeed. GOL entity
 classifications apply to both structural Entity and Event; field classifications
@@ -45,10 +49,11 @@ Business values are explicit `gol_value` objects, separate from structural
 resolution metadata. The sink submits these exact values for host validation; it
 does not infer fields or discard unknown values to fit a schema.
 
-The sink obtains fresh Gateway effect admission for all selected targets before
-opening its database client. Missing or revoked admission produces no persistence
-effect. The server retains calculation IFC provenance across retries and related
-steps; a Python task-local scope does not establish independent computation.
+The sink prepares the event, entity, relationship, state, and embedding
+proposals before acquiring a single Gateway permit. The PostgreSQL transaction,
+including the authorization outbox, runs while that permit is held. A missing
+or revoked admission prevents persistence. The server retains calculation IFC
+provenance across retries and related steps.
 
 ## Relations
 
