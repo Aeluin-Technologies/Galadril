@@ -401,7 +401,21 @@ class CommandHandler:
                 attempt=command.attempt,
                 resource_class=command.resource_class.value,
             )
-            await self._publish_lineage(command, EventStatus.RUNNING)
+            try:
+                await self._publish_lineage(command, EventStatus.RUNNING)
+            except Exception as error:
+                # Dispatch has not started, so redelivery can reclaim this lease.
+                logger.warning(
+                    "pipeline_command_failed",
+                    event_id=str(command.event_id),
+                    attempt=command.attempt,
+                    error_type=type(error).__name__,
+                    phase="running_lineage",
+                )
+                await self._ledger.fail(
+                    command, RuntimeError("Pipeline execution unavailable")
+                )
+                raise
             try:
                 result = await self._dispatcher.dispatch(command)
                 _require_result_scope(command, result)

@@ -525,6 +525,41 @@ class _PublicationGate:
 
 
 @pytest.mark.anyio
+async def test_denied_running_lineage_can_reacquire_the_same_command() -> None:
+    """A refused first publication must not leave an actor lease in progress."""
+    publisher = _Publisher()
+    gate = _PublicationGate()
+    gate.allowed = False
+    dispatcher = _Dispatcher()
+    handler = CommandHandler(
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        dispatcher=dispatcher,
+        ledger=MemoryExecutionLedger(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+        publication_gate=gate,
+    )
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="infer",
+        step_type=StepType.INFERENCE,
+        resource_class=ResourceClass.GPU,
+    )
+
+    with pytest.raises(GolDenied):
+        await handler.handle(command)
+    assert publisher.items == []
+    assert dispatcher.calls == 0
+
+    gate.allowed = True
+    assert await handler.handle(command) is not None
+    await handler.handle(command)
+    assert dispatcher.calls == 1
+
+
+@pytest.mark.anyio
 async def test_ingress_without_authority_publishes_no_payload() -> None:
     publisher = _Publisher()
     handler = IngressHandler(
