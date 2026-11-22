@@ -45,7 +45,7 @@ rust_test(
     srcs = ["tests/gol_receipts.rs", "src/application/usecases/gol/receipts.rs"],
     crate_root = "tests/gol_receipts.rs",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = ["//platform/ontology/rust:ontology"] + crate_deps(["anyhow", "base64", "ring", "serde", "serde_json", "sha2"]),
+    deps = ["//platform/ontology/rust:ontology"] + crate_deps(["anyhow", "base64", "ring", "serde", "serde_json", "sha2", "uuid"]),
 )
 
 rust_test(

@@ -169,7 +169,9 @@ class GatewayGolClient:
             body = {
                 **scope,
                 "effects": [
-                    effect.model_dump(by_alias=True, exclude_none=True)
+                    effect.model_dump(
+                        mode="json", by_alias=True, exclude_none=True
+                    )
                     for effect in checked
                 ],
             }

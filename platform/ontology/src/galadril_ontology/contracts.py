@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Literal
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -153,6 +154,13 @@ class GolBlockContract(Transport):
 GolOperation = Literal["read", "write", "execute", "transfer", "describe"]
 
 
+class GolHandoff(Transport):
+    """Names the command selected for a permitted broker release."""
+
+    block_id: str = Field(alias="blockId", min_length=1, max_length=128)
+    command_id: UUID = Field(alias="commandId")
+
+
 class GolEffect(Transport):
     """An effect description conveys no authority until the host retains its permit."""
 
@@ -165,6 +173,7 @@ class GolEffect(Transport):
     )
     proposal: dict[str, JsonValue] | None = None
     receipt: str | None = Field(default=None, max_length=65536, repr=False)
+    handoff: GolHandoff | None = None
 
     @field_validator("target")
     @classmethod

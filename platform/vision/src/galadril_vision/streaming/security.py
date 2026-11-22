@@ -12,6 +12,7 @@ from galadril_ontology import (
     GolBlockContract,
     GolDenied,
     GolEffect,
+    GolHandoff,
     GolRequest,
     GolRuntimeManager,
     source_object_id,
@@ -27,8 +28,11 @@ class PublicationGate(Protocol):
     async def authorize_state(self, command: PipelineCommand) -> None: ...
     async def resume(self, command: PipelineCommand) -> str: ...
     def protect(
-        self, command: PipelineCommand
-    ) -> AbstractAsyncContextManager[None]: ...
+        self,
+        command: PipelineCommand,
+        *,
+        handoff: PipelineCommand | None = None,
+    ) -> AbstractAsyncContextManager[str | None]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,9 +125,22 @@ class GatewayPublicationGate:
         )
 
     @asynccontextmanager
-    async def protect(self, command: PipelineCommand) -> AsyncIterator[None]:
+    async def protect(
+        self,
+        command: PipelineCommand,
+        *,
+        handoff: PipelineCommand | None = None,
+    ) -> AsyncIterator[str | None]:
         """A newly filtered projection cannot erase previously observed dependencies."""
         request, target = self._request(command)
+        continuation = None
+        if handoff is not None:
+            recipient, _ = self._request(handoff)
+            if request.source_object_id != recipient.source_object_id:
+                raise GolDenied("GOL command handoff changed source")
+            continuation = GolHandoff(
+                blockId=recipient.block_id, commandId=handoff.event_id
+            )
         async with self._runtime.bind(
             request,
             GolBlockContract(required_symbol_keys=(target,)),
@@ -136,7 +153,10 @@ class GatewayPublicationGate:
                         target=target,
                         destination="kafka",
                         purpose="pipeline_dispatch",
+                        handoff=continuation,
                     ),
                 )
-            ):
-                yield
+            ) as (receipt,):
+                if handoff is not None and not receipt:
+                    raise GolDenied("GOL command lineage unavailable")
+                yield receipt

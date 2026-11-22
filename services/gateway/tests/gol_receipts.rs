@@ -9,9 +9,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use galadril_ontology::authorization::{Flow, Operation};
 use galadril_ontology::{Classification, ModuleVersion, Version};
-use receipts::{Dependency, LineageOrigin, ReceiptScope, ReceiptSigner};
+use receipts::{
+    CommandHandoff, Dependency, LineageOrigin, ReceiptScope, ReceiptSigner,
+};
 use ring::hmac;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 #[test]
 fn expanded_eskg_metadata_fits_the_worker_receipt_transport() -> Result<()> {
@@ -174,6 +177,10 @@ fn durable_lineage_is_bound_to_the_source_and_exact_publication() -> Result<()>
         pipeline_id: "causal_demo".into(),
         pipeline_revision_id: "published_revision".into(),
         pins: Default::default(),
+        handoff: Some(CommandHandoff {
+            block_id: "causal".into(),
+            command_id: Uuid::from_u128(42),
+        }),
     };
     let scope = ReceiptScope {
         tenant: "tenant_a",
@@ -197,6 +204,17 @@ fn durable_lineage_is_bound_to_the_source_and_exact_publication() -> Result<()>
         "published_revision",
     )?;
     assert_eq!(lineage.lineage, Some(origin.clone()));
+    lineage.verify_command("causal", Uuid::from_u128(42))?;
+    assert!(
+        lineage
+            .verify_command("causal", Uuid::from_u128(43))
+            .is_err()
+    );
+    assert!(
+        lineage
+            .verify_command("other", Uuid::from_u128(42))
+            .is_err()
+    );
     for (tenant, source, pipeline, revision) in [
         (
             "tenant_b",

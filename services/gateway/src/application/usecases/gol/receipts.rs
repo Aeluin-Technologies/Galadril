@@ -15,6 +15,7 @@ use ring::hmac;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 const MAX_VALUE_BYTES: usize = 128 * 1024;
 const MAX_RECEIPT_TOKEN_BYTES: usize = 64 * 1024;
@@ -131,6 +132,14 @@ pub(super) struct ReceiptScope<'a> {
     pub lineage: Option<&'a LineageOrigin>,
 }
 
+/// Binds a broker lineage proof to one already-routed command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CommandHandoff {
+    pub block_id: String,
+    pub command_id: Uuid,
+}
+
 /// Authenticates the origin needed to request a new calculation after restart.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -143,6 +152,8 @@ pub(super) struct LineageOrigin {
     pub pipeline_id: String,
     pub pipeline_revision_id: String,
     pub pins: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<CommandHandoff>,
 }
 
 /// The signature authenticates a label and value binding, never an Allow.
@@ -164,6 +175,24 @@ pub(super) struct LabelReceipt {
     )]
     pub dependencies: BTreeSet<Dependency>,
     value_sha256: [u8; 32],
+}
+
+impl LabelReceipt {
+    /// Broker proofs preserve the recipient selected at their original
+    /// release.
+    pub fn verify_command(&self, block: &str, command_id: Uuid) -> Result<()> {
+        if let Some(handoff) = self
+            .lineage
+            .as_ref()
+            .and_then(|origin| origin.handoff.as_ref())
+        {
+            ensure!(
+                handoff.block_id == block && handoff.command_id == command_id,
+                "GOL lineage scope rejected"
+            );
+        }
+        Ok(())
+    }
 }
 
 pub(super) struct ReceiptSigner {
@@ -236,7 +265,11 @@ impl ReceiptSigner {
     ) -> Result<LabelReceipt> {
         let receipt = self.authenticate(token, tenant)?;
         ensure!(
-            receipt.instance_id == instance_id &&
+            receipt
+                .lineage
+                .as_ref()
+                .is_none_or(|origin| origin.handoff.is_none()) &&
+                receipt.instance_id == instance_id &&
                 receipt.value_sha256 == value_hash(value)?,
             "GOL provenance unavailable"
         );

@@ -163,6 +163,13 @@ signed dependencies. The worker receipt and provenance fields are stripped from
 generic graph and search projections. A durable completed result still requires
 its original live release scope for replay.
 
+Kafka entry commands and successors carry a signed handoff created inside the
+live `pipeline_dispatch` release. The proof binds the tenant, source, published
+pipeline, destination block and command ID. The consumer exchanges it for a
+fresh admission before claiming the command, so the queue time doesn't consume
+the new calculation's permit. Live authorization still governs the broker
+publish and each effect of the resumed calculation.
+
 Every GOL RPC additionally requires the Gateway-only credential loaded from
 `REGISTRY_GATEWAY_KEY_PATH` or the client's explicit `gateway_key_file`.
 Missing credentials leave those RPCs unavailable, including on the local

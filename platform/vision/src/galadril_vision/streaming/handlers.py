@@ -91,6 +91,32 @@ class CommandInProgress(RuntimeError):
     """Signals that a live lease should be redelivered after its owner finishes."""
 
 
+async def _publish_command(
+    publisher: Publisher,
+    gate: PublicationGate | None,
+    scope: PipelineCommand,
+    command: PipelineCommand,
+    topic: str,
+) -> PipelineCommand:
+    """Releases a routed command with the calculation's durable provenance."""
+    if gate is None:
+        raise GolDenied("GOL publication unavailable")
+    async with gate.protect(scope, handoff=command) as lineage:
+        if not lineage:
+            raise GolDenied("GOL command lineage unavailable")
+        released = command.model_copy(
+            update={"admission": None, "lineage": lineage}
+        )
+        await publisher.publish(
+            released.model_dump(mode="json"),
+            topic,
+            key=str(released.event_id),
+            correlation_id=str(released.correlation_id),
+            no_confirm=False,
+        )
+    return released
+
+
 class IngressHandler:
     """Normalizes validated Avro records into deterministic entry commands."""
 
@@ -156,6 +182,7 @@ class IngressHandler:
         except Exception as error:
             return await self.reject(envelope, error, started_at=started)
 
+        published: list[PipelineCommand] = []
         try:
             with bind_pipeline_context(
                 pipeline=self._pipeline,
@@ -163,13 +190,14 @@ class IngressHandler:
                 entity_id=record.record_id,
             ):
                 for command in commands:
-                    await self._publish(
-                        command,
-                        command.model_dump(mode="json"),
-                        self._topics.commands_for(command.resource_class),
-                        key=str(command.event_id),
-                        correlation_id=str(command.correlation_id),
-                        no_confirm=False,
+                    published.append(
+                        await _publish_command(
+                            self._publisher,
+                            self._publication_gate,
+                            command,
+                            command,
+                            self._topics.commands_for(command.resource_class),
+                        )
                     )
                     await self._publish_lineage(command, EventStatus.ACCEPTED)
                 logger.info(
@@ -187,7 +215,7 @@ class IngressHandler:
             outcome="accepted",
             duration_seconds=time.perf_counter() - started,
         )
-        return commands
+        return tuple(published)
 
     async def reject(
         self,
@@ -488,19 +516,17 @@ class CommandHandler:
                 step_type=route.step_type,
                 resource_class=route.resource_class,
                 payload=result.output,
-                admission=result.admission,
                 attributes={
                     "parent_command_id": str(command.event_id),
                     "parent_result_id": str(result.event_id),
                 },
             )
-            await self._publish(
+            await _publish_command(
+                self._publisher,
+                self._publication_gate,
                 command,
-                downstream.model_dump(mode="json"),
+                downstream,
                 self._topics.commands_for(route.resource_class),
-                key=str(downstream.event_id),
-                correlation_id=str(command.correlation_id),
-                no_confirm=False,
             )
 
     async def _handle_failure(self, command: PipelineCommand) -> None:

@@ -301,6 +301,7 @@ impl GolService {
                 &request.pipeline_id,
                 &request.pipeline_revision_id,
             )?;
+        receipt.verify_command(&request.block_id, request.command_id)?;
         let origin = receipt.lineage.context("GOL lineage unavailable")?;
         *phase = "principal_and_input";
         let actor = self.actor(&request.tenant_id, &origin.subject_id).await?;
@@ -1062,6 +1063,20 @@ impl GolService {
                 "transfer" => Operation::Transfer,
                 _ => anyhow::bail!("GOL effect not implemented by host"),
             };
+            if let Some(handoff) = &effect.handoff {
+                ensure!(
+                    operation == Operation::Transfer &&
+                        effect.destination == "kafka" &&
+                        effect.purpose == "pipeline_dispatch" &&
+                        effect.instance_id.is_none() &&
+                        effect.proposal.is_none() &&
+                        effect.receipt.is_none() &&
+                        !handoff.block_id.is_empty() &&
+                        handoff.block_id.len() <= 128 &&
+                        !handoff.command_id.is_nil(),
+                    "GOL command handoff requires a broker release"
+                );
+            }
             let generated_id;
             let id = match effect.instance_id.as_deref() {
                 Some(id) => id,
@@ -1463,39 +1478,61 @@ impl GolService {
             .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?;
         dependencies.extend(observed);
         ensure!(dependencies.len() <= 1024, "GOL provenance budget exceeded");
-        let lineage = if roots
-            .iter()
-            .any(|access| access.route.operation == Operation::Write)
-        {
-            Some(LineageOrigin {
-                issuer: actor.issuer.to_string(),
-                subject_id: actor.subject_id.to_string(),
-                source_object_id: worker
-                    .admission
-                    .input
-                    .source_object_id
-                    .to_string(),
-                source_revision: worker.admission.input.revision.to_string(),
-                source_marker: worker.source_marker,
-                pipeline_id: request.pipeline_id.clone(),
-                pipeline_revision_id: request.pipeline_revision_id.clone(),
-                pins: worker
-                    .pins
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
-                    .clone(),
-            })
-        } else {
-            None
-        };
+        let lineage =
+            if request.effects.iter().zip(&roots).any(|(effect, access)| {
+                access.route.operation == Operation::Write ||
+                    effect.handoff.is_some()
+            }) {
+                Some(LineageOrigin {
+                    issuer: actor.issuer.to_string(),
+                    subject_id: actor.subject_id.to_string(),
+                    source_object_id: worker
+                        .admission
+                        .input
+                        .source_object_id
+                        .to_string(),
+                    source_revision: worker
+                        .admission
+                        .input
+                        .revision
+                        .to_string(),
+                    source_marker: worker.source_marker,
+                    pipeline_id: request.pipeline_id.clone(),
+                    pipeline_revision_id: request.pipeline_revision_id.clone(),
+                    pins: worker
+                        .pins
+                        .lock()
+                        .map_err(|_| {
+                            anyhow::anyhow!("GOL runtime unavailable")
+                        })?
+                        .clone(),
+                    handoff: None,
+                })
+            } else {
+                None
+            };
         let receipts = request
             .effects
             .iter()
             .zip(&roots)
             .map(|(effect, access)| {
-                if access.route.operation != Operation::Write {
+                let mut handoff_lineage;
+                let (value, lineage) = if let Some(handoff) = &effect.handoff {
+                    handoff_lineage =
+                        lineage.clone().context("GOL lineage unavailable")?;
+                    handoff_lineage.handoff = Some(handoff.clone());
+                    (&serde_json::Value::Null, Some(&handoff_lineage))
+                } else if access.route.operation == Operation::Write {
+                    (
+                        effect
+                            .proposal
+                            .as_ref()
+                            .context("GOL proposal required")?,
+                        lineage.as_ref(),
+                    )
+                } else {
                     return Ok(None);
-                }
+                };
                 backend
                     .signer
                     .as_ref()
@@ -1508,13 +1545,10 @@ impl GolService {
                             generation: &request.generation_id,
                             source_revision: &lease.source_revision,
                             dependencies: &dependencies,
-                            lineage: lineage.as_ref(),
+                            lineage,
                         },
                         &flow,
-                        effect
-                            .proposal
-                            .as_ref()
-                            .context("GOL proposal required")?,
+                        value,
                     )
                     .map(Some)
             })

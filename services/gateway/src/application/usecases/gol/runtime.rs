@@ -6,6 +6,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::receipts::CommandHandoff;
+
 /// Payload-free errors prevent disclosure of private dependency metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeError {
@@ -68,6 +70,7 @@ pub(crate) struct RequestedEffect {
     pub instance_id: Option<String>,
     pub proposal: Option<Value>,
     pub receipt: Option<String>,
+    pub(super) handoff: Option<CommandHandoff>,
 }
 
 #[derive(Deserialize)]

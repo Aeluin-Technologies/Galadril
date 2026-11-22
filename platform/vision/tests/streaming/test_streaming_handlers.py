@@ -278,6 +278,9 @@ async def test_ingress_validates_and_publishes_deterministic_entry_command() -> 
     assert isinstance(record, dict)
     assert record["tenant_id"] == "tenant-1"
     assert publisher.items[0].topic == TopicLayout().commands_gpu
+    entry = PipelineCommand.model_validate(publisher.items[0].message)
+    assert entry.admission is None
+    assert entry.lineage == f"lineage:{entry.step}:{entry.event_id}"
     assert publisher.items[1].topic == TopicLayout().lineage
 
 
@@ -390,6 +393,11 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
     assert isinstance(result_event, dict)
     assert isinstance(completed_lineage, dict)
     assert first_downstream.message["causation_id"] == result_event["event_id"]
+    downstream = PipelineCommand.model_validate(first_downstream.message)
+    assert downstream.admission is None
+    assert (
+        downstream.lineage == f"lineage:{downstream.step}:{downstream.event_id}"
+    )
     assert completed_lineage["output_refs"] == [result_event["event_id"]]
 
 
@@ -517,11 +525,16 @@ class _PublicationGate:
         return None
 
     @asynccontextmanager
-    async def protect(self, command: PipelineCommand) -> AsyncIterator[None]:
+    async def protect(
+        self,
+        command: PipelineCommand,
+        *,
+        handoff: PipelineCommand | None = None,
+    ) -> AsyncIterator[str | None]:
         self.calls += 1
         if not self.allowed:
             raise GolDenied("GOL publication unavailable")
-        yield
+        yield f"lineage:{handoff.step}:{handoff.event_id}" if handoff else None
 
 
 @pytest.mark.anyio
@@ -799,11 +812,15 @@ async def test_kafka_io_remains_inside_the_live_permit() -> None:
 
         @asynccontextmanager
         async def protect(
-            self, command: PipelineCommand
-        ) -> AsyncIterator[None]:
+            self,
+            command: PipelineCommand,
+            *,
+            handoff: PipelineCommand | None = None,
+        ) -> AsyncIterator[str | None]:
             self.held = True
             try:
-                yield
+                async with super().protect(command, handoff=handoff) as receipt:
+                    yield receipt
             finally:
                 self.held = False
 
