@@ -5,10 +5,13 @@
 mod receipts;
 
 use anyhow::Result;
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use galadril_ontology::authorization::{Flow, Operation};
 use galadril_ontology::{Classification, ModuleVersion, Version};
 use receipts::{Dependency, LineageOrigin, ReceiptScope, ReceiptSigner};
-use serde_json::json;
+use ring::hmac;
+use serde_json::{Value, json};
 
 #[test]
 fn expanded_eskg_metadata_fits_the_worker_receipt_transport() -> Result<()> {
@@ -96,6 +99,61 @@ fn provenance_preserves_repeated_field_dependencies_within_the_wire_budget()
     let verified =
         signer.verify(&token, "tenant_a", "observation_1", &value)?;
     assert!(verified.dependencies == dependencies);
+    Ok(())
+}
+
+#[test]
+fn legacy_receipts_preserve_live_dependencies_for_value_reads() -> Result<()> {
+    let key = [17; 32];
+    let signer = ReceiptSigner::new(&key)?;
+    let target =
+        ModuleVersion::new("e2e.lifecycle".parse()?, Version::new(1, 0, 0))
+            .reference("ObservationState".parse()?)
+            .into();
+    let dependencies = [Dependency {
+        ontology: String::new(),
+        target: String::new(),
+        instance_id: "raw:tenant_a/source".into(),
+        revision: "original_etag".into(),
+        operation: Operation::Read,
+    }]
+    .into_iter()
+    .collect();
+    let value = json!({"kind": "Observation"});
+    let token = signer.issue(
+        &ReceiptScope {
+            tenant: "tenant_a",
+            target: &target,
+            instance_id: "observation_1",
+            generation: "abcdef0123456789abcdef0123456789",
+            source_revision: "original_etag",
+            dependencies: &dependencies,
+            lineage: None,
+        },
+        &Flow::new(Classification::Restricted),
+        &value,
+    )?;
+    let (encoded, _) = token.split_once('.').ok_or_else(|| {
+        anyhow::anyhow!("The issued receipt lacks a signature separator")
+    })?;
+    let mut legacy: Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded)?)?;
+    let fields = legacy.as_object_mut().ok_or_else(|| {
+        anyhow::anyhow!("The issued receipt lacks a JSON object")
+    })?;
+    fields.insert("format".into(), json!(2));
+    fields.insert("dependencies".into(), serde_json::to_value(&dependencies)?);
+    let bytes = serde_json::to_vec(&legacy)?;
+    let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, &key), &bytes);
+    let legacy_token = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(&bytes),
+        URL_SAFE_NO_PAD.encode(tag.as_ref())
+    );
+    let verified =
+        signer.verify(&legacy_token, "tenant_a", "observation_1", &value)?;
+    assert!(verified.dependencies == dependencies);
+    assert!(verified.lineage.is_none());
     Ok(())
 }
 

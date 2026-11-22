@@ -426,6 +426,7 @@ async def _exercise_causal_branch(
         read_causal_cohort,
         timeout_seconds=1800.0,
         description="30 concordant and 6 decoy Gateway observations",
+        abort_on=(PipelineExecutionError,),
     )
     assert await spicedb.allowed(
         resource_type="entity_state",
@@ -450,6 +451,7 @@ async def _exercise_causal_branch(
         lambda: read_causal_state(alpha_entity),
         timeout_seconds=300.0,
         description="real Amarth causal analysis of Gateway-derived entity",
+        abort_on=(PipelineExecutionError,),
     )
     assert causal.get("observation_count", 0) >= 30
     assert causal.get("entity_scope_size") == 1

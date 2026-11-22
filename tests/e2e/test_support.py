@@ -762,6 +762,56 @@ def test_pipeline_failure_preserves_step_and_error() -> None:
     require_pipeline_execution_not_failed([("infer", "completed", None)])
 
 
+@pytest.mark.parametrize(
+    ("probe", "rows", "step"),
+    [
+        (
+            e2e_clients.read_causal_cohort,
+            [("sink", "failed", "effect denied")],
+            "sink",
+        ),
+        (
+            lambda: e2e_clients.read_causal_state("entity_one"),
+            [None, ("causal", "failed", "effect denied")],
+            "causal",
+        ),
+    ],
+)
+def test_causal_observations_propagate_durable_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    probe: Callable[[], Awaitable[object]],
+    rows: list[tuple[str, str, str] | None],
+    step: str,
+) -> None:
+    """Separates a failed command from an incomplete causal observation."""
+    responses = iter(rows)
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(self, *_: object) -> Connection:
+            return self
+
+        async def fetchall(self) -> list[tuple[str, ...]]:
+            return []
+
+        async def fetchone(self) -> tuple[str, str, str] | None:
+            return next(responses)
+
+    async def connect(*_: object) -> Connection:
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    with pytest.raises(
+        e2e_clients.PipelineExecutionError, match=f"{step}: effect denied"
+    ):
+        asyncio.run(probe())
+
+
 def test_tempo_service_names_read_otlp_resource_attributes() -> None:
     """Ensures trace assertions use Tempo's OTLP response structure."""
     trace = {
@@ -984,12 +1034,16 @@ otel-collector-1  | EventName: pipeline.gol.failed
 otel-collector-1  |      -> phase: Str(handler)
 otel-collector-1  |      -> error_type: Str(GolDenied)
 otel-collector-1  |      -> step: Str(sink)
+otel-collector-1  | LogRecord #5
+otel-collector-1  | EventName: gol.worker.resume.denied
+otel-collector-1  |      -> phase: Str(principal_and_input)
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
         "ray.actor.task.failed error_type=VectorSearchError step=resolve",
         "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
         "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
+        "gol.worker.resume.denied phase=principal_and_input",
     ]
 
 
@@ -1061,7 +1115,7 @@ def test_causal_cohort_waits_for_the_last_event_bucket_to_close(
             ]
 
         async def fetchone(self) -> tuple[object, ...] | None:
-            if "SELECT step, error" in self.query:
+            if "status = 'failed'" in self.query:
                 return None
             if "pipeline_executions" in self.query:
                 return (36,)

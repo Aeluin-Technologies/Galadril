@@ -55,6 +55,7 @@ def _pipeline_failure_events(logs: str) -> str:
         "gol.worker.dependency.denied",
         "gol.worker.effect.denied",
         "gol.worker.open.denied",
+        "gol.worker.resume.denied",
         "gol.worker.write_contract.denied",
         "pipeline.command.failed",
         "pipeline.gol.failed",

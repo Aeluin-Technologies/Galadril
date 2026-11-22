@@ -587,14 +587,17 @@ async def read_causal_cohort() -> str | None:
         rows = await cursor.fetchall()
         failure_cursor = await connection.execute(
             """
-            SELECT step, error FROM pipeline_executions
+            SELECT step, status, error FROM pipeline_executions
             WHERE tenant_id = %s AND pipeline LIKE %s
               AND status = 'failed'
+            ORDER BY created_at
             LIMIT 1
             """,
             (TENANT_ID, f"%/{PIPELINE_ID}/%"),
         )
         failure = await failure_cursor.fetchone()
+        if failure is not None:
+            require_pipeline_execution_not_failed((failure,))
         completed_cursor = await connection.execute(
             """
             SELECT COUNT(*) FROM pipeline_executions
@@ -628,10 +631,6 @@ async def read_causal_cohort() -> str | None:
             (TENANT_ID,),
         )
         alignment = await alignment_cursor.fetchone()
-    if failure is not None:
-        raise AssertionError(
-            f"Causal fixture pipeline failed at {failure[0]}: {failure[1]}"
-        )
     observed: dict[str, set[tuple[str, str | None]]] = {
         "alpha": set(),
         "decoy": set(),
@@ -787,18 +786,18 @@ async def read_causal_state(entity_id: str) -> dict[str, object] | None:
         run = await run_cursor.fetchone()
         step_cursor = await connection.execute(
             """
-            SELECT status, error FROM pipeline_executions
+            SELECT step, status, error FROM pipeline_executions
             WHERE tenant_id = %s AND step = 'causal'
             ORDER BY created_at DESC LIMIT 1
             """,
             (TENANT_ID,),
         )
         step = await step_cursor.fetchone()
-    if step is not None and step[0] == "failed":
-        raise AssertionError(f"Vision causal command failed: {step[1]}")
+    if step is not None:
+        require_pipeline_execution_not_failed((step,))
     if run is not None and run[0] != "success":
         raise AssertionError(f"Amarth causal run did not succeed: {run[0]}")
-    if run is None or step is None or step[0] != "completed":
+    if run is None or step is None or step[1] != "completed":
         return None
     return require_mapping(run[1], "Amarth causal result")
 
