@@ -70,6 +70,12 @@ def test_causal_fixture_separates_decoys_without_changing_the_label(
     assert first["label"] == second["label"] == decoy["label"]
     assert first["source_field"] == second["source_field"] == "alpha"
     assert decoy["source_field"] == "decoy"
+    assert first["confidence"] != second["confidence"]
+    assert (
+        first["gol_value"]
+        == second["gol_value"]
+        == {"display_name": first["label"]}
+    )
 
     first_vector = _vector(first["embedding"])
     second_vector = _vector(second["embedding"])

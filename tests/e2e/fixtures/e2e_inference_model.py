@@ -134,10 +134,7 @@ class E2EDeterministicModel(BaseModel):
                 }
                 confidence = record.outcome
         prediction["gol_symbol_key"] = "e2e.lifecycle::E2EEntity"
-        prediction["gol_value"] = {
-            "display_name": prediction["label"],
-            "confidence": prediction["confidence"],
-        }
+        prediction["gol_value"] = {"display_name": prediction["label"]}
         prediction["gol_event_value"] = {"kind": "Observation"}
         return PredictionResult(
             model_name=self.meta().name,

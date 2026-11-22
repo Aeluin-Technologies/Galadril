@@ -131,7 +131,7 @@ def anyio_backend() -> str:
 def _ontology() -> str:
     """Declares canonical types without treating graph labels as ontology IDs."""
     return f"""ontology {ONTOLOGY_ID} version "1.0.0" {{
-    entity E2EEntity {{ field display_name: String; field confidence: f64; }}
+    entity E2EEntity {{ field display_name: String; }}
     entity E2EObservation {{ field kind: String; }}
     entity ObservationEdge {{
         field tenant_id: String;
