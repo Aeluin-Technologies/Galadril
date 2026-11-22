@@ -16,7 +16,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const MAX_VALUE_BYTES: usize = 128 * 1024;
-const MAX_RECEIPT_BYTES: usize = 16 * 1024;
+const MAX_RECEIPT_TOKEN_BYTES: usize = 64 * 1024;
+// The worker accepts 64 KiB on the wire, including the 43-byte encoded
+// SHA-256 tag and its separator.
+const MAX_RECEIPT_BYTES: usize = (MAX_RECEIPT_TOKEN_BYTES - 44) / 4 * 3;
 
 /// Persisted provenance retains revocable obligations, rather than decisions.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -120,7 +123,7 @@ impl ReceiptSigner {
         value: &Value,
     ) -> Result<LabelReceipt> {
         ensure!(
-            token.len() <= 2 * MAX_RECEIPT_BYTES,
+            token.len() <= MAX_RECEIPT_TOKEN_BYTES,
             "GOL provenance unavailable"
         );
         let (payload, signature) = token

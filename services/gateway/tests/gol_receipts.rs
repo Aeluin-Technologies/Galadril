@@ -5,10 +5,56 @@
 mod receipts;
 
 use anyhow::Result;
-use galadril_ontology::authorization::Flow;
+use galadril_ontology::authorization::{Flow, Operation};
 use galadril_ontology::{Classification, ModuleVersion, Version};
-use receipts::{ReceiptScope, ReceiptSigner};
+use receipts::{Dependency, ReceiptScope, ReceiptSigner};
 use serde_json::json;
+
+#[test]
+fn expanded_eskg_metadata_fits_the_worker_receipt_transport() -> Result<()> {
+    let signer = ReceiptSigner::new(&[17; 32])?;
+    let target =
+        ModuleVersion::new("e2e.lifecycle".parse()?, Version::new(1, 0, 0))
+            .reference("IdentityPrototype".parse()?)
+            .into();
+    let instance_id = &format!("gol:{}:{}", "a".repeat(64), "b".repeat(64));
+    let dependencies = (0..100)
+        .map(|index| Dependency {
+            ontology: "e2e.lifecycle".into(),
+            target: format!(
+                "e2e.lifecycle::ObservationState.effect_{index:03}"
+            ),
+            instance_id: if index < 73 {
+                "__schema".into()
+            } else {
+                instance_id.to_owned()
+            },
+            revision: "c".repeat(64),
+            operation: if index < 73 {
+                Operation::Describe
+            } else {
+                Operation::Read
+            },
+        })
+        .collect();
+    let value = json!({"entity_id": instance_id});
+    let token = signer.issue(
+        &ReceiptScope {
+            tenant: "tenant_a",
+            target: &target,
+            instance_id,
+            generation: "abcdef0123456789abcdef0123456789",
+            source_revision: "0123456789abcdef0123456789abcdef",
+            dependencies: &dependencies,
+        },
+        &Flow::new(Classification::Restricted),
+        &value,
+    )?;
+    assert!(token.len() <= 65536);
+    let verified = signer.verify(&token, "tenant_a", instance_id, &value)?;
+    assert!(verified.dependencies == dependencies);
+    Ok(())
+}
 
 #[test]
 fn signed_provenance_cannot_be_rebound_to_another_value_or_resource()
