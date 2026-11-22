@@ -408,21 +408,22 @@ class CommandHandler:
                 self._routes.successors(command.step, result.output)
                 await self._ledger.complete(command, result)
             except Exception as error:
+                logger.error(
+                    "pipeline_command_failed",
+                    event_id=str(command.event_id),
+                    attempt=command.attempt,
+                    error_type=type(error).__name__,
+                    outcome="unavailable",
+                )
                 await self._ledger.fail(
                     command, RuntimeError("Pipeline execution unavailable")
                 )
-                await self._handle_failure(command, error)
+                await self._handle_failure(command)
                 self._metrics.message_completed(
                     pipeline=command.pipeline,
                     step=command.step,
                     outcome="failed",
                     duration_seconds=time.perf_counter() - started_at,
-                )
-                logger.error(
-                    "pipeline_command_failed",
-                    event_id=str(command.event_id),
-                    attempt=command.attempt,
-                    outcome="unavailable",
                 )
                 return None
 
@@ -485,9 +486,7 @@ class CommandHandler:
                 no_confirm=False,
             )
 
-    async def _handle_failure(
-        self, command: PipelineCommand, error: Exception
-    ) -> None:
+    async def _handle_failure(self, command: PipelineCommand) -> None:
         """Publishes bounded retries or a terminal dead-letter event."""
         route = self._routes.route(command.step)
         if command.attempt < route.max_retries:

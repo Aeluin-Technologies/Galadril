@@ -755,16 +755,23 @@ impl GolService {
                     receipts: Vec::new(),
                 })
             },
-            EffectRequest::Begin(request) => self
-                .begin_effects(request)
-                .await
-                .map_err(|_| RuntimeError::Denied),
+            EffectRequest::Begin(request) => {
+                let mut phase = "admission";
+                self.begin_effects(request, &mut phase).await.map_err(|_| {
+                    tracing::warn!(
+                        event.name = "gol.worker.effect.denied",
+                        phase
+                    );
+                    RuntimeError::Denied
+                })
+            },
         }
     }
 
     async fn begin_effects(
         &self,
         request: BeginEffects,
+        phase: &mut &'static str,
     ) -> Result<EffectResponse> {
         ensure!(
             !request.effects.is_empty() && request.effects.len() <= 64,
@@ -809,6 +816,7 @@ impl GolService {
         let mut roots = Vec::with_capacity(request.effects.len());
         let mut outcome = worker.admission.context.current_label()?;
         for effect in &request.effects {
+            *phase = "provenance";
             ensure!(
                 lease.targets.contains(&effect.target),
                 "GOL target not bound"
@@ -940,6 +948,7 @@ impl GolService {
                     .join(descriptor.flow());
             }
             if operation == Operation::Write {
+                *phase = "write_instance";
                 let proposal = effect
                     .proposal
                     .as_ref()
@@ -957,6 +966,7 @@ impl GolService {
                         &lease.ontology,
                     )
                     .await?;
+                *phase = "write_contract";
                 let contract = lease
                     .archive
                     .invariant_contract(&access, &prepared, &backend.provider)
@@ -1007,7 +1017,13 @@ impl GolService {
                         &backend.provider,
                         &business::Business::new(contract, proposal),
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|error| {
+                        tracing::warn!(
+                            event.name = "gol.worker.write_contract.denied",
+                            reason = ?error
+                        );
+                    })?;
                 for field in fields {
                     let mut field_access =
                         access_clone(&access, Operation::Write);
@@ -1049,6 +1065,7 @@ impl GolService {
             roots.push(access_clone(&access, operation));
             checked.push(access);
         }
+        *phase = "policy";
         // Workers observe commit/error status directly. Require its read route
         // as well as its label; a blind write grant cannot authorize that
         // result.
@@ -1135,6 +1152,7 @@ impl GolService {
             );
         }
         let flow = worker.admission.context.current_label()?;
+        *phase = "release";
         // Persist the original prerequisite routes, even if a future contract
         // removes them. A cached derived value still depends on its old
         // inputs.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from unittest.mock import Mock
 from uuid import UUID, uuid4, uuid5
 
 import pytest
@@ -393,9 +394,13 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
 
 
 @pytest.mark.anyio
-async def test_actor_failure_publishes_bounded_retry() -> None:
+async def test_actor_failure_publishes_bounded_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Increments attempts durably instead of creating an infinite poison loop."""
     publisher = _Publisher()
+    log = Mock()
+    monkeypatch.setattr("galadril_vision.streaming.handlers.logger", log)
     handler = CommandHandler(
         routes=PipelineRouteTable(_pipeline(max_retries=1)),
         publisher=publisher,
@@ -423,6 +428,13 @@ async def test_actor_failure_publishes_bounded_retry() -> None:
     assert result is None
     assert isinstance(retry, dict)
     assert retry["attempt"] == 1
+    log.error.assert_called_once_with(
+        "pipeline_command_failed",
+        event_id=str(command.event_id),
+        attempt=0,
+        error_type="RuntimeError",
+        outcome="unavailable",
+    )
     assert not any(
         item.topic == TopicLayout().dead_letter for item in publisher.items
     )

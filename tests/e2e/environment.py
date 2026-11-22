@@ -6,9 +6,11 @@ import asyncio
 import io
 import json
 import os
+import re
 import secrets
 import signal
 import tarfile
+from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -45,6 +47,41 @@ _CONFIG_CATEGORIES = (
 
 class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
+
+
+def _pipeline_failure_events(logs: str) -> str:
+    """Preserves failure stages when metrics crowd out the final collector tail."""
+    events = {
+        "gol.worker.dependency.denied",
+        "gol.worker.effect.denied",
+        "gol.worker.open.denied",
+        "gol.worker.write_contract.denied",
+        "pipeline.command.failed",
+        "ray.actor.task.failed",
+    }
+    details = re.compile(
+        r"-> (phase|reason|error_type|step): Str\(([\w.()-]{1,64})\)", re.ASCII
+    )
+    names = re.compile(
+        r"(?:EventName: ([\w.]+)|-> event\.name: Str\(([\w.]+)\))", re.ASCII
+    )
+    recent: deque[str] = deque(maxlen=24)
+    for record in re.split(
+        r"^.*\|\s*LogRecord #\d+[ \t]*$", logs, flags=re.MULTILINE
+    ):
+        event = None
+        attributes: list[str] = []
+        for line in record.splitlines():
+            message = line.partition("|")[2].strip()
+            if name := names.fullmatch(message):
+                candidate = name.group(1) or name.group(2)
+                if candidate in events:
+                    event = candidate
+            elif detail := details.fullmatch(message):
+                attributes.append(f"{detail.group(1)}={detail.group(2)}")
+        if event is not None:
+            recent.append(" ".join((event, *attributes)))
+    return "\n".join(recent)
 
 
 def image_loader_command(loader: Path) -> tuple[str, str]:
@@ -650,21 +687,23 @@ class ComposeEnvironment:
             check=False,
             timeout_seconds=90.0,
         )
-        infrastructure_logs += await _run(
+        collector_logs = await _run(
             (
                 *self._command,
                 "logs",
                 "--no-color",
                 "--tail",
-                "1000",
+                "12000",
                 "otel-collector",
             ),
             environment=self._environment,
             check=False,
             timeout_seconds=90.0,
         )
+        infrastructure_logs += "\n".join(collector_logs.splitlines()[-1000:])
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
+            f"\nPipeline failure events:\n{_pipeline_failure_events(collector_logs)}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"

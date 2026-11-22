@@ -892,7 +892,33 @@ def test_compose_diagnostics_expose_outbox_worker_state(
     assert "application_name" in rendered
     assert "find /tmp/ray" not in rendered
     assert "worker-*.err" in rendered
-    assert commands[-1][-2:] == ("1000", "otel-collector")
+    assert commands[-1][-2:] == ("12000", "otel-collector")
+
+
+def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
+    logs = """
+otel-collector-1  | LogRecord #0
+otel-collector-1  | Body: Str(protected value)
+otel-collector-1  |      -> event.name: Str(gol.worker.effect.denied)
+otel-collector-1  |      -> phase: Str(write_contract)
+otel-collector-1  |      -> reason: Str(value with spaces)
+otel-collector-1  | LogRecord #1
+otel-collector-1  | EventName: ray.actor.task.failed
+otel-collector-1  |      -> error_type: Str(VectorSearchError)
+otel-collector-1  |      -> step: Str(resolve)
+otel-collector-1  | LogRecord #2
+otel-collector-1  | EventName: unrelated.event
+otel-collector-1  |      -> error_type: Str(PrivateError)
+otel-collector-1  | LogRecord #3
+otel-collector-1  | EventName: pipeline.command.failed
+otel-collector-1  |      -> error_type: Str(RayTaskError(CommandProcessingError))
+otel-collector-1  |      -> step: Str(resolve)
+"""
+    assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
+        "gol.worker.effect.denied phase=write_contract",
+        "ray.actor.task.failed error_type=VectorSearchError step=resolve",
+        "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
+    ]
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
