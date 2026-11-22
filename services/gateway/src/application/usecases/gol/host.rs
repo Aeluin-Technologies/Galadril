@@ -978,10 +978,16 @@ impl GolService {
             }
             // Opaque cross-calculation native state cannot be reclassified by
             // a request.
-            if matches!(
-                effect.destination.as_str(),
-                "identity_state" | "causal_state"
-            ) {
+            if effect.destination == "identity_state" {
+                // Every persisted prototype is a concrete GOL value. Reads
+                // require authenticated provenance, then the ordinary live
+                // policy and IFC gates below still decide its disclosure.
+                ensure!(
+                    operation == Operation::Write || receipt.is_some(),
+                    "GOL identity provenance unavailable"
+                );
+            }
+            if effect.destination == "causal_state" {
                 worker
                     .admission
                     .context
@@ -1016,6 +1022,44 @@ impl GolService {
                 outcome = outcome
                     .join(descriptor.control_flow())
                     .join(descriptor.flow());
+            }
+            if operation == Operation::Read &&
+                receipt.is_some() &&
+                matches!(target, Reference::Symbol(_))
+            {
+                // A signed object authenticates all its fields. Its root read
+                // permission alone cannot disclose a protected property.
+                let fields = effect
+                    .proposal
+                    .as_ref()
+                    .and_then(serde_json::Value::as_object)
+                    .context("GOL record provenance required")?;
+                for name in fields.keys() {
+                    let mut field_access =
+                        access_clone(&access, Operation::Read);
+                    field_access.route.target =
+                        galadril_ontology::FieldRef::new(
+                            owner(&target)?.clone(),
+                            name.parse()?,
+                        )
+                        .into();
+                    for archive in [lease.archive.as_ref(), &current] {
+                        let field = resolve(
+                            archive,
+                            &reference_key(&field_access.route.target),
+                        )?;
+                        for descriptor in archive
+                            .requirements(&Route::new(field, Operation::Read))
+                            .await?
+                            .values()
+                        {
+                            outcome = outcome
+                                .join(descriptor.flow())
+                                .join(descriptor.control_flow());
+                        }
+                    }
+                    checked.push(field_access);
+                }
             }
             if operation == Operation::Write {
                 *phase = "write_instance";

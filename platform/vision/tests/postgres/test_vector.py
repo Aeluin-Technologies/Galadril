@@ -12,6 +12,101 @@ from galadril_vision.common.types import EntityEmbedding
 from galadril_vision.connectors.postgres.vector import VectorStore
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("scale", [1.0, 1e-300, 1e300])
+async def test_candidate_ranking_follows_receipt_authorization(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, scale: float
+) -> None:
+    """An unreadable prototype must never affect nearest-neighbor ordering."""
+    store = VectorStore(mock_postgres_client, mock_config)
+    value = {
+        "entity_id": "entity-a",
+        "licorne_identity_id": "41",
+        "modality": "text",
+        "embedding": [scale, 0.0, 0.0, 0.0],
+        "observation_key": "observation-a",
+    }
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(
+        return_value=[("entity-a", value, "signed-receipt")]
+    )
+    held = False
+
+    @asynccontextmanager
+    async def authorized(**kwargs: object) -> AsyncIterator[str]:
+        nonlocal held
+        assert kwargs["receipt"] == "signed-receipt"
+        assert kwargs["proposal"] == value
+        held = True
+        try:
+            yield "read-receipt"
+        finally:
+            held = False
+
+    with patch(
+        "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+        new=authorized,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [scale, 0.0, 0.0, 0.0],
+            "text",
+            "tenant-a",
+            1,
+            connection=connection,
+        )
+    assert not held
+    assert candidates[0].entity_id == "entity-a"
+    assert candidates[0].similarity == 1.0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("secret_first", [True, False])
+async def test_unreadable_candidates_cannot_displace_readable_ones(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, secret_first: bool
+) -> None:
+    """Denial is applied before top-k even for a perfect unauthorized match."""
+    public = {
+        "entity_id": "public",
+        "licorne_identity_id": "41",
+        "modality": "text",
+        "embedding": [0.0, 1.0, 0.0, 0.0],
+        "observation_key": "public-source",
+    }
+    secret = {
+        **public,
+        "entity_id": "secret",
+        "embedding": [1.0, 0.0, 0.0, 0.0],
+    }
+    rows = [
+        ("public", public, "public-receipt"),
+        ("secret", secret, "secret-receipt"),
+    ]
+    if secret_first:
+        rows.reverse()
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=rows)
+
+    @asynccontextmanager
+    async def authorized(**kwargs: object) -> AsyncIterator[str]:
+        if kwargs["receipt"] == "secret-receipt":
+            raise GolDenied("Denied")
+        yield "read-receipt"
+
+    store = VectorStore(mock_postgres_client, mock_config)
+    with patch(
+        "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+        new=authorized,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [1.0, 0.0, 0.0, 0.0],
+            "text",
+            "tenant-a",
+            1,
+            connection=connection,
+        )
+    assert [candidate.entity_id for candidate in candidates] == ["public"]
+
+
 @pytest.fixture
 def mock_postgres_client() -> MagicMock:
     """Generates an insulated PostgresClient component handling async mock connections."""
@@ -145,46 +240,29 @@ async def test_find_similar_with_modality_routing(
 
 
 @pytest.mark.anyio
-async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
+async def test_find_resolution_candidates_ignores_unsigned_side_tables(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
-    """Returns deduplicated pgvector rows with LI-ESKG and PostGIS metadata."""
+    """Identity and spatial side tables cannot silently enrich signed evidence."""
     store = VectorStore(client=mock_postgres_client, config=mock_config)
-    mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [
-        ("ent-1", 0.93, "face", 41, 51.5074, -0.1278, 12.5),
-        ("ent-2", 0.88, "face", None, None, None, 0.0),
-    ]
-    mock_conn = _connection_mock()
-    mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
-    mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
-
-    candidates = await store.find_resolution_candidates(
-        embedding=[0.1, 0.2, 0.3, 0.4],
-        modality="face",
-        tenant_id="tenant-1",
-        top_k=2,
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=[])
+    assert (
+        await store.find_resolution_candidates(
+            [0.1, 0.2, 0.3, 0.4],
+            "face",
+            "tenant-1",
+            2,
+            connection=connection,
+        )
+        == []
     )
-
-    assert candidates[0].licorne_identity_id == 41
-    assert candidates[0].latitude == 51.5074
-    assert candidates[1].licorne_identity_id is None
-    assert mock_cursor.execute.call_count == 2
-    query, params = mock_cursor.execute.call_args.args
-    assert "identity_prototypes" in str(query)
-    assert "prototype.licorne_identity_id" in str(query)
-    assert len(params) == 14
-
-    mock_cursor.execute.reset_mock()
-    results_with_modality = await store.find_similar_with_modality(
-        embedding=[0.1, 0.2, 0.3, 0.4],
-        modality="TEXT",
-        tenant_id="raw-tenant",
-        top_k=5,
-    )
-    assert len(results_with_modality) == 2
-    assert mock_cursor.execute.call_count == 2
+    query, params = connection.execute.call_args.args
+    assert "identity_prototypes" in query
+    assert "gol_receipt IS NOT NULL" in query
+    assert "identity_links" not in query
+    assert "entity_states" not in query
+    assert params == ("tenant-1", "face")
 
 
 @pytest.mark.anyio
@@ -326,6 +404,10 @@ def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
         return
     with (
+        patch(
+            "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+            new=_unit_scope,
+        ),
         patch(
             "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
             new=_unit_scope,

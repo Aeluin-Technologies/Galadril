@@ -11,8 +11,11 @@ from typing import Protocol, cast
 
 import orjson
 import structlog
-from galadril_ontology import make_gol_state_effect, protected_gol_effects
-from pydantic import JsonValue, TypeAdapter
+from galadril_ontology import (
+    make_gol_state_effect,
+    protected_gol_effects,
+    scoped_instance_id,
+)
 
 from galadril_vision.common.config import IdentityResolutionConfig
 from galadril_vision.identity.contracts import (
@@ -23,8 +26,6 @@ from galadril_vision.identity.contracts import (
 )
 
 logger = structlog.get_logger(__name__)
-_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
-_REQUEST = TypeAdapter(ResolutionRequest)
 
 
 class _Candidate(Protocol):
@@ -187,17 +188,13 @@ class _CalibratedPostgresProvider:
     def generate_candidates(
         self, observations: list[_Observation], context: object
     ) -> list[list[_Candidate]]:
-        """Builds stable latent or authoritative-host candidate references."""
+        """Uses authorized PostgreSQL identities across isolated native ledgers."""
         del context
         groups: list[list[_Candidate]] = []
         for observation in observations:
             payload = self._payload(observation)
             group: list[_Candidate] = []
             for candidate in self._spatially_gated(payload):
-                licorne_id = candidate.get("licorne_identity_id")
-                if isinstance(licorne_id, int):
-                    group.append(self._licorne.Candidate.latent(licorne_id))
-                    continue
                 entity_id = candidate.get("entity_id")
                 if not isinstance(entity_id, str) or not entity_id:
                     continue
@@ -372,9 +369,6 @@ class _CalibratedPostgresProvider:
             return None
 
     def _candidate_key(self, candidate: dict[str, object]) -> str:
-        licorne_id = candidate.get("licorne_identity_id")
-        if isinstance(licorne_id, int):
-            return f"identity:{licorne_id}"
         entity_id = candidate.get("entity_id")
         return f"known:{self._config.postgres_backend_id}:{entity_id}"
 
@@ -428,22 +422,16 @@ class LicorneActorRuntime:
 
     async def resolve(self, request: ResolutionRequest) -> ResolutionDecision:
         """Keeps native submission, result consumption, and cleanup in one permit."""
+        if self._config.ledger_root is not None:
+            raise IdentityResolutionError(
+                "Shared native ledgers require provenance"
+            )
         effects = (
             make_gol_state_effect(
-                operation="read",
+                operation="transfer",
                 tenant_id=request.tenant_id,
-                destination="identity_state",
+                destination="identity_compute",
                 purpose="identity_resolution",
-            ),
-            make_gol_state_effect(
-                operation="write",
-                tenant_id=request.tenant_id,
-                destination="identity_state",
-                purpose="identity_resolution",
-                instance_id=request.observation_key,
-                proposal=_JSON_OBJECT.validate_python(
-                    _REQUEST.dump_python(request, mode="json")
-                ),
             ),
         )
         async with protected_gol_effects(effects, tenant_id=request.tenant_id):
@@ -503,6 +491,12 @@ class LicorneActorRuntime:
                             await pump
                         except asyncio.CancelledError:
                             pass
+                    # Only the caller's freshly authorized candidate snapshot may
+                    # affect this computation. Native caches never span requests.
+                    resolver.close()
+                    await resolver.wait_closed()
+                    self._resolver = None
+                    self._providers.clear()
 
     async def close(self) -> None:
         """Stops native workers and fails unresolved actor-local requests."""
@@ -543,8 +537,6 @@ class LicorneActorRuntime:
                 "new_log_prior": self._config.new_log_prior,
                 "noise_log_prior": self._config.noise_log_prior,
             }
-            if self._config.ledger_root is not None:
-                kwargs["ledger_root"] = self._config.ledger_root
             self._resolver = self._licorne.AsyncResolver(**kwargs)
         else:
             self._resolver.register_tenant(
@@ -647,14 +639,38 @@ class LicorneActorRuntime:
         selected_label: str | None = None
         if resolution.host_reference is not None:
             _, entity_id, _ = resolution.host_reference
+            selected = next(
+                (
+                    candidate
+                    for candidate in request.candidates
+                    if candidate.entity_id == entity_id
+                ),
+                None,
+            )
+            if selected is None:
+                raise IdentityResolutionError(
+                    "Native identity lacks authorized evidence"
+                )
+            licorne_identity_id = selected.licorne_identity_id
             selected_label = (
                 f"known:{self._config.postgres_backend_id}:{entity_id}"
             )
         elif licorne_identity_id is not None:
-            entity_id = entity_by_licorne.get(
-                licorne_identity_id,
-                f"licorne_{licorne_identity_id:016x}",
-            )
+            if resolution.created_identity:
+                licorne_identity_id = (
+                    _stable_u64(request.tenant_id, request.observation_key)
+                    & ((1 << 63) - 1)
+                    or 1
+                )
+                entity_id = scoped_instance_id(
+                    f"licorne_{licorne_identity_id:016x}"
+                )
+            else:
+                entity_id = entity_by_licorne.get(licorne_identity_id)
+                if entity_id is None:
+                    raise IdentityResolutionError(
+                        "Native identity lacks authorized evidence"
+                    )
             selected_label = (
                 "new"
                 if bool(resolution.created_identity)

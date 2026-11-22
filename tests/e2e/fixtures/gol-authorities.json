@@ -263,46 +263,57 @@
       "purposes": [
         "causal_analysis"
       ]
+    },
+    "identity_compute": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "identity_resolution"
+      ]
     }
   },
   "revision": {
     "version": {
       "name": "galadril.gol.e2e_host",
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     "sha256": [
-      219,
-      197,
-      6,
-      179,
-      162,
-      237,
-      194,
-      79,
-      142,
-      46,
-      178,
-      255,
-      188,
-      131,
+      231,
       177,
-      255,
-      85,
-      165,
-      178,
-      239,
-      59,
-      207,
-      75,
-      227,
-      211,
-      20,
-      111,
-      155,
-      92,
-      244,
+      143,
+      218,
+      8,
+      5,
+      187,
+      153,
+      91,
+      184,
+      200,
       189,
-      89
+      160,
+      14,
+      86,
+      128,
+      2,
+      209,
+      102,
+      155,
+      204,
+      155,
+      70,
+      33,
+      76,
+      95,
+      83,
+      228,
+      110,
+      250,
+      196,
+      155
     ]
   },
   "relationship_schema": {

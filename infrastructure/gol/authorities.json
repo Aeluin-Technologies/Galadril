@@ -264,46 +264,57 @@
       "purposes": [
         "causal_analysis"
       ]
+    },
+    "identity_compute": {
+      "kind": "Internal",
+      "clearance": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "purposes": [
+        "identity_resolution"
+      ]
     }
   },
   "revision": {
     "version": {
       "name": "galadril.gol.host",
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     "sha256": [
-      131,
-      159,
-      243,
+      196,
       67,
-      125,
-      157,
-      47,
-      162,
-      70,
-      5,
+      158,
+      99,
+      241,
+      244,
+      169,
+      76,
+      247,
+      137,
+      20,
+      3,
+      154,
+      221,
+      204,
+      239,
+      80,
       163,
-      18,
       227,
-      219,
-      240,
       117,
-      5,
-      44,
-      130,
-      47,
-      113,
-      225,
-      191,
-      54,
-      34,
-      23,
-      109,
-      121,
-      215,
-      44,
-      129,
-      71
+      35,
+      122,
+      4,
+      177,
+      86,
+      75,
+      99,
+      227,
+      29,
+      213,
+      209,
+      41
     ]
   },
   "relationship_schema": {

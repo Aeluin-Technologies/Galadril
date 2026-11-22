@@ -27,6 +27,7 @@ from clients import (
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     GatewayClient,
     GraphQLOperationError,
+    PipelineExecutionError,
     RegistryFixtures,
     RelationshipSpec,
     SpiceDBProbe,
@@ -132,8 +133,19 @@ def _ontology() -> str:
     return f"""ontology {ONTOLOGY_ID} version "1.0.0" {{
     entity E2EEntity {{ field display_name: String; field confidence: f64; }}
     entity E2EObservation {{ field kind: String; }}
+    entity IdentityPrototype {{
+        field entity_id: String;
+        field licorne_identity_id: String;
+        field modality: String;
+        field embedding: List<f64>;
+        field observation_key: String;
+        field latitude: Option<f64>;
+        field longitude: Option<f64>;
+        field accuracy_meters: f64;
+    }}
     {gol_access("E2EEntity")}
     {gol_access("E2EObservation")}
+    {gol_access("IdentityPrototype")}
 }}"""
 
 
@@ -1313,6 +1325,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 read_pipeline_state,
                 timeout_seconds=180.0,
                 description="terminal Vision DAG and drained authz outbox",
+                abort_on=(PipelineExecutionError,),
             )
             assert state.completed_steps == _EXPECTED_STEPS
             assert state.state_value.get("label") == "gateway-e2e-record"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -13,15 +14,17 @@ from uuid import uuid4
 import orjson
 import structlog
 from galadril_ontology import (
+    GolDenied,
     GolEffect,
     make_gol_state_effect,
+    protected_gol_effect,
     protected_gol_effects,
     protected_gol_state_effect,
 )
 from pgvector.psycopg import register_vector_async
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
-from pydantic import JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import (
@@ -35,9 +38,31 @@ from galadril_vision.common.types import (
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConnectorConfig
     from galadril_vision.connectors.postgres.client import PostgresClient
-    from galadril_vision.identity.contracts import ResolutionDecision
+    from galadril_vision.identity.contracts import (
+        ResolutionDecision,
+        SpatialEvidence,
+    )
 
 logger = structlog.get_logger(__name__)
+
+
+def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    """Rescaling avoids overflow and underflow for finite signed vectors."""
+    left_scale = max(abs(value) for value in left)
+    right_scale = max(abs(value) for value in right)
+    if left_scale == 0 or right_scale == 0:
+        return 0.0
+    left_norm = math.sqrt(
+        math.fsum((value / left_scale) ** 2 for value in left)
+    )
+    right_norm = math.sqrt(
+        math.fsum((value / right_scale) ** 2 for value in right)
+    )
+    similarity = math.fsum(
+        (a / left_scale / left_norm) * (b / right_scale / right_norm)
+        for a, b in zip(left, right, strict=True)
+    )
+    return max(-1.0, min(similarity, 1.0))
 
 
 class _ConfiguredConnection(Protocol):
@@ -57,6 +82,25 @@ class IdentityCandidate:
     latitude: float | None = None
     longitude: float | None = None
     accuracy_meters: float = 0.0
+
+
+class _PrototypeValue(BaseModel):
+    """Parses the signed storage envelope after the host authorizes its fields."""
+
+    model_config = ConfigDict(
+        strict=True,
+        extra="forbid",
+        allow_inf_nan=False,
+        hide_input_in_errors=True,
+    )
+    entity_id: str
+    licorne_identity_id: str = Field(pattern=r"^[0-9]{1,19}$")
+    modality: str
+    embedding: list[float]
+    observation_key: str
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    accuracy_meters: float = Field(default=0.0, ge=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,27 +280,19 @@ class VectorStore:
         self, tenant_id: str, modality: str
     ) -> AsyncIterator[AsyncConnection[TupleRow]]:
         """Serializes candidate discovery and new identity publication."""
-        async with protected_gol_state_effect(
-            operation="read",
-            tenant_id=tenant_id,
-            destination="identity_state",
-            purpose="identity_resolution",
-        ):
-            tenant_id = normalize_tenant_id(tenant_id)
-            modality = normalize_embedding_modality(modality)
-            digest = hashlib.blake2b(digest_size=8, person=b"gala-id")
-            digest.update(tenant_id.encode("utf-8"))
-            digest.update(b"\x00")
-            digest.update(modality.encode("utf-8"))
-            lock_key = int.from_bytes(digest.digest(), "big", signed=True)
-            async with self._client.tenant_connection(tenant_id) as conn:
-                await conn.execute(
-                    "SELECT set_config('lock_timeout', %s, true)", ("30s",)
-                )
-                await conn.execute(
-                    "SELECT pg_advisory_xact_lock(%s)", (lock_key,)
-                )
-                yield conn
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality = normalize_embedding_modality(modality)
+        digest = hashlib.blake2b(digest_size=8, person=b"gala-id")
+        digest.update(tenant_id.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(modality.encode("utf-8"))
+        lock_key = int.from_bytes(digest.digest(), "big", signed=True)
+        async with self._client.tenant_connection(tenant_id) as conn:
+            await conn.execute(
+                "SELECT set_config('lock_timeout', %s, true)", ("30s",)
+            )
+            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            yield conn
 
     async def store_identity_prototype_on_connection(
         self,
@@ -267,42 +303,50 @@ class VectorStore:
         embedding: Sequence[float],
         decision: ResolutionDecision,
         observation_key: str,
+        spatial: SpatialEvidence | None = None,
     ) -> None:
-        """Publishes an unseen LI-ESKG identity before downstream sink work."""
+        """Publishes signed prototype evidence before downstream sink work."""
+        if decision.entity_id is None or decision.licorne_identity_id is None:
+            raise VectorSearchError("unseen identity prototype is incomplete")
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality = normalize_embedding_modality(modality)
+        embedding = self._validate_embedding(embedding)
+        value: dict[str, JsonValue] = {
+            "entity_id": decision.entity_id,
+            "licorne_identity_id": str(decision.licorne_identity_id),
+            "modality": modality,
+            "embedding": list(embedding),
+            "observation_key": observation_key,
+            "latitude": spatial.latitude if spatial is not None else None,
+            "longitude": spatial.longitude if spatial is not None else None,
+            "accuracy_meters": spatial.accuracy_meters
+            if spatial is not None
+            else 0.0,
+        }
         async with protected_gol_state_effect(
             operation="write",
             tenant_id=tenant_id,
             destination="identity_state",
             purpose="identity_resolution",
-            derived=True,
-            instance_id=str(decision.entity_id),
-            proposal={
-                "entity_id": decision.entity_id,
-                "licorne_identity_id": decision.licorne_identity_id,
-                "modality": modality,
-                "embedding": list(embedding),
-                "observation_key": observation_key,
-            },
-        ):
-            if (
-                decision.entity_id is None
-                or decision.licorne_identity_id is None
-            ):
+            instance_id=decision.entity_id,
+            proposal=value,
+        ) as receipt:
+            if not receipt:
                 raise VectorSearchError(
-                    "unseen identity prototype is incomplete"
+                    "Identity prototype provenance unavailable"
                 )
-            tenant_id = normalize_tenant_id(tenant_id)
-            modality = normalize_embedding_modality(modality)
             await self._ensure_vector_registration(connection)
             cursor = await connection.execute(
                 """
                 INSERT INTO identity_prototypes (
                     tenant_id, entity_id, licorne_identity_id, modality,
-                    embedding, observation_key
-                ) VALUES (%s, %s, %s, %s, %s::vector, %s)
+                    embedding, observation_key, gol_value, gol_receipt
+                ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s::jsonb, %s)
                 ON CONFLICT (tenant_id, entity_id) DO UPDATE
                 SET embedding = EXCLUDED.embedding,
-                    observation_key = EXCLUDED.observation_key
+                    observation_key = EXCLUDED.observation_key,
+                    gol_value = EXCLUDED.gol_value,
+                    gol_receipt = EXCLUDED.gol_receipt
                 WHERE identity_prototypes.licorne_identity_id =
                       EXCLUDED.licorne_identity_id
                   AND identity_prototypes.modality = EXCLUDED.modality
@@ -315,6 +359,8 @@ class VectorStore:
                     modality,
                     self._validate_embedding(embedding),
                     observation_key,
+                    orjson.dumps(value).decode(),
+                    receipt,
                 ),
             )
             if await cursor.fetchone() is None:
@@ -337,127 +383,79 @@ class VectorStore:
         *,
         connection: AsyncConnection[TupleRow] | None = None,
     ) -> list[IdentityCandidate]:
-        """Retrieves unique vector candidates with stable IDs and latest points."""
-        async with protected_gol_state_effect(
+        """Ranks only values whose signed provenance and live read routes pass."""
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality_key = normalize_embedding_modality(modality)
+        target = make_gol_state_effect(
             operation="read",
             tenant_id=tenant_id,
             destination="identity_state",
             purpose="identity_resolution",
-        ):
-            tenant_id = normalize_tenant_id(tenant_id)
-            modality_key = normalize_embedding_modality(modality)
-            validated_vector = self._validate_embedding(embedding)
-            limit = max(int(top_k), 1)
-            oversampled_limit = min(limit * 4, 1024)
-            query = sql.SQL("""
-                WITH stored AS (
-                    SELECT entity_id,
-                           1.0 - (embedding <=> %s::vector) AS similarity,
-                           modality
-                    FROM entity_embeddings
-                    WHERE tenant_id = %s AND modality = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                ), prototypes AS (
-                    SELECT entity_id,
-                           1.0 - (embedding <=> %s::vector) AS similarity,
-                           modality
-                    FROM identity_prototypes
-                    WHERE tenant_id = %s AND modality = %s
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                ), nearest AS (
-                    SELECT * FROM stored
-                    UNION ALL
-                    SELECT * FROM prototypes
-                ), deduplicated AS (
-                    SELECT DISTINCT ON (entity_id)
-                           entity_id, similarity, modality
-                    FROM nearest
-                    ORDER BY entity_id, similarity DESC
+        ).target
+        vector = self._validate_embedding(embedding)
+        if not all(math.isfinite(value) for value in vector):
+            raise VectorSearchError("Invalid identity vector")
+        if not 1 <= top_k <= 256:
+            raise VectorSearchError("Invalid identity candidate limit")
+        if connection is None:
+            async with self._client.tenant_connection(tenant_id) as conn:
+                return await self.find_resolution_candidates(
+                    vector, modality_key, tenant_id, top_k, connection=conn
                 )
-                SELECT candidate.entity_id,
-                       candidate.similarity,
-                       candidate.modality,
-                       COALESCE(
-                           prototype.licorne_identity_id,
-                           link.licorne_identity_id
-                       ),
-                       ST_Y(latest.geom),
-                       ST_X(latest.geom),
-                       COALESCE(
-                           (latest.state_value->>'accuracy_meters')::double precision,
-                           0.0
-                       )
-                FROM deduplicated AS candidate
-                LEFT JOIN identity_links AS link
-                  ON link.tenant_id = %s
-                 AND link.entity_id = candidate.entity_id
-                LEFT JOIN identity_prototypes AS prototype
-                  ON prototype.tenant_id = %s
-                 AND prototype.entity_id = candidate.entity_id
-                LEFT JOIN LATERAL (
-                    SELECT state.geom, state.state_value
-                    FROM entity_states AS state
-                    WHERE state.tenant_id = %s
-                      AND state.entity_id = candidate.entity_id
-                      AND state.geom IS NOT NULL
-                    ORDER BY state.event_time DESC
-                    LIMIT 1
-                ) AS latest ON TRUE
-                ORDER BY candidate.similarity DESC
-                LIMIT %s
-            """)
-            params = (
-                validated_vector,
-                tenant_id,
-                modality_key,
-                validated_vector,
-                oversampled_limit,
-                validated_vector,
-                tenant_id,
-                modality_key,
-                validated_vector,
-                oversampled_limit,
-                tenant_id,
-                tenant_id,
-                tenant_id,
-                limit,
-            )
-
-            async def query_on_connection(
-                conn: AsyncConnection[TupleRow],
-            ) -> list[tuple[object, ...]]:
-                await self._ensure_vector_registration(conn)
-                async with conn.pipeline():
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            "SELECT set_config('statement_timeout', %s, true)",
-                            (f"{self._statement_timeout_ms()}ms",),
+        # Never let an unauthorized row enter a SQL ranking, join, or LIMIT.
+        cursor = await connection.execute(
+            """
+            SELECT entity_id, gol_value, gol_receipt
+            FROM identity_prototypes
+            WHERE tenant_id = %s AND modality = %s
+              AND gol_value IS NOT NULL AND gol_receipt IS NOT NULL
+            ORDER BY entity_id
+            LIMIT 4097
+            """,
+            (tenant_id, modality_key),
+        )
+        rows = await cursor.fetchall()
+        if len(rows) > 4096:
+            raise VectorSearchError("Identity candidate budget exceeded")
+        candidates = []
+        for entity_id, value, receipt in rows:
+            if not isinstance(value, dict) or not isinstance(receipt, str):
+                raise VectorSearchError("Identity provenance unavailable")
+            try:
+                async with protected_gol_effect(
+                    operation="read",
+                    target=target,
+                    tenant_id=tenant_id,
+                    destination="identity_state",
+                    purpose="identity_resolution",
+                    instance_id=str(entity_id),
+                    proposal=value,
+                    receipt=receipt,
+                ):
+                    prototype = _PrototypeValue.model_validate(value)
+                    if prototype.entity_id != entity_id:
+                        raise VectorSearchError("Identity provenance mismatch")
+                    if prototype.modality != modality_key:
+                        raise VectorSearchError("Identity modality mismatch")
+                    identity = int(prototype.licorne_identity_id)
+                    if not 0 < identity < (1 << 63):
+                        raise VectorSearchError("Invalid identity prototype")
+                    stored = self._validate_embedding(prototype.embedding)
+                    candidates.append(
+                        IdentityCandidate(
+                            entity_id=str(entity_id),
+                            similarity=_cosine_similarity(vector, stored),
+                            modality=modality_key,
+                            licorne_identity_id=identity,
+                            latitude=prototype.latitude,
+                            longitude=prototype.longitude,
+                            accuracy_meters=prototype.accuracy_meters,
                         )
-                        await cur.execute(query, params)
-                        return await cur.fetchall()
-
-            if connection is None:
-                async with self._client.tenant_connection(tenant_id) as conn:
-                    rows = await query_on_connection(conn)
-            else:
-                rows = await query_on_connection(connection)
-
-            return [
-                IdentityCandidate(
-                    entity_id=str(row[0]),
-                    similarity=float(row[1]),
-                    modality=str(row[2]),
-                    licorne_identity_id=(
-                        int(row[3]) if row[3] is not None else None
-                    ),
-                    latitude=float(row[4]) if row[4] is not None else None,
-                    longitude=float(row[5]) if row[5] is not None else None,
-                    accuracy_meters=float(row[6] or 0.0),
-                )
-                for row in rows
-            ]
+                    )
+            except GolDenied:
+                logger.info("identity.candidate.denied")
+        candidates.sort(key=lambda item: (-item.similarity, item.entity_id))
+        return candidates[:top_k]
 
     async def has_embeddings(
         self,

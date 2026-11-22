@@ -342,6 +342,7 @@ async def resolve_entities_batch(
                                 embedding=padded_vector,
                                 decision=decision,
                                 observation_key=observation_key,
+                                spatial=spatial,
                             )
                         )
             else:

@@ -6,7 +6,7 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -221,11 +221,39 @@ def test_provider_preserves_identity_kind_and_emits_finite_evidence() -> None:
     candidates = provider.generate_candidates([observation], object())
     factors = provider.emit_factors([observation], candidates, object())
 
-    assert candidates[0][0].identity_id == 42
+    assert candidates[0][0].key == "person-linked"
     assert candidates[0][1].key == "person-host"
     assert factors[0].cardinalities == [4]
     assert len(factors[0].contributions or []) == 2
     assert factors[0].log_potentials[0] > factors[0].log_potentials[1]
+
+
+@pytest.mark.anyio
+async def test_native_state_is_not_reused_between_calculations() -> None:
+    """Native caches must not retain evidence omitted by a later projection."""
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=_licorne(),
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-a",
+        observation_key="first",
+        source="source",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.9,
+        candidates=(),
+    )
+    first = await runtime.resolve(request)
+    assert runtime._resolver is None
+    assert not runtime._providers
+    second = await runtime.resolve(
+        replace(request, tenant_id="tenant-b", observation_key="second")
+    )
+    assert first.entity_id != second.entity_id
+    assert runtime._resolver is None
+    assert not runtime._providers
+    await runtime.close()
 
 
 @pytest.mark.anyio
@@ -249,8 +277,13 @@ async def test_actor_runtime_correlates_native_decision_and_h3_cell() -> None:
     decision = await runtime.resolve(request)
     await runtime.close()
 
-    assert decision.entity_id == "licorne_0000000000000007"
-    assert decision.licorne_identity_id == 7
+    expected_id = (
+        _stable_u64(request.tenant_id, request.observation_key)
+        & ((1 << 63) - 1)
+        or 1
+    )
+    assert decision.entity_id == f"licorne_{expected_id:016x}"
+    assert decision.licorne_identity_id == expected_id
     assert decision.selected_probability == 0.91
     assert decision.h3_cell is not None
     assert decision.final_version == 13
@@ -371,6 +404,10 @@ def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
         patch(
             "galadril_vision.identity.licorne.make_gol_state_effect",
             new=_unit_state_effect,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.scoped_instance_id",
+            side_effect=lambda local: local,
         ),
     ):
         yield

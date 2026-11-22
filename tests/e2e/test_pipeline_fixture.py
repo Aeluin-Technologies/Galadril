@@ -40,7 +40,7 @@ def test_resolvers_name_their_gol_state_contract() -> None:
     for step in resolvers:
         assert (
             step.params.model_dump().get("gol_state_symbol_key")
-            == "e2e.lifecycle::E2EEntity"
+            == "e2e.lifecycle::IdentityPrototype"
         )
 
 

@@ -27,6 +27,7 @@ from galadril_vision.connectors.postgres.vector import (
 from galadril_vision.identity.contracts import (
     ResolutionDecision,
     ResolutionRequest,
+    SpatialEvidence,
 )
 
 
@@ -252,6 +253,7 @@ class TestTasksDatabasePipelines:
                 embedding: Sequence[float],
                 decision: ResolutionDecision,
                 observation_key: str,
+                spatial: SpatialEvidence | None = None,
             ) -> None:
                 assert connection is not None
                 assert tenant_id == "acme"
