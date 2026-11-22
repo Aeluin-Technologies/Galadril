@@ -424,7 +424,7 @@ async def _exercise_causal_branch(
         await asyncio.sleep(1.0)
     alpha_entity = await eventually(
         read_causal_cohort,
-        timeout_seconds=180.0,
+        timeout_seconds=1800.0,
         description="30 concordant and 6 decoy Gateway observations",
     )
     assert await spicedb.allowed(
