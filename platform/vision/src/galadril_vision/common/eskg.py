@@ -23,7 +23,7 @@ def eskg_write_effect(
         target=target,
         destination="eskg",
         purpose="persistence",
-        instance_id=scoped_instance_id(local_id),
+        instanceId=scoped_instance_id(local_id),
         proposal={
             name: str(value) if type(value) is int else value
             for name, value in proposal.items()

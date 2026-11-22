@@ -883,23 +883,25 @@ async def sink_to_db_batch(
             event_type=EventType.from_str(event_type)
             if event_type
             else EventType.OBSERVATION,
-            properties={
-                "document_evidence": _document_evidence(raw_payload),
-                "source_metadata": source_metadata(raw_payload),
-                "gol_symbol_key": gol_event_symbol_key,
-                "gol_value": event_value,
-                "source": source or "unknown",
-                "record_id": record_id,
-                "modality": modality,
-                "h3_cell": next(
-                    (
-                        item["h3_cell"]
-                        for item in batch
-                        if item.get("h3_cell") is not None
+            properties=_GOL_VALUE.validate_python(
+                {
+                    "document_evidence": _document_evidence(raw_payload),
+                    "source_metadata": source_metadata(raw_payload),
+                    "gol_symbol_key": gol_event_symbol_key,
+                    "gol_value": event_value,
+                    "source": source or "unknown",
+                    "record_id": record_id,
+                    "modality": modality,
+                    "h3_cell": next(
+                        (
+                            item["h3_cell"]
+                            for item in batch
+                            if item.get("h3_cell") is not None
+                        ),
+                        None,
                     ),
-                    None,
-                ),
-            },
+                }
+            ),
             timestamp=_event_datetime(event_time),
             location_coords=[parsed_spatial.latitude, parsed_spatial.longitude]
             if parsed_spatial
@@ -920,7 +922,7 @@ async def sink_to_db_batch(
                 target=gol_event_symbol_key,
                 destination="eskg",
                 purpose="persistence",
-                instance_id=event_id,
+                instanceId=event_id,
                 proposal=event_value,
             )
         )
@@ -1017,7 +1019,7 @@ async def sink_to_db_batch(
                         target=target,
                         destination="eskg",
                         purpose="persistence",
-                        instance_id=entity_id,
+                        instanceId=entity_id,
                         proposal=value,
                     ),
                     GraphStore.edge_write_effect(edge, gol_edge_symbol_key),
@@ -1090,7 +1092,6 @@ async def sink_to_db_batch(
             pg_client.tenant_connection(batch_tenant_id) as conn,
             conn.transaction(),
         ):
-            await graph_store.prepare_connection(conn)
             for observation in observations:
                 event = observation.event
                 event.properties["gol_receipt"] = issued[

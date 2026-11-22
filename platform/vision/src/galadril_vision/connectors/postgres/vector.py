@@ -550,7 +550,7 @@ class VectorStore:
                 "tenant_id": normalize_tenant_id(record.tenant_id),
                 "entity_id": entity_id,
                 "modality": normalize_embedding_modality(record.modality),
-                "embedding": record.vector,
+                "embedding": cast(list[JsonValue], record.vector),
             },
         )
 
@@ -574,7 +574,7 @@ class VectorStore:
             value: dict[str, JsonValue] = {
                 "entity_id": entity_id,
                 "modality": modality,
-                "embedding": vector,
+                "embedding": cast(list[JsonValue], vector),
                 "metadata": metadata,
             }
             if gol_target:

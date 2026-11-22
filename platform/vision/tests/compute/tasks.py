@@ -384,9 +384,8 @@ class TestTasksDatabasePipelines:
             mock_conn
         )
 
-        mock_v_store = AsyncMock()
-        mock_g_store = AsyncMock()
-        mock_g_store.prepare_connection = AsyncMock()
+        mock_v_store = AsyncMock(spec_set=VectorStore)
+        mock_g_store = AsyncMock(spec_set=GraphStore)
         mock_g_store.insert_event_on_connection = AsyncMock()
         mock_g_store.ensure_vertex_on_connection = AsyncMock()
         mock_g_store.create_edge_on_connection = AsyncMock()
