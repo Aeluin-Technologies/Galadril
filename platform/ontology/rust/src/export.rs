@@ -367,8 +367,8 @@ impl ProjectExporter<'_> {
         build::submit(
             self,
             &document,
-            &request.projection.root,
-            proposal,
+            &request.projection.root.access,
+            build::Proposal::Projection(proposal),
             runtime,
             provider,
             business,
@@ -379,7 +379,7 @@ impl ProjectExporter<'_> {
 }
 
 impl<R: crate::archive::RangeReader + Sync> crate::archive::ArchiveReader<R> {
-    /// Validates a business instance using separately authorized schema
+    /// Validates a replacement instance using separately authorized schema
     /// metadata. Metadata permissions cannot stand in for the instance's
     /// write permissions.
     pub async fn validate_proposal_for(
@@ -405,17 +405,14 @@ impl<R: crate::archive::RangeReader + Sync> crate::archive::ArchiveReader<R> {
             return Err(ExportError::Unavailable);
         }
         let document = self.export_schema(request, runtime, provider).await?;
-        let selection = Selection::new(
-            Access {
-                route: write.route.clone(),
-                instance: write.instance.clone(),
-                destination: write.destination.clone(),
-                purpose: write.purpose.clone(),
-            },
-            root.fields.clone(),
-        )?;
         build::submit(
-            self, &document, &selection, proposal, runtime, provider, business,
+            self,
+            &document,
+            write,
+            build::Proposal::Replacement(proposal),
+            runtime,
+            provider,
+            business,
         )
         .await
         .map_err(record_error)
@@ -446,8 +443,8 @@ impl<R: crate::archive::RangeReader + Sync> crate::archive::ArchiveReader<R> {
         build::submit(
             self,
             &document,
-            &request.projection.root,
-            proposal,
+            &request.projection.root.access,
+            build::Proposal::Projection(proposal),
             runtime,
             provider,
             business,

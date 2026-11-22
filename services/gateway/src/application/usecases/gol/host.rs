@@ -62,11 +62,28 @@ fn ingress_floor<'a>(
     floors.get(&format!("{tenant}/{group}"))
 }
 
+/// Matches the private worker transport's IEEE-754 values and exact integers.
+fn worker_json_options() -> ExportOptions {
+    ExportOptions {
+        integers: IntegerEncoding::DecimalStrings,
+        allow_float_rounding: true,
+        ..ExportOptions::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use galadril_ontology::Classification;
 
     use super::*;
+
+    #[test]
+    fn worker_json_representation_accepts_native_floats_and_exact_integers() {
+        let options = worker_json_options();
+        assert!(options.allow_float_rounding);
+        assert_eq!(options.integers, IntegerEncoding::DecimalStrings);
+        assert!(!ExportOptions::default().allow_float_rounding);
+    }
 
     #[test]
     fn ingress_floor_requires_the_exact_tenant_and_group() {
@@ -406,10 +423,7 @@ impl GolService {
                 backend.metadata_access(&request.tenant_id, target.clone())?,
                 fields.clone(),
             )?;
-            let options = ExportOptions {
-                integers: IntegerEncoding::DecimalStrings,
-                ..ExportOptions::default()
-            };
+            let options = worker_json_options();
             let mappings = galadril_registry::gol::registered_json_mappings()?;
             if let Ok(document) = lease
                 .archive
@@ -975,10 +989,7 @@ impl GolService {
                     metadata,
                     data: prepared,
                 };
-                let options = ExportOptions {
-                    integers: IntegerEncoding::DecimalStrings,
-                    ..ExportOptions::default()
-                };
+                let options = worker_json_options();
                 let mappings =
                     galadril_registry::gol::registered_json_mappings()?;
                 lease

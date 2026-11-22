@@ -26,7 +26,7 @@ use galadril_ontology::authorization::{
 };
 use galadril_ontology::export::{
     ExportError, ExportRequest, ExternalMappings, IntegerEncoding,
-    ProjectExporter, SchemaPart,
+    ProjectExporter, Projection, SchemaPart, Selection,
 };
 use serde_json::json;
 
@@ -766,6 +766,114 @@ async fn structured_assignments_need_child_write_enforcement()
         Err(ExportError::WriteDenied)
     );
     assert!(!business.0.load(Ordering::Relaxed));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_worker_proposal_uses_the_concrete_write_access()
+-> fixture::base::TestResult {
+    let source = galadril_ontology::syntax::parse_source(
+        "worker.gol",
+        r#"ontology sample.worker version "1.0.0" {
+            entity Profile {
+                field title: String;
+                field revision: u64;
+                field embedding: List<f64>;
+                field offset: Option<f64>;
+                field nickname: OptionalName;
+            }
+            type OptionalName = Option<String>;
+            access OptionalName {
+                resource: "company_record";
+                permission read_meta { relation: "view"; cedar: "Domain::Action::\"optionalName\""; }
+            }
+            access Profile {
+                resource: "company_record";
+                permission read_meta { relation: "view"; cedar: "Domain::Action::\"profile\""; }
+                permission export_meta { relation: "export"; cedar: "Domain::Action::\"exportProfile\""; }
+                permission write_profile { relation: "edit"; cedar: "Domain::Action::\"writeProfile\""; }
+            }
+        }"#,
+    )?;
+    let types = galadril_ontology::ExternalTypeRegistry::default();
+    let project = galadril_ontology::semantic::analyze_project(
+        &[source],
+        &galadril_ontology::semantic::Environment::new(&types),
+    )?;
+    let environment = fixture::environment(&project)?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let exporter = ProjectExporter::new(&project, &environment)?;
+    let runtime = fixture::base::runtime(exporter.contract());
+    let provider = Rebac(AtomicBool::new(true));
+    let describe = || {
+        fixture::base::access(
+            &project,
+            "Profile",
+            None,
+            "schema",
+            Operation::Describe,
+        )
+    };
+    let projection = Projection::new(Selection::new(
+        describe()?,
+        ["title", "revision", "embedding"]
+            .map(str::parse)
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?,
+    )?);
+    let partial =
+        Projection::new(Selection::new(describe()?, ["title".parse()?])?);
+    let request = ExportRequest {
+        projection: &projection,
+        part: SchemaPart::Value,
+        options: &ExportOptions {
+            allow_float_rounding: true,
+            integers: IntegerEncoding::DecimalStrings,
+            ..ExportOptions::default()
+        },
+        mappings: &ExternalMappings::default(),
+    };
+    let write = fixture::base::access(
+        &project,
+        "Profile",
+        None,
+        "profile_1",
+        Operation::Write,
+    )?;
+    let business = Business(AtomicBool::new(false));
+    assert_eq!(
+        reader
+            .validate_proposal_for(
+                &ExportRequest {
+                    projection: &partial,
+                    ..request
+                },
+                &json!({"title":"example"}),
+                &write,
+                &runtime,
+                &provider,
+                &business,
+            )
+            .await,
+        Err(ExportError::InvalidJson)
+    );
+    assert!(!business.0.load(Ordering::Relaxed));
+    reader
+        .validate_proposal_for(
+            &request,
+            &json!({
+                "title": "example",
+                "revision": u64::MAX.to_string(),
+                "embedding": [0.25, 0.5]
+            }),
+            &write,
+            &runtime,
+            &provider,
+            &business,
+        )
+        .await?;
+    assert!(business.0.load(Ordering::Relaxed));
     Ok(())
 }
 

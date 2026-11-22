@@ -138,6 +138,18 @@ the root and the binding's owning pipeline, then uses the common sparse reader
 and compiled security contract to admit metadata and data access. The RPC and
 the manifest candidate list are private backend interfaces.
 
+Vision sends GOL floating-point values as JSON numbers and integers as exact
+decimal strings. Gateway uses this representation for worker schema projection
+and authorized proposal validation, including for fields inside lists and
+optional types. A worker write uses the instance's own write authority. It must
+provide all required fields of the canonical GOLC value, including any fields
+outside the requested metadata projection.
+
+An admitted write batch fixes its effects before the transaction begins.
+The ESKG sink currently admits the event and entity writes in that batch.
+Edges, state snapshots and embeddings also need typed proposals admitted
+before the transaction can complete.
+
 Every GOL RPC additionally requires the Gateway-only credential loaded from
 `REGISTRY_GATEWAY_KEY_PATH` or the client's explicit `gateway_key_file`.
 Missing credentials leave those RPCs unavailable, including on the local
