@@ -149,6 +149,20 @@ An admitted write batch fixes its effects before the transaction begins.
 The ESKG sink prepares typed proposals for the event, entities, edges, states,
 and embeddings before opening the transaction.
 
+New effect receipts carry signed worker lineage, including the original actor,
+raw object revision, and immutable pipeline and ontology pins. Receipt version
+3 encodes repeated dependency fields once under the existing 64 KiB transport
+limit. Version 2 receipts still verify their value binding and can inform
+authorized reads. They lack the origin evidence required for re-admission.
+
+Vision can submit a receipt as lineage on the authenticated worker channel.
+Gateway checks the actor, raw object and pipeline again before issuing a bounded
+admission scoped to the requested command's published block. The calculation
+starts from the receipt's IFC label, and opening its contract rechecks the
+signed dependencies. The worker receipt and provenance fields are stripped from
+generic graph and search projections. A durable completed result still requires
+its original live release scope for replay.
+
 Every GOL RPC additionally requires the Gateway-only credential loaded from
 `REGISTRY_GATEWAY_KEY_PATH` or the client's explicit `gateway_key_file`.
 Missing credentials leave those RPCs unavailable, including on the local

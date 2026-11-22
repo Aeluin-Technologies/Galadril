@@ -1,7 +1,8 @@
 //! Authenticate durable IFC provenance without persisting authorization
 //! decisions.
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
 use anyhow::{Context, Result, ensure};
@@ -11,7 +12,7 @@ use galadril_ontology::Reference;
 use galadril_ontology::archive::remote::Generation;
 use galadril_ontology::authorization::{Flow, Operation};
 use ring::hmac;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -20,6 +21,7 @@ const MAX_RECEIPT_TOKEN_BYTES: usize = 64 * 1024;
 // The worker accepts 64 KiB on the wire, including the 43-byte encoded
 // SHA-256 tag and its separator.
 const MAX_RECEIPT_BYTES: usize = (MAX_RECEIPT_TOKEN_BYTES - 44) / 4 * 3;
+const MAX_DEPENDENCIES: usize = 1024;
 
 /// Persisted provenance retains revocable obligations, rather than decisions.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -32,6 +34,93 @@ pub(super) struct Dependency {
     pub operation: Operation,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndexedDependencies<T> {
+    strings: Vec<T>,
+    rows: Vec<(u16, u16, u16, u16, Operation)>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DependenciesWire {
+    Indexed(IndexedDependencies<String>),
+    Legacy(BTreeSet<Dependency>),
+}
+
+/// Interns repeated fields without dropping the individual live obligations.
+fn serialize_dependencies<S: Serializer>(
+    dependencies: &BTreeSet<Dependency>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut keys = BTreeMap::new();
+    let mut dictionary = IndexedDependencies {
+        strings: Vec::new(),
+        rows: Vec::with_capacity(dependencies.len()),
+    };
+    let mut index = |value| match keys.entry(value) {
+        Entry::Occupied(entry) => Ok(*entry.get()),
+        Entry::Vacant(entry) => {
+            let id = u16::try_from(dictionary.strings.len())
+                .map_err(serde::ser::Error::custom)?;
+            dictionary.strings.push(value);
+            Ok(*entry.insert(id))
+        },
+    };
+    for dependency in dependencies {
+        dictionary.rows.push((
+            index(dependency.ontology.as_str())?,
+            index(dependency.target.as_str())?,
+            index(dependency.instance_id.as_str())?,
+            index(dependency.revision.as_str())?,
+            dependency.operation,
+        ));
+    }
+    dictionary.serialize(serializer)
+}
+
+fn deserialize_dependencies<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeSet<Dependency>, D::Error> {
+    match DependenciesWire::deserialize(deserializer)? {
+        DependenciesWire::Legacy(dependencies)
+            if dependencies.len() <= MAX_DEPENDENCIES =>
+        {
+            Ok(dependencies)
+        },
+        DependenciesWire::Indexed(indexed)
+            if indexed.rows.len() <= MAX_DEPENDENCIES &&
+                indexed.strings.len() <= 4 * indexed.rows.len() =>
+        {
+            let read = |key| {
+                indexed.strings.get(usize::from(key)).cloned().ok_or_else(
+                    || {
+                        serde::de::Error::custom(
+                            "Invalid GOL dependency reference",
+                        )
+                    },
+                )
+            };
+            indexed
+                .rows
+                .into_iter()
+                .map(|(ontology, target, instance, revision, operation)| {
+                    Ok(Dependency {
+                        ontology: read(ontology)?,
+                        target: read(target)?,
+                        instance_id: read(instance)?,
+                        revision: read(revision)?,
+                        operation,
+                    })
+                })
+                .collect()
+        },
+        _ => Err(serde::de::Error::custom(
+            "GOL provenance exceeds dependency limit",
+        )),
+    }
+}
+
 pub(super) struct ReceiptScope<'a> {
     pub tenant: &'a str,
     pub target: &'a Reference,
@@ -39,6 +128,21 @@ pub(super) struct ReceiptScope<'a> {
     pub generation: &'a str,
     pub source_revision: &'a str,
     pub dependencies: &'a BTreeSet<Dependency>,
+    pub lineage: Option<&'a LineageOrigin>,
+}
+
+/// Authenticates the origin needed to request a new calculation after restart.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LineageOrigin {
+    pub issuer: String,
+    pub subject_id: String,
+    pub source_object_id: String,
+    pub source_revision: String,
+    pub source_marker: [u8; 32],
+    pub pipeline_id: String,
+    pub pipeline_revision_id: String,
+    pub pins: BTreeMap<String, String>,
 }
 
 /// The signature authenticates a label and value binding, never an Allow.
@@ -52,6 +156,12 @@ pub(super) struct LabelReceipt {
     pub generation: String,
     pub source_revision: String,
     pub flow: Flow,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<LineageOrigin>,
+    #[serde(
+        serialize_with = "serialize_dependencies",
+        deserialize_with = "deserialize_dependencies"
+    )]
     pub dependencies: BTreeSet<Dependency>,
     value_sha256: [u8; 32],
 }
@@ -84,18 +194,20 @@ impl ReceiptSigner {
                 !scope.instance_id.is_empty() &&
                 scope.instance_id.len() <= 1024 &&
                 !scope.source_revision.is_empty() &&
-                scope.source_revision.len() <= 128,
+                scope.source_revision.len() <= 128 &&
+                scope.dependencies.len() <= MAX_DEPENDENCIES,
             "Invalid GOL provenance scope"
         );
         scope.generation.parse::<Generation>()?;
         let receipt = LabelReceipt {
-            format: 2,
+            format: 3,
             tenant: scope.tenant.to_owned(),
             target: scope.target.clone(),
             instance_id: scope.instance_id.to_owned(),
             generation: scope.generation.to_owned(),
             source_revision: scope.source_revision.to_owned(),
             flow: flow.clone(),
+            lineage: scope.lineage.cloned(),
             dependencies: scope.dependencies.clone(),
             value_sha256: value_hash(value)?,
         };
@@ -122,6 +234,40 @@ impl ReceiptSigner {
         instance_id: &str,
         value: &Value,
     ) -> Result<LabelReceipt> {
+        let receipt = self.authenticate(token, tenant)?;
+        ensure!(
+            receipt.instance_id == instance_id &&
+                receipt.value_sha256 == value_hash(value)?,
+            "GOL provenance unavailable"
+        );
+        Ok(receipt)
+    }
+
+    /// Certifies provenance for re-admission. Reading the value still needs
+    /// the exact proposal, its receipt, and a live read permit.
+    pub fn verify_lineage(
+        &self,
+        token: &str,
+        tenant: &str,
+        source: &str,
+        pipeline: &str,
+        revision: &str,
+    ) -> Result<LabelReceipt> {
+        let receipt = self.authenticate(token, tenant)?;
+        let origin = receipt
+            .lineage
+            .as_ref()
+            .context("GOL lineage unavailable")?;
+        ensure!(
+            origin.source_object_id == source &&
+                origin.pipeline_id == pipeline &&
+                origin.pipeline_revision_id == revision,
+            "GOL lineage scope rejected"
+        );
+        Ok(receipt)
+    }
+
+    fn authenticate(&self, token: &str, tenant: &str) -> Result<LabelReceipt> {
         ensure!(
             token.len() <= MAX_RECEIPT_TOKEN_BYTES,
             "GOL provenance unavailable"
@@ -144,10 +290,7 @@ impl ReceiptSigner {
         let receipt: LabelReceipt = serde_json::from_slice(&bytes)
             .context("GOL provenance unavailable")?;
         ensure!(
-            receipt.format == 2 &&
-                receipt.tenant == tenant &&
-                receipt.instance_id == instance_id &&
-                receipt.value_sha256 == value_hash(value)?,
+            matches!(receipt.format, 2 | 3) && receipt.tenant == tenant,
             "GOL provenance unavailable"
         );
         receipt.generation.parse::<Generation>()?;

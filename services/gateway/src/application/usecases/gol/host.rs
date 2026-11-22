@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
+use chrono::Timelike as _;
 use galadril_ontology::archive::remote::RemoteArchive;
 use galadril_ontology::authorization::{
     Access, Decision, Flow, Instance, Operation, Route,
@@ -21,12 +22,12 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-use super::admission::{Admission, VerifiedInput};
+use super::admission::{Actor, Admission, VerifiedInput};
 use super::effect_scope::Permits;
-use super::receipts::{Dependency, ReceiptScope};
+use super::receipts::{Dependency, LineageOrigin, ReceiptScope};
 use super::runtime::{
-    BeginEffects, EffectRequest, EffectResponse, RuntimeError, RuntimeLease,
-    RuntimeRequest, RuntimeSymbol,
+    BeginEffects, EffectRequest, EffectResponse, ResumeRequest,
+    ResumeResponse, RuntimeError, RuntimeLease, RuntimeRequest, RuntimeSymbol,
 };
 use super::{GolService, owner, resolve, snapshot, symbol};
 use crate::application::usecases::authorization::{Permission, QueryContext};
@@ -50,7 +51,16 @@ struct Worker {
     leases: Mutex<BTreeMap<String, Arc<Lease>>>,
     dependencies: Mutex<BTreeSet<Dependency>>,
     pins: Mutex<BTreeMap<String, String>>,
+    source_marker: [u8; 32],
+    resume: Option<ResumedScope>,
     expires: Instant,
+}
+
+struct ResumedScope {
+    key: [u8; 32],
+    pipeline: String,
+    revision: String,
+    block: String,
 }
 
 /// Selects the deployment floor for one verified tenant and upload group.
@@ -185,6 +195,8 @@ impl GolService {
                     operation: Operation::Read,
                 }])),
                 pins: Mutex::new(BTreeMap::new()),
+                source_marker: Sha256::digest(token.as_bytes()).into(),
+                resume: None,
                 expires: now
                     .checked_add(Duration::from_secs(900))
                     .context("GOL runtime unavailable")?,
@@ -254,6 +266,123 @@ impl GolService {
             })
     }
 
+    pub(crate) async fn runtime_resume(
+        &self,
+        request: ResumeRequest,
+    ) -> Result<ResumeResponse, RuntimeError> {
+        let mut phase = "lineage";
+        self.resume_worker(request, &mut phase)
+            .await
+            .map(|admission| ResumeResponse { admission })
+            .map_err(|_| {
+                tracing::warn!(event.name = "gol.worker.resume.denied", phase);
+                RuntimeError::Denied
+            })
+    }
+
+    async fn resume_worker(
+        &self,
+        request: ResumeRequest,
+        phase: &mut &'static str,
+    ) -> Result<String> {
+        ensure!(
+            !request.block_id.is_empty() && request.block_id.len() <= 128,
+            "GOL lineage scope rejected"
+        );
+        let backend = self.backend()?;
+        let receipt = backend
+            .signer
+            .as_ref()
+            .context("GOL provenance unavailable")?
+            .verify_lineage(
+                &request.lineage,
+                &request.tenant_id,
+                &request.source_object_id,
+                &request.pipeline_id,
+                &request.pipeline_revision_id,
+            )?;
+        let origin = receipt.lineage.context("GOL lineage unavailable")?;
+        *phase = "principal_and_input";
+        let actor = self.actor(&request.tenant_id, &origin.subject_id).await?;
+        ensure!(actor.issuer.as_ref() == origin.issuer, "GOL issuer changed");
+        let input = VerifiedInput {
+            source_object_id: origin.source_object_id.into(),
+            revision: origin.source_revision.into(),
+            flow: receipt.flow.join(&backend.profile.context_floor),
+        };
+        let facts = QueryContext {
+            hour_utc: i64::from(chrono::Utc::now().hour()),
+            ..Default::default()
+        };
+        self.verify_worker_source(
+            &actor,
+            &input,
+            &origin.source_marker,
+            &facts,
+        )
+        .await?;
+        self.verify_actor_execute(&actor, &facts, &request.pipeline_id)
+            .await?;
+
+        *phase = "admission";
+        let mut key = Sha256::new();
+        key.update(request.command_id.as_bytes());
+        key.update(Sha256::digest(request.lineage.as_bytes()));
+        key.update(request.block_id.as_bytes());
+        let key: [u8; 32] = key.finalize().into();
+        let now = Instant::now();
+        let mut entries = self
+            .workers
+            .entries
+            .lock()
+            .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?;
+        entries.retain(|_, worker| now < worker.expires);
+        if let Some((token, worker)) = entries.iter().find(|(_, worker)| {
+            worker.resume.as_ref().is_some_and(|scope| scope.key == key)
+        }) {
+            ensure!(
+                !worker.invalid.load(Ordering::Acquire),
+                "GOL admission unavailable"
+            );
+            return Ok(token.clone());
+        }
+        ensure!(entries.len() < 1024, "GOL runtime capacity reached");
+        let token = self.admissions.admit(actor, input, now)?;
+        let admission = self
+            .admissions
+            .resolve(
+                &token,
+                &request.tenant_id,
+                &request.source_object_id,
+                now,
+            )?
+            .context("GOL admission unavailable")?;
+        entries.insert(
+            token.clone(),
+            Arc::new(Worker {
+                admission,
+                gate: Arc::new(AsyncMutex::new(())),
+                invalid: Arc::new(AtomicBool::new(false)),
+                facts,
+                leases: Mutex::new(BTreeMap::new()),
+                dependencies: Mutex::new(receipt.dependencies),
+                pins: Mutex::new(origin.pins),
+                source_marker: origin.source_marker,
+                resume: Some(ResumedScope {
+                    key,
+                    pipeline: request.pipeline_id,
+                    revision: request.pipeline_revision_id,
+                    block: request.block_id,
+                }),
+                expires: now
+                    .checked_add(Duration::from_secs(900))
+                    .context("GOL runtime unavailable")?,
+            }),
+        );
+        tracing::debug!(event.name = "gol.worker.resume.admitted");
+        Ok(token)
+    }
+
     async fn open_worker(
         &self,
         request: RuntimeRequest,
@@ -264,11 +393,18 @@ impl GolService {
             &request.tenant_id,
             &request.source_object_id,
         )?;
+        if let Some(scope) = &worker.resume {
+            ensure!(
+                scope.pipeline == request.pipeline_id &&
+                    scope.revision == request.pipeline_revision_id &&
+                    scope.block == request.block_id,
+                "GOL lineage scope rejected"
+            );
+        }
         *phase = "boundary";
         let _boundary = self.worker_boundary(&worker).await?;
         *phase = "principal_and_input";
-        self.verify_worker(&worker, &request.admission, &request.pipeline_id)
-            .await?;
+        self.verify_worker(&worker, &request.pipeline_id).await?;
         *phase = "binding";
         let binding = self
             .registry
@@ -586,7 +722,6 @@ impl GolService {
     async fn verify_worker(
         &self,
         worker: &Worker,
-        token: &str,
         pipeline: &str,
     ) -> Result<()> {
         ensure!(
@@ -594,12 +729,27 @@ impl GolService {
                 Instant::now() < worker.expires,
             "GOL admission unavailable"
         );
-        let tenant = worker.admission.actor.tenant.as_ref();
-        let user = worker.admission.actor.subject_id.as_ref();
+        self.verify_worker_source(
+            &worker.admission.actor,
+            &worker.admission.input,
+            &worker.source_marker,
+            &worker.facts,
+        )
+        .await?;
+        self.verify_pipeline_execute(worker, pipeline).await
+    }
+
+    async fn verify_worker_source(
+        &self,
+        actor: &Actor,
+        input: &VerifiedInput,
+        source_marker: &[u8; 32],
+        facts: &QueryContext,
+    ) -> Result<()> {
+        let tenant = actor.tenant.as_ref();
+        let user = actor.subject_id.as_ref();
         self.identity.verify_user(tenant, user).await?;
-        let source = worker
-            .admission
-            .input
+        let source = input
             .source_object_id
             .strip_prefix("raw:")
             .context("GOL input unavailable")?;
@@ -614,13 +764,16 @@ impl GolService {
             .map_err(|_| anyhow::anyhow!("GOL input unavailable"))?;
         let metadata = head.metadata().context("GOL input unavailable")?;
         ensure!(
-            head.e_tag() == Some(worker.admission.input.revision.as_ref()) &&
+            head.e_tag() == Some(input.revision.as_ref()) &&
                 metadata.get("tenant").map(String::as_str) == Some(tenant) &&
                 metadata.get("owner").map(String::as_str) == Some(user) &&
                 metadata.get("authz-origin").map(String::as_str) ==
                     Some("gateway") &&
-                metadata.get("authz-gol-admission").map(String::as_str) ==
-                    Some(token),
+                metadata.get("authz-gol-admission").is_some_and(|marker| {
+                    let digest: [u8; 32] =
+                        Sha256::digest(marker.as_bytes()).into();
+                    &digest == source_marker
+                }),
             "GOL input changed"
         );
         ensure!(
@@ -631,12 +784,12 @@ impl GolService {
                     Permission::View,
                     "raw",
                     source,
-                    Some(&worker.facts)
+                    Some(facts)
                 )
                 .await?,
             "GOL input unavailable"
         );
-        self.verify_pipeline_execute(worker, pipeline).await
+        Ok(())
     }
 
     async fn verify_pipeline_execute(
@@ -644,7 +797,20 @@ impl GolService {
         worker: &Worker,
         pipeline: &str,
     ) -> Result<()> {
-        let actor = &worker.admission.actor;
+        self.verify_actor_execute(
+            &worker.admission.actor,
+            &worker.facts,
+            pipeline,
+        )
+        .await
+    }
+
+    async fn verify_actor_execute(
+        &self,
+        actor: &Actor,
+        facts: &QueryContext,
+        pipeline: &str,
+    ) -> Result<()> {
         ensure!(
             self.auth
                 .is_authorized(
@@ -653,7 +819,7 @@ impl GolService {
                     Permission::Execute,
                     "pipeline",
                     pipeline,
-                    Some(&worker.facts)
+                    Some(facts)
                 )
                 .await?,
             "GOL pipeline unavailable"
@@ -849,8 +1015,7 @@ impl GolService {
             &request.source_object_id,
         )?;
         let boundary = self.worker_boundary(&worker).await?;
-        self.verify_worker(&worker, &request.admission, &request.pipeline_id)
-            .await?;
+        self.verify_worker(&worker, &request.pipeline_id).await?;
         let lease = worker
             .leases
             .lock()
@@ -1298,6 +1463,31 @@ impl GolService {
             .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?;
         dependencies.extend(observed);
         ensure!(dependencies.len() <= 1024, "GOL provenance budget exceeded");
+        let lineage = if roots
+            .iter()
+            .any(|access| access.route.operation == Operation::Write)
+        {
+            Some(LineageOrigin {
+                issuer: actor.issuer.to_string(),
+                subject_id: actor.subject_id.to_string(),
+                source_object_id: worker
+                    .admission
+                    .input
+                    .source_object_id
+                    .to_string(),
+                source_revision: worker.admission.input.revision.to_string(),
+                source_marker: worker.source_marker,
+                pipeline_id: request.pipeline_id.clone(),
+                pipeline_revision_id: request.pipeline_revision_id.clone(),
+                pins: worker
+                    .pins
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
+                    .clone(),
+            })
+        } else {
+            None
+        };
         let receipts = request
             .effects
             .iter()
@@ -1318,6 +1508,7 @@ impl GolService {
                             generation: &request.generation_id,
                             source_revision: &lease.source_revision,
                             dependencies: &dependencies,
+                            lineage: lineage.as_ref(),
                         },
                         &flow,
                         effect

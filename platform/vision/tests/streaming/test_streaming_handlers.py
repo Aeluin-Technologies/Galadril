@@ -560,6 +560,51 @@ async def test_denied_running_lineage_can_reacquire_the_same_command() -> None:
 
 
 @pytest.mark.anyio
+async def test_causal_lineage_is_exchanged_before_dispatch() -> None:
+    class Gate(_PublicationGate):
+        async def resume(self, command: PipelineCommand) -> str:
+            assert command.lineage == "signed-lineage"
+            return "fresh-admission"
+
+        async def authorize_state(self, command: PipelineCommand) -> None:
+            assert command.admission == "fresh-admission"
+
+    config = _pipeline()
+    config.pipeline.append(
+        PipelineStep.model_validate(
+            {
+                "step": "causal",
+                "type": "causal",
+                "input_from": [],
+                "params": {"trigger": "on_demand"},
+            }
+        )
+    )
+    handler = CommandHandler(
+        routes=PipelineRouteTable(config),
+        publisher=_Publisher(),
+        dispatcher=_Dispatcher(),
+        ledger=MemoryExecutionLedger(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+        publication_gate=Gate(),
+    )
+    command = PipelineCommand.model_validate(
+        {
+            "correlation_id": uuid4(),
+            "pipeline": "vision",
+            "step": "causal",
+            "step_type": "causal",
+            "resource_class": "causal",
+            "lineage": "signed-lineage",
+        }
+    )
+    result = await handler.handle(command)
+    assert result is not None
+    assert result.admission == "fresh-admission"
+
+
+@pytest.mark.anyio
 async def test_ingress_without_authority_publishes_no_payload() -> None:
     publisher = _Publisher()
     handler = IngressHandler(

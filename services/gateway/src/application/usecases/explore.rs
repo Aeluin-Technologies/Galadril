@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use super::gol::redact_worker_provenance;
 use crate::application::ports::entity_state_store::EntityStateStore;
 use crate::application::ports::relations_store::{
     GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph, RelationsStore,
@@ -141,7 +142,7 @@ impl ExploreService {
             if ok && source_visible {
                 out.push(SearchHit {
                     entity_id: row.entity_id,
-                    metadata: row.metadata,
+                    metadata: redact_worker_provenance(row.metadata),
                 });
             }
         }
@@ -258,7 +259,7 @@ impl ExploreService {
                         None
                     },
                     properties: if administrator {
-                        n.properties
+                        redact_worker_provenance(n.properties)
                     } else {
                         serde_json::json!({})
                     },
@@ -279,7 +280,7 @@ impl ExploreService {
                     to_id: e.to_id,
                     label: e.label,
                     properties: if administrator {
-                        e.properties
+                        redact_worker_provenance(e.properties)
                     } else {
                         serde_json::json!({})
                     },
@@ -346,7 +347,7 @@ mod tests {
                             symbol_key: "operations.people::Person".into(),
                             symbol_kind: "entity".into(),
                         }),
-                        properties: serde_json::json!({"label":"private"}),
+                        properties: serde_json::json!({"label":"private", "gol_receipt":"private lineage"}),
                     },
                     GraphNode {
                         id: "visible-event".into(),
@@ -366,7 +367,7 @@ mod tests {
                         from_id: "evt_entity-1".into(),
                         to_id: "visible-event".into(),
                         label: "OBSERVED".into(),
-                        properties: serde_json::json!({"confidence":0.9}),
+                        properties: serde_json::json!({"confidence":0.9, "gol_receipt":"private lineage"}),
                     },
                     GraphEdge {
                         from_id: "evt_entity-1".into(),
@@ -505,6 +506,10 @@ mod tests {
             .await?;
         assert_eq!(admin_graph.nodes.len(), 2);
         assert_eq!(admin_graph.edges.len(), 1);
+        assert_eq!(
+            admin_graph.edges.first().map(|edge| &edge.properties),
+            Some(&serde_json::json!({"confidence": 0.9}))
+        );
         assert!(
             admin_graph
                 .nodes

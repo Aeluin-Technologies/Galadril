@@ -26,6 +26,7 @@ EventString = Annotated[
 AdmissionHandle = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)
 ]
+LineageProof = Annotated[str, StringConstraints(min_length=1, max_length=65536)]
 
 
 def utc_now() -> datetime:
@@ -82,6 +83,7 @@ class PipelineCommand(EventEnvelope):
     step_type: StepType
     resource_class: ResourceClass
     admission: AdmissionHandle | None = Field(default=None, repr=False)
+    lineage: LineageProof | None = Field(default=None, repr=False)
     attempt: int = Field(default=0, ge=0)
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     attributes: dict[str, JsonValue] = Field(default_factory=dict)

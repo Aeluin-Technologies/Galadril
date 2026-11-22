@@ -33,6 +33,30 @@ pub(crate) struct RuntimeRequest {
     pub admission: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResumeRequest {
+    pub tenant_id: String,
+    pub pipeline_id: String,
+    pub pipeline_revision_id: String,
+    pub block_id: String,
+    pub source_object_id: String,
+    pub command_id: uuid::Uuid,
+    pub lineage: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RuntimeOpenRequest {
+    Open(RuntimeRequest),
+    Resume(ResumeRequest),
+}
+
+#[derive(Serialize)]
+pub(crate) struct ResumeResponse {
+    pub admission: String,
+}
+
 /// Every operation in a transaction is checked before any effect begins.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

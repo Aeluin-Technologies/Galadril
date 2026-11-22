@@ -9,6 +9,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Protocol
+from uuid import UUID
 
 import orjson
 import structlog
@@ -31,6 +32,9 @@ tracer = trace.get_tracer(__name__)
 
 class RuntimeGateway(Protocol):
     async def open(self, request: GolRequest, admission: str) -> GolLease: ...
+    async def resume(
+        self, request: GolRequest, lineage: str, command_id: UUID
+    ) -> str: ...
     def protected(
         self,
         request: GolRequest,
@@ -203,6 +207,14 @@ class GolRuntimeManager:
 
     def __init__(self, gateway: RuntimeGateway) -> None:
         self._gateway = gateway
+
+    async def resume(
+        self, request: GolRequest, lineage: str, command_id: UUID
+    ) -> str:
+        """Keeps re-admission outside any open effect scope."""
+        if _ACTIVE.get() is not None or not lineage:
+            raise GolDenied("GOL admission unavailable")
+        return await self._gateway.resume(request, lineage, command_id)
 
     @asynccontextmanager
     async def bind(

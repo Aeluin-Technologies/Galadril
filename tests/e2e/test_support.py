@@ -15,6 +15,7 @@ import tarfile
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import authentication as e2e_authentication
 import clients as e2e_clients
@@ -40,10 +41,75 @@ from environment import (
     pipeline_environment,
     runfile,
 )
+from galadril_pipeline.config import StepType
+from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
+
+
+def test_causal_dispatch_continues_the_completed_sink_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The causal command must carry the same admitted input as its parent."""
+    source_key = f"{e2e_clients.TENANT_ID}/raw/default/nonce/source.txt"
+    record = {"storage_path": f"s3://lake/{source_key}"}
+    result = StepResult(
+        correlation_id=uuid4(),
+        tenant_id=e2e_clients.TENANT_ID,
+        pipeline=f"{e2e_clients.TENANT_ID}/{e2e_clients.PIPELINE_ID}/revision",
+        step="sink",
+        step_type=StepType.SINK,
+        resource_class=ResourceClass.CPU,
+        admission="original-gol-admission",
+        command_id=uuid4(),
+        status=EventStatus.COMPLETED,
+        duration_seconds=0.1,
+        output={"record": record},
+    )
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(self, *_: object) -> Connection:
+            return self
+
+        async def fetchall(self) -> list[tuple[object, ...]]:
+            return [
+                (
+                    result.pipeline,
+                    result.model_dump(mode="json"),
+                    result.correlation_id,
+                    "signed-source-lineage",
+                )
+            ]
+
+    async def connect(*_: object) -> Connection:
+        return Connection()
+
+    published: list[e2e_clients.PipelineCommand] = []
+
+    def publish(command: e2e_clients.PipelineCommand, _trace_id: str) -> None:
+        published.append(command)
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    monkeypatch.setattr(e2e_clients, "_publish_causal_command", publish)
+    asyncio.run(
+        e2e_clients.publish_causal_command(
+            "entity_one", source_key=source_key, trace_id="trace"
+        )
+    )
+
+    (command,) = published
+    assert command.causation_id == result.event_id
+    assert command.admission is None
+    assert command.lineage == "signed-source-lineage"
+    assert command.payload == {"target": "entity:entity_one", "record": record}
 
 
 def _authentication_response(

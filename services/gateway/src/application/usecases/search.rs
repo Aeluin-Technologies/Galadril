@@ -14,6 +14,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::gol::redact_worker_provenance;
 use crate::application::ports::embedding_generator::EmbeddingGenerator;
 use crate::application::ports::entity_state_store::EntityStateStore;
 use crate::application::ports::search_store::{
@@ -333,7 +334,7 @@ impl SearchService {
                     rows.into_iter()
                         .map(|row| GlobalSearchHit::EntityState {
                             entity_id: row.entity_id,
-                            state: row.metadata,
+                            state: redact_worker_provenance(row.metadata),
                             state_type: row.state_type,
                         })
                         .collect()
@@ -353,7 +354,9 @@ impl SearchService {
                             event_id: row.event_id,
                             event_type: row.event_type,
                             event_time_ms: row.event_time_ms,
-                            properties: row.properties,
+                            properties: redact_worker_provenance(
+                                row.properties,
+                            ),
                         })
                         .collect()
                 },
@@ -385,7 +388,7 @@ impl SearchService {
                             entity_id: row.entity_id,
                             modality: row.modality,
                             created_at_ms: row.created_at_ms,
-                            metadata: row.metadata,
+                            metadata: redact_worker_provenance(row.metadata),
                             score: row.score,
                         })
                         .collect()
@@ -571,7 +574,7 @@ impl SearchService {
             {
                 out.push(GlobalSearchHit::EntityState {
                     entity_id: row.entity_id,
-                    state: row.metadata,
+                    state: redact_worker_provenance(row.metadata),
                     state_type: row.state_type,
                 });
             }
@@ -608,7 +611,7 @@ impl SearchService {
                         event_id: event.event_id,
                         event_type: event.event_type,
                         event_time_ms: event.event_time_ms,
-                        properties: event.properties,
+                        properties: redact_worker_provenance(event.properties),
                     });
                 }
             }
@@ -684,7 +687,7 @@ impl SearchService {
                     entity_id: r.entity_id,
                     modality: r.modality,
                     created_at_ms: r.created_at_ms,
-                    metadata: r.metadata,
+                    metadata: redact_worker_provenance(r.metadata),
                     score: r.score,
                 });
             }

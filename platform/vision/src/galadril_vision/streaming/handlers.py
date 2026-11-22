@@ -335,6 +335,9 @@ class CommandHandler:
         try:
             if self._publication_gate is None:
                 raise GolDenied("GOL publication unavailable")
+            if command.lineage is not None:
+                admission = await self._publication_gate.resume(command)
+                command = command.model_copy(update={"admission": admission})
             await self._publication_gate.authorize_state(command)
             return await self._handle(command)
         except GolDenied:

@@ -25,6 +25,7 @@ class PublicationGate(Protocol):
     """Every broker write requires a live release decision, including cache hits."""
 
     async def authorize_state(self, command: PipelineCommand) -> None: ...
+    async def resume(self, command: PipelineCommand) -> str: ...
     def protect(
         self, command: PipelineCommand
     ) -> AbstractAsyncContextManager[None]: ...
@@ -109,6 +110,15 @@ class GatewayPublicationGate:
             admission=command.admission,
         ):
             pass
+
+    async def resume(self, command: PipelineCommand) -> str:
+        """Resumes an immutable command without carrying live permissions."""
+        if command.lineage is None:
+            raise GolDenied("GOL lineage unavailable")
+        request, _ = self._request(command)
+        return await self._runtime.resume(
+            request, command.lineage, command.event_id
+        )
 
     @asynccontextmanager
     async def protect(self, command: PipelineCommand) -> AsyncIterator[None]:

@@ -8,6 +8,7 @@ import stat
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from os import PathLike
+from uuid import UUID
 
 import httpx
 import orjson
@@ -108,6 +109,26 @@ class GatewayGolClient:
             return GolLease.model_validate_json(response)
         except ValidationError:
             raise GolUnavailable("GOL runtime unavailable") from None
+
+    async def resume(
+        self, request: GolRequest, lineage: str, command_id: UUID
+    ) -> str:
+        """Exchanges signed ancestry for an admission owned by Gateway."""
+        response = await self._post(
+            "/internal/gol/runtime",
+            {
+                **request.model_dump(by_alias=True),
+                "lineage": lineage,
+                "commandId": str(command_id),
+            },
+        )
+        try:
+            admission = _EFFECT.validate_json(response).get("admission")
+        except ValidationError:
+            raise GolUnavailable("GOL admission unavailable") from None
+        if not isinstance(admission, str) or len(admission) != 32:
+            raise GolUnavailable("GOL admission unavailable")
+        return admission
 
     @asynccontextmanager
     async def protected(

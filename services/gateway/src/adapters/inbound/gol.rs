@@ -14,17 +14,17 @@ pub(crate) use wire::enforce_content_length;
 
 use crate::adapters::inbound::graphql::server::GatewayServices;
 use crate::application::usecases::gol::runtime::{
-    EffectRequest, RuntimeError, RuntimeRequest,
+    EffectRequest, RuntimeError, RuntimeOpenRequest,
 };
 
-/// Opening a reader cannot mint a new computation or reset its observed flow.
+/// Authenticates normal opens and explicit re-admission from signed lineage.
 #[tracing::instrument(name = "gol.http.runtime", skip_all)]
 pub async fn open(
     Extension(services): Extension<Arc<GatewayServices>>,
     request: Request<Body>,
 ) -> Response {
     let request =
-        match wire::decode::<RuntimeRequest>(request, 16 * 1024, |key| {
+        match wire::decode::<RuntimeOpenRequest>(request, 72 * 1024, |key| {
             services.gol.verify_worker_key(key)
         })
         .await
@@ -32,10 +32,25 @@ pub async fn open(
             Ok(request) => request,
             Err(response) => return response,
         };
-    match services.gol.runtime_open(request).await {
-        Ok(lease) => ([(header::CACHE_CONTROL, "no-store")], Json(lease))
-            .into_response(),
-        Err(error) => failure(error),
+    match request {
+        RuntimeOpenRequest::Open(request) => {
+            match services.gol.runtime_open(request).await {
+                Ok(lease) => {
+                    ([(header::CACHE_CONTROL, "no-store")], Json(lease))
+                        .into_response()
+                },
+                Err(error) => failure(error),
+            }
+        },
+        RuntimeOpenRequest::Resume(request) => {
+            match services.gol.runtime_resume(request).await {
+                Ok(admission) => {
+                    ([(header::CACHE_CONTROL, "no-store")], Json(admission))
+                        .into_response()
+                },
+                Err(error) => failure(error),
+            }
+        },
     }
 }
 

@@ -43,7 +43,12 @@ from confluent_kafka import (
 )
 from confluent_kafka.admin import AdminClient
 from galadril_pipeline.config import StepType
-from galadril_pipeline.events import PipelineCommand, ResourceClass
+from galadril_pipeline.events import (
+    EventStatus,
+    PipelineCommand,
+    ResourceClass,
+    StepResult,
+)
 from galadril_registry_api import registry_pb2
 from google.protobuf.message import Message
 from grpcutil import insecure_bearer_token_credentials
@@ -713,33 +718,54 @@ async def publish_causal_command(
     ) as connection:
         cursor = await connection.execute(
             """
-            SELECT pipeline, result, correlation_id FROM pipeline_executions
-            WHERE tenant_id = %s
-              AND step = 'sink' AND status = 'completed'
-              AND result->'output'->'record'->>'storage_path' LIKE %s
-            LIMIT 1
+            SELECT run.pipeline, run.result, run.correlation_id,
+                   event.properties->>'gol_receipt'
+            FROM pipeline_executions AS run
+            JOIN eskg_events AS event ON event.tenant_id = run.tenant_id
+              AND event.properties->>'record_id' = run.result->'output'->'record'->>'record_id'
+            WHERE run.tenant_id = %s
+              AND run.step = 'sink' AND run.status = 'completed'
+              AND run.result->'output'->'record'->>'storage_path' LIKE %s
+            LIMIT 2
             """,
             (TENANT_ID, f"%{source_key}"),
         )
-        row = await cursor.fetchone()
-    if row is None:
-        raise AssertionError("Completed sink result is missing")
-    sink_result = require_mapping(row[1], "completed sink result")
-    result_id = sink_result.get("event_id")
-    if not isinstance(result_id, str):
-        raise AssertionError("Completed sink result lacks an event ID")
-    correlation_id = UUID(str(row[2]))
+        rows = await cursor.fetchall()
+    if len(rows) != 1:
+        raise AssertionError("Completed sink lineage is missing or ambiguous")
+    (row,) = rows
+    sink_result = StepResult.model_validate(row[1])
+    record = sink_result.output.get("record")
+    storage_path = (
+        record.get("storage_path") if isinstance(record, dict) else None
+    )
+    if (
+        sink_result.tenant_id != TENANT_ID
+        or sink_result.pipeline != row[0]
+        or sink_result.correlation_id != UUID(str(row[2]))
+        or sink_result.step_type is not StepType.SINK
+        or sink_result.status is not EventStatus.COMPLETED
+        or not isinstance(row[3], str)
+        or not row[3]
+        or not isinstance(storage_path, str)
+        or urlsplit(storage_path).path.removeprefix("/") != source_key
+    ):
+        raise AssertionError(
+            "Completed sink result lacks the expected input scope"
+        )
+    correlation_id = sink_result.correlation_id
     command = PipelineCommand(
         event_id=uuid5(correlation_id, "e2e:causal"),
         correlation_id=correlation_id,
-        causation_id=UUID(result_id),
+        causation_id=sink_result.event_id,
         tenant_id=TENANT_ID,
         entity_id=entity_id,
-        pipeline=str(row[0]),
+        pipeline=sink_result.pipeline,
         step="causal",
         step_type=StepType.CAUSAL,
         resource_class=ResourceClass.CAUSAL,
-        payload={"target": f"entity:{entity_id}"},
+        lineage=row[3],
+        payload={"target": f"entity:{entity_id}", "record": record},
     )
     await asyncio.to_thread(_publish_causal_command, command, trace_id)
     return str(correlation_id)

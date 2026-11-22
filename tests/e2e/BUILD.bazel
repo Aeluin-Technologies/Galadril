@@ -374,6 +374,7 @@ py_test(
     main = "test_support.py",
     deps = [
         ":e2e_support",
+        "//platform/pipeline/src/galadril_pipeline",
         "@pip//pytest",
     ],
 )

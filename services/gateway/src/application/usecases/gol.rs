@@ -41,6 +41,24 @@ use crate::application::ports::control_plane_store::{
 };
 use crate::application::ports::iam_store::IamStore;
 
+/// Keeps private worker evidence out of generic graph and search projections.
+pub(super) fn redact_worker_provenance(mut properties: Value) -> Value {
+    if let Some(fields) = properties.as_object_mut() {
+        fields.retain(|name, _| {
+            !matches!(
+                name.as_str(),
+                "gol_receipt" |
+                    "gol_state_receipt" |
+                    "gol_instance_id" |
+                    "gol_state_id" |
+                    "gol_value" |
+                    "gol_state_value"
+            )
+        });
+    }
+    properties
+}
+
 /// Only admitted properties reach GraphQL or an agent.
 #[derive(Debug, Serialize)]
 pub struct GolProperty {
