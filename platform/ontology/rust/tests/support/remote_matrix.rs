@@ -39,7 +39,10 @@ async fn docker_atomic_provenance_and_logical_tenant_namespaces() -> TestResult
         "123e4567-e89b-12d3-a456-426614174000",
         "tenant_namespace".parse()?,
         "example.ontology".parse()?,
-        RemoteOptions::default(),
+        RemoteOptions {
+            reader_window: Duration::from_secs(3),
+            ..RemoteOptions::default()
+        },
     )
     .await?;
     let provenance = PublicationProvenance {
@@ -53,6 +56,13 @@ async fn docker_atomic_provenance_and_logical_tenant_namespaces() -> TestResult
         .await?;
     let snapshot = store.open_generation(first).await?;
     assert_eq!(snapshot.provenance(), Some(&provenance));
+    assert!(snapshot.is_live());
+    tokio::time::sleep(Duration::from_millis(3_050)).await;
+    assert!(!snapshot.is_live());
+    let renewed = store.open_generation(first).await?;
+    assert!(renewed.is_live());
+    assert_eq!(renewed.generation(), first);
+    assert_eq!(renewed.provenance(), Some(&provenance));
     let second_provenance = PublicationProvenance {
         source_revision: "lakefs_revision_b".into(),
         ..provenance.clone()
@@ -164,6 +174,7 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
 
     let before = store.metrics();
     let remote = store.open().await?;
+    assert!(remote.is_live());
     let projection = remote
         .read(&title, &owner, &spice)
         .await
@@ -435,6 +446,8 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
             .contains(&artifact_key(generation))
     );
     tokio::time::sleep(Duration::from_millis(6_050)).await;
+    assert!(!left.is_live());
+    assert!(!right.is_live());
     assert!(left.read(&title, &owner, &spice).await.is_none());
     assert!(right.read(&title, &owner, &spice).await.is_none());
     assert_eq!(cleanup.sweep().await?, 3);
@@ -445,6 +458,7 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
 
     let restarted = connect(&storage, options).await?;
     let reopened = restarted.open().await?;
+    assert!(reopened.is_live());
     assert_eq!(reopened.generation(), active);
     assert_eq!(
         reopened

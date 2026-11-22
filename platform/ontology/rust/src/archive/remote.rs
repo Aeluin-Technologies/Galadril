@@ -404,6 +404,15 @@ pub struct RemoteArchive {
 }
 
 impl RemoteArchive {
+    /// Reports whether the original reader window still permits operations.
+    ///
+    /// Hosts may reopen an active generation after expiration. Each operation
+    /// also enforces the window because this observation can become stale.
+    #[must_use]
+    pub fn is_live(&self) -> bool {
+        self.lifetime.live()
+    }
+
     /// Borrows artifact pins for independent verification by the trusted host.
     #[must_use]
     pub fn versions(&self) -> &crate::authorization::Versions {

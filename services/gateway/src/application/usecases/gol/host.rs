@@ -244,25 +244,32 @@ impl GolService {
         {
             return Err(RuntimeError::Invalid);
         }
-        self.open_worker(request).await.map_err(|error| {
-            tracing::warn!(event.name = "gol.worker.open.denied");
-            drop(error);
-            RuntimeError::Denied
-        })
+        let mut phase = "admission";
+        self.open_worker(request, &mut phase)
+            .await
+            .map_err(|error| {
+                tracing::warn!(event.name = "gol.worker.open.denied", phase);
+                drop(error);
+                RuntimeError::Denied
+            })
     }
 
     async fn open_worker(
         &self,
         request: RuntimeRequest,
+        phase: &mut &'static str,
     ) -> Result<RuntimeLease> {
         let worker = self.worker(
             &request.admission,
             &request.tenant_id,
             &request.source_object_id,
         )?;
+        *phase = "boundary";
         let _boundary = self.worker_boundary(&worker).await?;
+        *phase = "principal_and_input";
         self.verify_worker(&worker, &request.admission, &request.pipeline_id)
             .await?;
+        *phase = "binding";
         let binding = self
             .registry
             .clone()
@@ -292,6 +299,7 @@ impl GolService {
                 })
                 .map(|(id, lease)| (id.clone(), Arc::clone(lease)))
         };
+        *phase = "lease";
         let (context_id, lease) = if let Some((id, lease)) = existing {
             ensure!(
                 lease.ontology == binding.ontology_id &&
@@ -301,6 +309,7 @@ impl GolService {
                     lease.source_revision == binding.source_revision,
                 "GOL binding changed"
             );
+            let lease = self.refresh_lease(&worker, &id, lease).await?;
             (id, lease)
         } else {
             let archive = self
@@ -362,7 +371,9 @@ impl GolService {
             leases.insert(id.clone(), Arc::clone(&lease));
             (id, lease)
         };
+        *phase = "dependencies";
         self.recheck_dependencies(&worker).await?;
+        *phase = "metadata";
         let backend = self.backend()?;
         ensure!(backend.signer.is_some(), "GOL effect signing unavailable");
         let actor = self
@@ -493,6 +504,51 @@ impl GolService {
         })
     }
 
+    /// Refreshes expired physical readers without resetting calculation state.
+    /// Exact-generation open rejects retired artifacts, preserving retention.
+    async fn refresh_lease(
+        &self,
+        worker: &Worker,
+        context_id: &str,
+        lease: Arc<Lease>,
+    ) -> Result<Arc<Lease>> {
+        if lease.archive.is_live() {
+            return Ok(lease);
+        }
+        let generation = lease.archive.generation().to_string();
+        let archive = self
+            .backend()?
+            .open(
+                &worker.admission.actor.tenant,
+                &lease.ontology,
+                Some(&generation),
+            )
+            .await?;
+        ensure!(
+            archive.provenance().is_some_and(|provenance| {
+                provenance.source_revision.as_ref() == lease.source_revision
+            }),
+            "GOL source binding changed"
+        );
+        let refreshed = Arc::new(Lease {
+            pipeline: lease.pipeline.clone(),
+            revision: lease.revision.clone(),
+            block: lease.block.clone(),
+            binding_pipeline: lease.binding_pipeline.clone(),
+            ontology: lease.ontology.clone(),
+            source_revision: lease.source_revision.clone(),
+            archive: Arc::new(archive),
+            targets: lease.targets.clone(),
+        });
+        worker
+            .leases
+            .lock()
+            .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
+            .insert(context_id.to_owned(), Arc::clone(&refreshed));
+        tracing::debug!(event.name = "gol.worker.reader.refreshed");
+        Ok(refreshed)
+    }
+
     fn worker(
         &self,
         token: &str,
@@ -512,6 +568,12 @@ impl GolService {
             .get(token)
             .cloned()
             .context("GOL admission unavailable")?;
+        if worker.invalid.load(Ordering::Acquire) {
+            tracing::warn!(
+                event.name = "gol.worker.invalid",
+                reason = "incomplete_effect"
+            );
+        }
         ensure!(
             Arc::ptr_eq(&admitted, &worker.admission) &&
                 !worker.invalid.load(Ordering::Acquire) &&
@@ -697,13 +759,17 @@ impl GolService {
             )
             .await?
         };
-        ensure!(
-            archive
-                .authorize(&access, &prepared, &backend.provider)
-                .await ==
-                Decision::Allow,
-            "GOL dependency unavailable"
-        );
+        let decision = archive
+            .authorize(&access, &prepared, &backend.provider)
+            .await;
+        if let Decision::Deny(reason) = decision {
+            tracing::warn!(
+                event.name = "gol.worker.dependency.denied",
+                reason = ?reason,
+                metadata = dependency.instance_id == "__schema"
+            );
+        }
+        ensure!(decision == Decision::Allow, "GOL dependency unavailable");
         Ok(())
     }
 
@@ -804,6 +870,10 @@ impl GolService {
             self.verify_pipeline_execute(&worker, &lease.binding_pipeline)
                 .await?;
         }
+        let lease = self
+            .refresh_lease(&worker, &request.context_id, lease)
+            .await?;
+        *phase = "dependencies";
         self.recheck_dependencies(&worker).await?;
         let backend = self.backend()?;
         let actor = self
