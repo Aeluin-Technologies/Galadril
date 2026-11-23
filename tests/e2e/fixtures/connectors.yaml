@@ -44,6 +44,8 @@ connectors:
     password: "galadril_app"
     maintenance_user: "galadril_maintenance"
     maintenance_password: "galadril_maintenance"
+    # The lookup budget covers both SQL and live authorization of stored candidates.
+    vector_search_timeout_ms: 120000
 
   spicedb:
     endpoint: "spicedb:50051"

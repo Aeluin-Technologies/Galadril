@@ -47,6 +47,7 @@ from galadril_vision.connectors.postgres.vector import (
 )
 from galadril_vision.identity.contracts import (
     CandidateEvidence,
+    IdentityResolutionError,
     IdentityResolver,
     ResolutionDecision,
     ResolutionRequest,
@@ -283,16 +284,22 @@ async def resolve_entities_batch(
                         _LegacyCandidate(entity_id, similarity)
                         for entity_id, similarity in matches
                     ]
-                except TimeoutError as error:
-                    raise RuntimeError(
+                except TimeoutError:
+                    logger.warning(
+                        "identity.candidate_search.failed", reason="deadline"
+                    )
+                    raise IdentityResolutionError(
                         "candidate search timed out; refusing to create an "
                         "identity from an unverified empty domain"
-                    ) from error
-                except Exception as error:
-                    raise RuntimeError(
+                    ) from None
+                except Exception:
+                    logger.warning(
+                        "identity.candidate_search.failed", reason="backend"
+                    )
+                    raise IdentityResolutionError(
                         "candidate search failed; refusing to create an "
                         "identity from an unverified empty domain"
-                    ) from error
+                    ) from None
 
             async def native_decision(
                 active_resolver: IdentityResolver,

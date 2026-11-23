@@ -25,6 +25,7 @@ from galadril_vision.connectors.postgres.vector import (
     VectorStore,
 )
 from galadril_vision.identity.contracts import (
+    IdentityResolutionError,
     ResolutionDecision,
     ResolutionRequest,
     SpatialEvidence,
@@ -339,12 +340,18 @@ class TestTasksDatabasePipelines:
         ) == int(first_created)
 
     @pytest.mark.anyio
-    async def test_resolve_entities_batch_timeouts_and_unknowns(self) -> None:
-        """Ensures search timeouts gracefully fallback to unmapped entity tracking categories."""
+    @pytest.mark.parametrize(
+        ("failure", "reason"),
+        [(TimeoutError(), "deadline"), (OSError(), "backend")],
+    )
+    async def test_candidate_search_failure_cannot_create_identity(
+        self, failure: Exception, reason: str
+    ) -> None:
+        """A failed candidate lookup cannot be mistaken for an empty domain."""
         state = PostgresRuntimeState()
         cfg = _postgres_config()
         mock_v_store = AsyncMock()
-        mock_v_store.find_resolution_candidates.side_effect = TimeoutError()
+        mock_v_store.find_resolution_candidates.side_effect = failure
 
         inference_results: list[dict[str, object]] = [
             {
@@ -354,11 +361,16 @@ class TestTasksDatabasePipelines:
             }
         ]
 
-        with patch(
-            "galadril_vision.compute.tasks.get_pg_stores",
-            return_value=(MagicMock(), mock_v_store, MagicMock()),
+        with (
+            patch(
+                "galadril_vision.compute.tasks.get_pg_stores",
+                return_value=(MagicMock(), mock_v_store, MagicMock()),
+            ),
+            patch("galadril_vision.compute.tasks.logger") as logger,
         ):
-            with pytest.raises(RuntimeError, match="refusing to create"):
+            with pytest.raises(
+                IdentityResolutionError, match="refusing to create"
+            ):
                 await resolve_entities_batch(
                     state=state,
                     postgres_config=cfg,
@@ -367,6 +379,9 @@ class TestTasksDatabasePipelines:
                     modality="f",
                     threshold=0.8,
                 )
+            logger.warning.assert_called_once_with(
+                "identity.candidate_search.failed", reason=reason
+            )
 
     @pytest.mark.anyio
     async def test_sink_to_db_batch(self) -> None:
