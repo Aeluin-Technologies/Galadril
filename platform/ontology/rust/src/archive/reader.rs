@@ -574,8 +574,20 @@ impl<R: RangeReader> ArchiveReader<R> {
         runtime: &impl TrustedRuntime,
         provider: &impl PermissionProvider,
     ) -> Result<bool, ArchiveError> {
+        Ok(self
+            .authorization_decision(access, runtime, provider)
+            .await? ==
+            Decision::Allow)
+    }
+
+    pub(crate) async fn authorization_decision(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Result<Decision, ArchiveError> {
         let Some(primary) = self.index.route(&access.route).await? else {
-            return Ok(false);
+            return Ok(Decision::Deny(Denial::Route));
         };
         let mut routes =
             self.index.prerequisites(&access.route, &primary).await?;
@@ -583,8 +595,7 @@ impl<R: RangeReader> ArchiveReader<R> {
         Ok(self
             .authority
             .authorize(access, &routes, runtime, provider)
-            .await ==
-            Decision::Allow)
+            .await)
     }
 
     #[cfg(feature = "export")]

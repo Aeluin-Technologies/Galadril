@@ -12,7 +12,7 @@ use galadril_ontology::archive::remote::{
 };
 use galadril_ontology::archive::{ArchiveReader, Direction, compile_archive};
 use galadril_ontology::authorization::{
-    Consistency, Decision, Operation, authorize, compile,
+    Consistency, Decision, Denial, Operation, authorize, compile,
 };
 
 use super::{
@@ -192,6 +192,19 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
     let warm = store.metrics();
     assert_eq!(warm.requests, cold.requests);
     assert!(warm.ram_hits > cold.ram_hits);
+
+    let excluded = Runtime {
+        subject: "excluded",
+        ..owner.clone()
+    };
+    assert_eq!(
+        remote.authorize_checked(&title, &excluded, &spice).await?,
+        Decision::Deny(Denial::Relationship)
+    );
+    assert_eq!(
+        remote.authorize(&title, &excluded, &spice).await,
+        Decision::Deny(Denial::Runtime)
+    );
 
     for (name, context, expected) in [
         (

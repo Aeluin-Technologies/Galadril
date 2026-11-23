@@ -448,12 +448,17 @@ impl RemoteArchive {
         provider: &impl PermissionProvider,
     ) -> crate::authorization::Decision {
         use crate::authorization::{Decision, Denial};
-        self.authorize_checked(access, runtime, provider)
-            .await
-            .unwrap_or(Decision::Deny(Denial::Runtime))
+        match self.authorize_checked(access, runtime, provider).await {
+            Ok(Decision::Allow) => Decision::Allow,
+            _ => Decision::Deny(Denial::Runtime),
+        }
     }
 
-    /// Lets the trusted host distinguish a reader expiry from a policy denial.
+    /// Returns storage errors and policy decisions for trusted host
+    /// diagnostics.
+    ///
+    /// Do not disclose denial categories or storage errors to callers that
+    /// lack access to the underlying artifact.
     pub async fn authorize_checked(
         &self,
         access: &Access,
@@ -465,7 +470,10 @@ impl RemoteArchive {
             return Ok(Decision::Deny(Denial::Runtime));
         }
         within(self.lifetime, async {
-            Ok(self.reader.authorize(access, runtime, provider).await)
+            self.reader
+                .authorization_decision(access, runtime, provider)
+                .await
+                .map_err(map_archive)
         })
         .await
     }
