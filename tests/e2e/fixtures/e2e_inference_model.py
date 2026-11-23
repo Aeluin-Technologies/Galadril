@@ -130,6 +130,7 @@ class E2EDeterministicModel(BaseModel):
                     ),
                     "label": "gateway-e2e-record",
                     "source_field": record.cohort,
+                    "scalar_evidence": {"signal": record.signal},
                     "confidence": record.outcome,
                 }
                 confidence = record.outcome
