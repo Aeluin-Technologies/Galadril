@@ -17,7 +17,10 @@ from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue
 
-from galadril_vision.application.errors import CommandProcessingError
+from galadril_vision.application.errors import (
+    CommandFailureReason,
+    CommandProcessingError,
+)
 from galadril_vision.application.ontology import ontology_contract
 
 logger = logging.getLogger(__name__)
@@ -153,5 +156,10 @@ class PipelineExecutor:
                 },
             )
             raise CommandProcessingError(
-                "Block GOL authorization is unavailable"
+                "Block GOL authorization is unavailable",
+                reason=(
+                    CommandFailureReason.GOL_RUNTIME_OPEN
+                    if phase == "runtime_open"
+                    else CommandFailureReason.GOL_HANDLER
+                ),
             ) from None

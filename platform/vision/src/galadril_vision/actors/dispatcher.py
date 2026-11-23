@@ -8,7 +8,12 @@ from typing import Protocol, TypeVar, cast
 from galadril_pipeline.events import PipelineCommand, ResourceClass, StepResult
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
+from ray.exceptions import RayTaskError
 
+from galadril_vision.application.errors import (
+    CommandFailureReason,
+    CommandProcessingError,
+)
 from galadril_vision.telemetry.context import inject_trace_context
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
@@ -82,8 +87,17 @@ class RayActorDispatcher:
                 )
                 payload = await _await_reference(reference)
                 result = StepResult.model_validate_json(payload)
-            except Exception:
+            except Exception as error:
                 self._metrics.ray_task_completed(**labels, outcome="failed")
+                if (
+                    isinstance(error, RayTaskError)
+                    and isinstance(error.cause, CommandProcessingError)
+                    and isinstance(error.cause.reason, CommandFailureReason)
+                ):
+                    reason = error.cause.reason
+                    raise CommandProcessingError(
+                        reason.public_message(), reason=reason
+                    ) from None
                 raise
             self._metrics.ray_task_completed(**labels, outcome="completed")
             return result

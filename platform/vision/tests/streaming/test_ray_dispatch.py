@@ -78,6 +78,39 @@ async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
 
 
 @pytest.mark.anyio
+async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
+    """Checks the wrapper used for errors returned across process boundaries."""
+    from galadril_vision.application.errors import (
+        CommandFailureReason,
+        CommandProcessingError,
+    )
+    from ray.exceptions import RayTaskError
+
+    class FailedActor:
+        class Method:
+            async def remote(
+                self, _command_json: bytes, _carrier: Mapping[str, str]
+            ) -> bytes:
+                raise RayTaskError(
+                    "execute",
+                    "private traceback",
+                    CommandProcessingError(
+                        "private worker details",
+                        reason=CommandFailureReason.GOL_HANDLER,
+                    ),
+                )
+
+        execute = Method()
+
+    dispatcher = RayActorDispatcher(
+        {ResourceClass.GPU: [FailedActor()]}, PipelineMetrics()
+    )
+    with pytest.raises(CommandProcessingError) as failure:
+        await dispatcher.dispatch(_command())
+    assert failure.value.reason is CommandFailureReason.GOL_HANDLER
+
+
+@pytest.mark.anyio
 async def test_actor_requires_valid_w3c_parent_carrier() -> None:
     """Ensures actor execution accepts the explicit serialized W3C boundary."""
     actor = PipelineActor(_Processor())

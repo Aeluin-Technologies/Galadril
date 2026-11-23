@@ -442,10 +442,64 @@ async def test_actor_failure_publishes_bounded_retry(
         attempt=0,
         error_type="RuntimeError",
         outcome="unavailable",
+        reason="worker_execution",
     )
     assert not any(
         item.topic == TopicLayout().dead_letter for item in publisher.items
     )
+
+
+@pytest.mark.anyio
+async def test_failed_command_retains_a_safe_diagnostic_code() -> None:
+    """Durable status and dead letters identify the phase without private details."""
+    from galadril_vision.application.errors import (
+        CommandFailureReason,
+        CommandProcessingError,
+    )
+
+    class Ledger(MemoryExecutionLedger):
+        error: str | None = None
+
+        async def fail(
+            self, command: PipelineCommand, error: Exception
+        ) -> None:
+            self.error = str(error)
+            await super().fail(command, error)
+
+    ledger = Ledger()
+    publisher = _Publisher()
+    topics = TopicLayout()
+    handler = CommandHandler(
+        routes=PipelineRouteTable(_pipeline(max_retries=0)),
+        publisher=publisher,
+        dispatcher=_Dispatcher(
+            CommandProcessingError(
+                "private receipt details",
+                reason=CommandFailureReason.GOL_RUNTIME_OPEN,
+            )
+        ),
+        ledger=ledger,
+        topics=topics,
+        metrics=PipelineMetrics(),
+        publication_gate=_PublicationGate(),
+    )
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="infer",
+        step_type=StepType.INFERENCE,
+        resource_class=ResourceClass.GPU,
+    )
+    assert await handler.handle(command) is None
+    expected = "Pipeline execution unavailable (gol_runtime_open)"
+    assert ledger.error == expected
+    dead_letter = next(
+        item.message
+        for item in publisher.items
+        if item.topic == topics.dead_letter
+    )
+    assert isinstance(dead_letter, dict)
+    assert dead_letter["error_message"] == expected
 
 
 @pytest.mark.anyio

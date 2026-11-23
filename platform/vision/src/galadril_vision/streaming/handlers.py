@@ -18,6 +18,10 @@ from galadril_pipeline.events import (
 from galadril_pipeline.routing import PipelineRouteTable
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from galadril_vision.application.errors import (
+    CommandFailureReason,
+    CommandProcessingError,
+)
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.kafka.schemas import EventNormalizer
 from galadril_vision.pipeline.ledger import ClaimState, ExecutionClaim
@@ -444,26 +448,37 @@ class CommandHandler:
                     phase="running_lineage",
                 )
                 await self._ledger.fail(
-                    command, RuntimeError("Pipeline execution unavailable")
+                    command,
+                    RuntimeError(
+                        CommandFailureReason.RUNNING_LINEAGE.public_message()
+                    ),
                 )
                 raise
+            reason = CommandFailureReason.WORKER_EXECUTION
             try:
                 result = await self._dispatcher.dispatch(command)
+                reason = CommandFailureReason.WORKER_RESULT
                 _require_result_scope(command, result)
                 self._routes.successors(command.step, result.output)
+                reason = CommandFailureReason.LEDGER_COMPLETION
                 await self._ledger.complete(command, result)
             except Exception as error:
+                if isinstance(error, CommandProcessingError) and isinstance(
+                    error.reason, CommandFailureReason
+                ):
+                    reason = error.reason
                 logger.error(
                     "pipeline_command_failed",
                     event_id=str(command.event_id),
                     attempt=command.attempt,
                     error_type=type(error).__name__,
                     outcome="unavailable",
+                    reason=reason.value,
                 )
                 await self._ledger.fail(
-                    command, RuntimeError("Pipeline execution unavailable")
+                    command, RuntimeError(reason.public_message())
                 )
-                await self._handle_failure(command)
+                await self._handle_failure(command, reason)
                 self._metrics.message_completed(
                     pipeline=command.pipeline,
                     step=command.step,
@@ -529,7 +544,9 @@ class CommandHandler:
                 self._topics.commands_for(route.resource_class),
             )
 
-    async def _handle_failure(self, command: PipelineCommand) -> None:
+    async def _handle_failure(
+        self, command: PipelineCommand, reason: CommandFailureReason
+    ) -> None:
         """Publishes bounded retries or a terminal dead-letter event."""
         route = self._routes.route(command.step)
         if command.attempt < route.max_retries:
@@ -565,7 +582,7 @@ class CommandHandler:
             attempt=command.attempt,
             duration_seconds=0.0,
             error_type="PipelineExecutionError",
-            error_message="Pipeline execution unavailable",
+            error_message=reason.public_message(),
         )
         await self._publish(
             command,
