@@ -6,7 +6,8 @@ import asyncio
 import json
 import ssl
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -16,7 +17,12 @@ import boto3
 import grpc
 import httpx
 import psycopg
-from assertions import require_mapping, require_sequence
+from assertions import (
+    eventually,
+    require_mapping,
+    require_sequence,
+    tempo_error_spans,
+)
 from authentication import authenticated_token as authenticated_token
 from authzed.api.v1 import (
     AsyncClient,
@@ -1073,6 +1079,34 @@ async def read_tempo_trace(trace_id: str) -> dict[str, object] | None:
         return None
     response.raise_for_status()
     return require_mapping(response.json(), "Tempo trace")
+
+
+@asynccontextmanager
+async def capture_tempo_failure(trace_id: str) -> AsyncIterator[None]:
+    """Adds bounded error spans while the test's collector is still running."""
+    try:
+        yield
+    except Exception as error:
+
+        async def error_spans() -> tuple[str, ...] | None:
+            trace = await read_tempo_trace(trace_id)
+            return (
+                tempo_error_spans(trace) if trace is not None else ()
+            ) or None
+
+        try:
+            names = await eventually(
+                error_spans, timeout_seconds=15, description="Tempo error spans"
+            )
+        except AssertionError:
+            error.add_note(
+                f"No error spans exported for Tempo trace {trace_id}"
+            )
+        else:
+            error.add_note(
+                f"Tempo trace {trace_id} error spans: {', '.join(names)}"
+            )
+        raise
 
 
 def statuses_by_step(

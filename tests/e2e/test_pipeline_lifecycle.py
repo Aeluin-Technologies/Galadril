@@ -33,6 +33,7 @@ from clients import (
     SpiceDBProbe,
     authenticated_token,
     canonical_spicedb_object_id,
+    capture_tempo_failure,
     consume_lineage,
     gateway_tls_context,
     publish_causal_command,
@@ -498,12 +499,13 @@ async def _exercise_causal_branch(
         source_key=first_source_key,
         trace_id=_CAUSAL_TRACE_ID,
     )
-    causal = await eventually(
-        lambda: read_causal_state(alpha_entity),
-        timeout_seconds=300.0,
-        description="real Amarth causal analysis of Gateway-derived entity",
-        abort_on=(PipelineExecutionError,),
-    )
+    async with capture_tempo_failure(_CAUSAL_TRACE_ID):
+        causal = await eventually(
+            lambda: read_causal_state(alpha_entity),
+            timeout_seconds=300.0,
+            description="real Amarth causal analysis of Gateway-derived entity",
+            abort_on=(PipelineExecutionError,),
+        )
     assert causal.get("observation_count", 0) >= 30
     assert causal.get("entity_scope_size") == 1
     assert causal.get("event_scope_size", 0) >= 30

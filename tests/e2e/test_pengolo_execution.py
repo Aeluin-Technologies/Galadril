@@ -14,6 +14,7 @@ from clients import (
     GatewayClient,
     RelationshipSpec,
     SpiceDBProbe,
+    capture_tempo_failure,
     gateway_tls_context,
     seed_users,
     vision_database_ready,
@@ -97,7 +98,7 @@ async def test_pengolo_checkpoint_smoke() -> None:
             ).get("id")
             assert isinstance(identifier, str)
 
-            async def completed() -> Mapping[str, object] | None:
+            async def completed(stage: str) -> Mapping[str, object] | None:
                 data = await gateway.execute(
                     token,
                     "query($id:String!) { pengoloEvents(generationId:$id, after:0, temporary:false) { status message { text } } }",
@@ -109,12 +110,12 @@ async def test_pengolo_checkpoint_smoke() -> None:
                 status = result.get("status")
                 if status in {"failed", "cancelled"}:
                     raise AssertionError(
-                        f"Native checkpoint generation ended with {status}"
+                        f"{stage} generation ended with {status}"
                     )
                 return result if status == "completed" else None
 
             result = await eventually(
-                completed,
+                lambda: completed("Native checkpoint"),
                 timeout_seconds=30,
                 description="native checkpoint generation",
                 abort_on=(AssertionError,),
@@ -131,6 +132,7 @@ async def test_pengolo_checkpoint_smoke() -> None:
                 timeout_seconds=180,
                 description="Vision retrieval schema readiness",
             )
+            trace_id = uuid.uuid4().hex
             data = await gateway.execute(
                 token,
                 "mutation($input: PengoloSendInput!) { sendPengolo(input: $input) { generation { id } } }",
@@ -148,6 +150,7 @@ async def test_pengolo_checkpoint_smoke() -> None:
                         ),
                     }
                 },
+                trace_id=trace_id,
             )
             identifier = require_mapping(
                 require_mapping(data.get("sendPengolo"), "MCP send result").get(
@@ -156,12 +159,13 @@ async def test_pengolo_checkpoint_smoke() -> None:
                 "MCP generation",
             ).get("id")
             assert isinstance(identifier, str)
-            result = await eventually(
-                completed,
-                timeout_seconds=60,
-                description="workspace MCP generation",
-                abort_on=(AssertionError,),
-            )
+            async with capture_tempo_failure(trace_id):
+                result = await eventually(
+                    lambda: completed("Workspace MCP"),
+                    timeout_seconds=60,
+                    description="workspace MCP generation",
+                    abort_on=(AssertionError,),
+                )
             text = require_mapping(result.get("message"), "MCP response").get(
                 "text"
             )

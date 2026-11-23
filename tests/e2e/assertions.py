@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+
+_SPAN_NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9._/-]{0,95}", re.ASCII)
 
 
 async def eventually[T](
@@ -92,3 +95,31 @@ def complete_tempo_trace(
     ):
         return None
     return trace
+
+
+def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
+    """Reports span names without releasing messages, attributes or events."""
+    names: set[str] = set()
+    batches = trace.get("batches") or trace.get("resourceSpans")
+    if not isinstance(batches, list):
+        return ()
+    for batch in batches:
+        scopes = batch.get("scopeSpans") if isinstance(batch, dict) else None
+        if not isinstance(scopes, list):
+            continue
+        for scope in scopes:
+            spans = scope.get("spans") if isinstance(scope, dict) else None
+            if not isinstance(spans, list):
+                continue
+            for span in spans:
+                if not isinstance(span, dict):
+                    continue
+                status, name = span.get("status"), span.get("name")
+                if (
+                    isinstance(status, dict)
+                    and status.get("code") in (2, "STATUS_CODE_ERROR")
+                    and isinstance(name, str)
+                    and _SPAN_NAME.fullmatch(name)
+                ):
+                    names.add(name)
+    return tuple(sorted(names)[:24])

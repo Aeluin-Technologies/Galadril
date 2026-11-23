@@ -871,6 +871,41 @@ def test_tempo_trace_waits_for_every_required_service() -> None:
     assert complete_tempo_trace(complete, required) is complete
 
 
+def test_tempo_failure_reports_only_error_span_names() -> None:
+    """Keeps exported error details and trace payloads out of test failures."""
+    from assertions import tempo_error_spans
+
+    trace = {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "name": "ray.dispatch",
+                                "status": {"code": 2, "message": "private"},
+                            },
+                            {
+                                "name": "mcp.client.call",
+                                "status": {"code": "STATUS_CODE_ERROR"},
+                            },
+                            {
+                                "name": "pipeline.claim",
+                                "status": {"code": "STATUS_CODE_OK"},
+                            },
+                            {
+                                "name": "unsafe parameterized span name",
+                                "status": {"code": 2},
+                            },
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    assert tempo_error_spans(trace) == ("mcp.client.call", "ray.dispatch")
+
+
 def test_image_loader_command_does_not_require_executable_runfile(
     tmp_path: Path,
 ) -> None:
