@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import httpx
 from galadril_ontology import (
@@ -97,6 +98,44 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             wire["proposal"], {"length": 12, "body": "signed value"}
         )
+
+    async def test_transport_read_budget_allows_gateway_to_finish(self) -> None:
+        """The worker can receive the result of live checks within the proxy budget."""
+        request = WorkerCredential.request()
+        original_client = httpx.AsyncClient
+
+        def transport(outgoing: httpx.Request) -> httpx.Response:
+            self.assertEqual(
+                outgoing.extensions["timeout"],
+                {"connect": 10.0, "read": 35.0, "write": 10.0, "pool": 10.0},
+            )
+            return httpx.Response(
+                200,
+                json=lease(request.tenant_id).model_dump(by_alias=True)
+                | {"contextId": "admitted-context"},
+            )
+
+        def connect(
+            *,
+            timeout: float | httpx.Timeout,
+            follow_redirects: bool,
+            trust_env: bool,
+        ) -> httpx.AsyncClient:
+            return original_client(
+                timeout=timeout,
+                follow_redirects=follow_redirects,
+                trust_env=trust_env,
+                transport=httpx.MockTransport(transport),
+            )
+
+        client = GatewayGolClient(
+            "http://api-proxy:8082", worker_key_path=self.worker_key_path
+        )
+        self.addAsyncCleanup(client.close)
+        with patch.object(httpx, "AsyncClient", side_effect=connect):
+            self.assertEqual(
+                await client.open(request, "private admission"), lease()
+            )
 
     async def test_transport_failure_reports_only_operation_and_category(
         self,

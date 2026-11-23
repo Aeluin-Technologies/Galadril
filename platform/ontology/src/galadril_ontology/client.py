@@ -93,8 +93,11 @@ class GatewayGolClient:
     ) -> bytes:
         credential = await asyncio.to_thread(self._worker_key)
         if self._client is None:
+            # Let the private Gateway proxy report its 30-second deadline.
             self._client = httpx.AsyncClient(
-                timeout=10, follow_redirects=False, trust_env=False
+                timeout=httpx.Timeout(10.0, read=35.0),
+                follow_redirects=False,
+                trust_env=False,
             )
         headers = {"x-galadril-gol-worker-key": credential}
         propagate.inject(headers)
