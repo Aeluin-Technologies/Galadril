@@ -1,5 +1,8 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
+
+const development = process.env.GALADRIL_UI_TEST_DEV === "1";
+
 export default defineConfig({
   testDir: ".",
   testMatch: [
@@ -12,21 +15,22 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 90000,
+  // Vite can still be transforming route modules when the document finishes loading.
+  expect: { timeout: development ? 30_000 : 5_000 },
   outputDir: resolve(
     process.env.TEST_UNDECLARED_OUTPUTS_DIR ?? "/tmp",
     "pipeline-browser-results",
   ),
   use: {
-    actionTimeout: process.env.GALADRIL_UI_TEST_DEV === "1" ? 60000 : 15000,
+    actionTimeout: development ? 60000 : 15000,
     trace: "retain-on-failure",
     baseURL: `http://127.0.0.1:${process.env.GALADRIL_UI_TEST_PORT}`,
     viewport: { width: 1440, height: 1000 },
   },
   webServer: {
-    command:
-      process.env.GALADRIL_UI_TEST_DEV === "1"
-        ? `node node_modules/nuxt/bin/nuxt.mjs dev --envName ui-test --host 127.0.0.1 --port ${process.env.GALADRIL_UI_TEST_PORT}`
-        : "node .output/server/index.mjs",
+    command: development
+      ? `node node_modules/nuxt/bin/nuxt.mjs dev --envName ui-test --host 127.0.0.1 --port ${process.env.GALADRIL_UI_TEST_PORT}`
+      : "node .output/server/index.mjs",
     cwd: resolve(import.meta.dirname, ".."),
     url: `http://127.0.0.1:${process.env.GALADRIL_UI_TEST_PORT}/login`,
     timeout: 120000,

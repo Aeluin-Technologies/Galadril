@@ -92,7 +92,11 @@ for (const scenario of ["ready", "stale", "forbidden"] as const) {
         ? route.fulfill({ response: shell })
         : route.continue(),
     );
-    await page.goto(`/mcp/email/${accountId}/${draftId}/1`);
+    const [session] = await Promise.all([
+      page.waitForResponse("**/auth/session"),
+      page.goto(`/mcp/email/${accountId}/${draftId}/1`),
+    ]);
+    expect(session.ok()).toBe(true);
     await expect(
       page.getByRole("heading", {
         name: "Review email prepared through MCP",
