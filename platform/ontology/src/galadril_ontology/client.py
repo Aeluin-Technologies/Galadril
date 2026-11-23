@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import stat
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from os import PathLike
+from typing import Literal
 from uuid import UUID
 
 import httpx
@@ -18,10 +20,25 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter, ValidationError
 from .contracts import GolEffect, GolLease, GolRequest
 from .errors import GolDenied, GolUnavailable
 
+_LOGGER = logging.getLogger(__name__)
+type _RpcPhase = Literal["open", "resume", "begin", "finish"]
+
 _EFFECT = TypeAdapter(dict[str, JsonValue])
 _PROPOSAL = TypeAdapter(
     dict[str, JsonValue], config=ConfigDict(allow_inf_nan=False)
 )
+
+
+def _log_rpc_failure(phase: _RpcPhase, reason: str) -> None:
+    """Reports the failure without attaching the request, response or exception."""
+    _LOGGER.warning(
+        "GOL worker RPC failed",
+        extra={
+            "event.name": "pipeline.gol.rpc.failed",
+            "phase": phase,
+            "reason": reason,
+        },
+    )
 
 
 class GatewayGolClient:
@@ -71,7 +88,9 @@ class GatewayGolClient:
             raise GolDenied("GOL workload authentication unavailable")
         return key.hex()
 
-    async def _post(self, path: str, body: dict[str, object]) -> bytes:
+    async def _post(
+        self, path: str, body: dict[str, object], *, phase: _RpcPhase
+    ) -> bytes:
         credential = await asyncio.to_thread(self._worker_key)
         if self._client is None:
             self._client = httpx.AsyncClient(
@@ -86,6 +105,8 @@ class GatewayGolClient:
                 json=body,
                 headers=headers,
             ) as response:
+                if response.status_code != 200:
+                    _log_rpc_failure(phase, f"http_{response.status_code}")
                 if response.status_code >= 500 or response.status_code == 429:
                     raise GolUnavailable("GOL runtime unavailable")
                 if response.status_code != 200:
@@ -96,7 +117,8 @@ class GatewayGolClient:
                         raise GolUnavailable("GOL runtime unavailable")
                     content.extend(chunk)
                 return bytes(content)
-        except httpx.HTTPError:
+        except httpx.HTTPError as error:
+            _log_rpc_failure(phase, type(error).__name__)
             raise GolUnavailable("GOL runtime unavailable") from None
 
     async def open(self, request: GolRequest, admission: str) -> GolLease:
@@ -104,6 +126,7 @@ class GatewayGolClient:
         response = await self._post(
             "/internal/gol/runtime",
             {**request.model_dump(by_alias=True), "admission": admission},
+            phase="open",
         )
         try:
             return GolLease.model_validate_json(response)
@@ -121,6 +144,7 @@ class GatewayGolClient:
                 "lineage": lineage,
                 "commandId": str(command_id),
             },
+            phase="resume",
         )
         try:
             admission = _EFFECT.validate_json(response).get("admission")
@@ -179,7 +203,7 @@ class GatewayGolClient:
                 raise GolDenied("GOL effect batch exceeds limit")
         except (ValidationError, TypeError, ValueError):
             raise GolDenied("GOL effect batch unavailable") from None
-        response = await self._post("/internal/gol/effect", body)
+        response = await self._post("/internal/gol/effect", body, phase="begin")
         try:
             result = _EFFECT.validate_json(response)
         except ValueError:
@@ -222,7 +246,9 @@ class GatewayGolClient:
 
     async def _finish(self, body: dict[str, object]) -> None:
         """Cancellation cannot silently release a calculation as successful."""
-        task = asyncio.create_task(self._post("/internal/gol/effect", body))
+        task = asyncio.create_task(
+            self._post("/internal/gol/effect", body, phase="finish")
+        )
         cancelled = False
         while not task.done():
             try:

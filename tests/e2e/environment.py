@@ -59,6 +59,7 @@ def _pipeline_failure_events(logs: str) -> str:
         "gol.worker.write_contract.denied",
         "pipeline.command.failed",
         "pipeline.gol.failed",
+        "pipeline.gol.rpc.failed",
         "ray.actor.task.failed",
     }
     details = re.compile(

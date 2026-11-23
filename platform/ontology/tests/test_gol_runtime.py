@@ -79,6 +79,59 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.worker_key_path = Path(directory.name) / "worker-key"
         self.worker_key_path.write_bytes(b"t" * 32)
 
+    async def test_transport_failure_reports_only_operation_and_category(
+        self,
+    ) -> None:
+        def transport(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/internal/gol/runtime":
+                return httpx.Response(403, text="protected response")
+            raise httpx.ReadTimeout(
+                "protected transport details", request=request
+            )
+
+        request = WorkerCredential.request()
+        client = GatewayGolClient(
+            "http://api-proxy:8082", worker_key_path=self.worker_key_path
+        )
+        self.addAsyncCleanup(client.close)
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        )
+        with self.assertLogs("galadril_ontology.client", "WARNING") as logs:
+            with self.assertRaises(GolDenied):
+                await client.open(request, "private admission")
+            with self.assertRaises(GolUnavailable):
+                async with client.protected(
+                    request,
+                    lease(),
+                    "private admission",
+                    effects=(
+                        GolEffect(
+                            operation="transfer",
+                            target="communication.mail::Message",
+                            destination="kafka",
+                            purpose="pipeline_dispatch",
+                        ),
+                    ),
+                ):
+                    self.fail("An unavailable permit cannot reach I/O")
+        self.assertEqual(
+            [
+                (
+                    record.__dict__["event.name"],
+                    record.__dict__["phase"],
+                    record.__dict__["reason"],
+                )
+                for record in logs.records
+            ],
+            [
+                ("pipeline.gol.rpc.failed", "open", "http_403"),
+                ("pipeline.gol.rpc.failed", "begin", "ReadTimeout"),
+            ],
+        )
+        self.assertNotIn("protected", " ".join(logs.output))
+        self.assertNotIn("private admission", " ".join(logs.output))
+
     async def test_new_instance_ids_are_bound_to_the_admitted_source(
         self,
     ) -> None:

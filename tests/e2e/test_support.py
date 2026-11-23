@@ -1037,6 +1037,10 @@ otel-collector-1  |      -> step: Str(sink)
 otel-collector-1  | LogRecord #5
 otel-collector-1  | EventName: gol.worker.resume.denied
 otel-collector-1  |      -> phase: Str(principal_and_input)
+otel-collector-1  | LogRecord #6
+otel-collector-1  | EventName: pipeline.gol.rpc.failed
+otel-collector-1  |      -> phase: Str(begin)
+otel-collector-1  |      -> reason: Str(ReadTimeout)
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
@@ -1044,6 +1048,7 @@ otel-collector-1  |      -> phase: Str(principal_and_input)
         "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
         "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
         "gol.worker.resume.denied phase=principal_and_input",
+        "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
     ]
 
 
