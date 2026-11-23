@@ -81,7 +81,8 @@ class PostgresExecutionLedger:
                     SET status = 'running', attempt = %s, error = NULL,
                         lease_expires_at = %s, updated_at = NOW()
                     WHERE idempotency_key = %s
-                      AND (status = 'failed' OR lease_expires_at < NOW())
+                      AND (status = 'failed' OR
+                           (status = 'running' AND lease_expires_at <= NOW()))
                     RETURNING idempotency_key
                     """,
                     (
@@ -134,6 +135,20 @@ class PostgresExecutionLedger:
                     f"Execution lease was lost before completion: {command.idempotency_key}"
                 )
 
+    async def defer(self, command: PipelineCommand, error: Exception) -> None:
+        """Records a diagnostic and releases the lease for broker redelivery."""
+        async with self._client.tenant_connection(
+            command.tenant_id
+        ) as connection:
+            await connection.execute(
+                """
+                UPDATE pipeline_executions
+                SET error = %s, lease_expires_at = NOW(), updated_at = NOW()
+                WHERE idempotency_key = %s AND status = 'running' AND attempt = %s
+                """,
+                (str(error)[:4096], command.idempotency_key, command.attempt),
+            )
+
     async def fail(self, command: PipelineCommand, error: Exception) -> None:
         """Releases a failed claim for a bounded retry command."""
         async with self._client.tenant_connection(
@@ -182,5 +197,13 @@ class MemoryExecutionLedger:
     async def fail(self, command: PipelineCommand, error: Exception) -> None:
         """Removes a failed claim so a bounded retry can acquire it."""
         del error
+        await self._release(command)
+
+    async def defer(self, command: PipelineCommand, error: Exception) -> None:
+        """Makes unfinished work eligible for delivery again."""
+        del error
+        await self._release(command)
+
+    async def _release(self, command: PipelineCommand) -> None:
         async with self._lock:
             self._claims.pop(command.idempotency_key, None)

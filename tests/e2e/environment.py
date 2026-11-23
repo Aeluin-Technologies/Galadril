@@ -58,6 +58,7 @@ def _pipeline_failure_events(logs: str) -> str:
         "gol.worker.resume.denied",
         "gol.worker.write_contract.denied",
         "identity.candidate_search.failed",
+        "pipeline.command.deferred",
         "pipeline.command.failed",
         "pipeline.gol.failed",
         "pipeline.gol.rpc.failed",

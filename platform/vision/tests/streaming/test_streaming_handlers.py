@@ -619,15 +619,31 @@ class _PublicationGate:
 @pytest.mark.anyio
 async def test_denied_running_lineage_can_reacquire_the_same_command() -> None:
     """A refused first publication must not leave an actor lease in progress."""
+
+    class Ledger(MemoryExecutionLedger):
+        deferred: str | None = None
+
+        async def defer(
+            self, command: PipelineCommand, error: Exception
+        ) -> None:
+            self.deferred = str(error)
+            await super().defer(command, error)
+
+        async def fail(
+            self, command: PipelineCommand, error: Exception
+        ) -> None:
+            pytest.fail("A command awaiting broker redelivery is not terminal")
+
     publisher = _Publisher()
     gate = _PublicationGate()
     gate.allowed = False
     dispatcher = _Dispatcher()
+    ledger = Ledger()
     handler = CommandHandler(
         routes=PipelineRouteTable(_pipeline()),
         publisher=publisher,
         dispatcher=dispatcher,
-        ledger=MemoryExecutionLedger(),
+        ledger=ledger,
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
         publication_gate=gate,
@@ -644,6 +660,7 @@ async def test_denied_running_lineage_can_reacquire_the_same_command() -> None:
         await handler.handle(command)
     assert publisher.items == []
     assert dispatcher.calls == 0
+    assert ledger.deferred == "Pipeline execution unavailable (running_lineage)"
 
     gate.allowed = True
     assert await handler.handle(command) is not None

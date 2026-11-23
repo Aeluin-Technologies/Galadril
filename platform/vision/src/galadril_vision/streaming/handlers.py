@@ -86,6 +86,10 @@ class ExecutionLedger(Protocol):
         self, command: PipelineCommand, result: StepResult
     ) -> None: ...
 
+    async def defer(
+        self, command: PipelineCommand, error: Exception
+    ) -> None: ...
+
     async def fail(
         self, command: PipelineCommand, error: Exception
     ) -> None: ...
@@ -443,13 +447,13 @@ class CommandHandler:
             except Exception as error:
                 # Dispatch has not started, so redelivery can reclaim this lease.
                 logger.warning(
-                    "pipeline_command_failed",
+                    "pipeline_command_deferred",
                     event_id=str(command.event_id),
                     attempt=command.attempt,
                     error_type=type(error).__name__,
                     phase="running_lineage",
                 )
-                await self._ledger.fail(
+                await self._ledger.defer(
                     command,
                     RuntimeError(
                         CommandFailureReason.RUNNING_LINEAGE.public_message()
