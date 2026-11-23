@@ -174,6 +174,9 @@ class GolEffect(Transport):
     proposal: dict[str, JsonValue] | None = None
     receipt: str | None = Field(default=None, max_length=65536, repr=False)
     handoff: GolHandoff | None = None
+    read_fields: tuple[str, ...] | None = Field(
+        default=None, alias="readFields", min_length=1, max_length=128
+    )
 
     @field_validator("target")
     @classmethod

@@ -299,19 +299,25 @@ async def test_upsert_causal_link_versions_causes_relationship(
     mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 
-    await store.upsert_causal_link(
-        source_feature="FacialExpressionShift.confidence",
-        target_feature="TextSentimentChange.sentiment",
-        properties={
-            "inference_id": "run-1",
-            "confidence_score": 0.87,
-            "time_lag_seconds": 3.0,
-        },
-        tenant_id="tenant-abc",
-    )
+    with patch(
+        "galadril_vision.connectors.postgres.graph.scoped_instance_id",
+        return_value="causal-link",
+        create=True,
+    ):
+        await store.upsert_causal_link(
+            source_feature="FacialExpressionShift.confidence",
+            target_feature="TextSentimentChange.sentiment",
+            properties={
+                "inference_id": "run-1",
+                "confidence_score": 0.87,
+                "time_lag_seconds": 3.0,
+            },
+            tenant_id="tenant-abc",
+        )
 
-    assert mock_conn.execute.await_count == 7
-    edge_query = mock_conn.execute.await_args_list[6].args[0].as_string(None)
+    assert mock_conn.execute.await_count == 2
+    edge_query = mock_conn.execute.await_args_list[1].args[0].as_string(None)
+    assert "MERGE (a:CausalVariable" in edge_query
     assert "CAUSES" in edge_query
     assert "inference_id: $inference_id" in edge_query
 

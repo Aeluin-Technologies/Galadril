@@ -205,12 +205,63 @@ def _ontology() -> str:
         field longitude: Option<f64>;
         field accuracy_meters: f64;
     }}
+    entity CausalRun {{
+        field cache_key: String;
+        field target: String;
+        field window_start: String;
+        field window_end: String;
+        field status: String;
+        field error: Option<String>;
+        field reason: Option<String>;
+        field persisted_edges: Option<u32>;
+        field causal_links: Option<u32>;
+        field validated_effects: Option<u32>;
+        field entity_scope_size: Option<u32>;
+        field event_scope_size: Option<u32>;
+        field observation_count: Option<u32>;
+        field relationship_count: Option<u32>;
+        field counterfactual_ready: Option<bool>;
+        field effect_sizes: List<f64>;
+        field confidence_scores: List<f64>;
+        field lag_seconds: List<f64>;
+        field p_values: List<Option<f64>>;
+        field q_values: List<Option<f64>>;
+        field stabilities: List<f64>;
+        field counterfactual_flags: List<bool>;
+    }}
+    entity CausalLink {{
+        field inference_id: String;
+        field source_feature: String;
+        field target_feature: String;
+        field confidence_score: f64;
+        field time_lag_seconds: f64;
+        field lag_steps: u32;
+        field effect_size: f64;
+        field p_value: Option<f64>;
+        field q_value: Option<f64>;
+        field stability: f64;
+        field method: String;
+        field window_start: String;
+        field window_end: String;
+        field bucket_seconds: f64;
+        field target: String;
+        field samples_processed: u32;
+        field source_node_ids: List<String>;
+        field target_node_ids: List<String>;
+        field supports_counterfactual: bool;
+        field counterfactual_model: String;
+        field updated_at: String;
+        field average_treatment_effect: Option<f64>;
+        field refutation_passed: Option<bool>;
+    }}
     {gol_access("E2EEntity")}
     {gol_access("E2EObservation")}
     {gol_access("ObservationEdge")}
     {gol_access("ObservationState")}
     {gol_access("ObservationEmbedding")}
     {gol_access("IdentityPrototype")}
+    {gol_access("CausalRun")}
+    {gol_access("CausalLink")}
 }}"""
 
 

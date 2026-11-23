@@ -11,7 +11,7 @@ use anyhow::{Context, Result, ensure};
 use chrono::Timelike as _;
 use galadril_ontology::archive::remote::RemoteArchive;
 use galadril_ontology::authorization::{
-    Access, Decision, Flow, Instance, Operation, Route,
+    Access, Decision, ExecutionContext, Flow, Instance, Operation, Route,
 };
 use galadril_ontology::export::{
     ExportOptions, ExportRequest, IntegerEncoding, SchemaPart,
@@ -509,7 +509,8 @@ impl GolService {
             (id, lease)
         };
         *phase = "dependencies";
-        self.recheck_dependencies(&worker).await?;
+        self.recheck_dependencies(&worker, &mut BTreeMap::new())
+            .await?;
         *phase = "metadata";
         let backend = self.backend()?;
         ensure!(backend.signer.is_some(), "GOL effect signing unavailable");
@@ -828,30 +829,131 @@ impl GolService {
         Ok(())
     }
 
-    async fn recheck_dependencies(&self, worker: &Worker) -> Result<()> {
+    async fn recheck_dependencies(
+        &self,
+        worker: &Worker,
+        archives: &mut BTreeMap<String, RemoteArchive>,
+    ) -> Result<BTreeSet<Dependency>> {
         let dependencies = worker
             .dependencies
             .lock()
             .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
             .clone();
-        for dependency in dependencies {
-            self.recheck_dependency(worker, &dependency).await?;
-        }
-        Ok(())
-    }
-
-    async fn recheck_dependency(
-        &self,
-        worker: &Worker,
-        dependency: &Dependency,
-    ) -> Result<()> {
-        let backend = self.backend()?;
         let actor = self
             .actor(
                 &worker.admission.actor.tenant,
                 &worker.admission.actor.subject_id,
             )
             .await?;
+        for dependency in &dependencies {
+            self.recheck_dependency(
+                &actor,
+                &worker.admission.context,
+                &worker.facts,
+                dependency,
+                archives,
+            )
+            .await?;
+        }
+        Ok(dependencies)
+    }
+
+    /// Releases the selected fields only while the result and all its inputs
+    /// are visible to the requesting principal.
+    pub(in crate::application::usecases) async fn verify_record_release(
+        &self,
+        (tenant, user): (&str, &str),
+        facts: &QueryContext,
+        (instance, key, encoded): (&str, &str, &str),
+        value: &serde_json::Value,
+        fields: &[&str],
+    ) -> Result<()> {
+        let backend = self.backend()?;
+        let receipt = backend
+            .signer
+            .as_ref()
+            .context("GOL provenance unavailable")?
+            .verify(encoded, tenant, instance, value)?;
+        let Reference::Symbol(symbol) = &receipt.target else {
+            anyhow::bail!("GOL release requires a record");
+        };
+        ensure!(
+            reference_key(&receipt.target) == key,
+            "GOL release target mismatch"
+        );
+        let (module, _) = key
+            .split_once("::")
+            .context("GOL release target unavailable")?;
+        let ontology = backend
+            .authority
+            .module_owners
+            .get(&module.parse()?)
+            .map_or_else(|| module.to_owned(), ToString::to_string);
+        let actor = self.actor(tenant, user).await?;
+        let state = Arc::new(ExecutionContext::from_inputs(
+            &actor.principal(),
+            actor.clearance.clone(),
+            receipt.flow.join(&backend.profile.context_floor),
+        )?);
+        let mut archives = BTreeMap::new();
+        for dependency in &receipt.dependencies {
+            self.recheck_dependency(
+                &actor,
+                &state,
+                facts,
+                dependency,
+                &mut archives,
+            )
+            .await?;
+        }
+        let mut dependency = Dependency {
+            ontology,
+            target: key.to_owned(),
+            instance_id: receipt.instance_id,
+            revision: receipt.source_revision,
+            operation: Operation::Read,
+        };
+        self.recheck_dependency(
+            &actor,
+            &state,
+            facts,
+            &dependency,
+            &mut archives,
+        )
+        .await?;
+        for field in fields {
+            ensure!(
+                value.get(field).is_some(),
+                "GOL release field unavailable"
+            );
+            dependency.target = reference_key(
+                &galadril_ontology::FieldRef::new(
+                    symbol.clone(),
+                    field.parse()?,
+                )
+                .into(),
+            );
+            self.recheck_dependency(
+                &actor,
+                &state,
+                facts,
+                &dependency,
+                &mut archives,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn recheck_dependency(
+        &self,
+        actor: &Actor,
+        state: &Arc<ExecutionContext>,
+        facts: &QueryContext,
+        dependency: &Dependency,
+        archives: &mut BTreeMap<String, RemoteArchive>,
+    ) -> Result<()> {
+        let backend = self.backend()?;
         if dependency.ontology.is_empty() && dependency.target.is_empty() {
             let key = dependency
                 .instance_id
@@ -880,17 +982,26 @@ impl GolService {
                             Permission::View,
                             "raw",
                             key,
-                            Some(&worker.facts)
+                            Some(facts)
                         )
                         .await?,
                 "GOL source provenance unavailable"
             );
             return Ok(());
         }
-        let archive = backend
-            .open(&actor.tenant, &dependency.ontology, None)
-            .await?;
-        let target = resolve(&archive, &dependency.target)?;
+        // All dependency checks in this request share a bounded active
+        // archive. SpiceDB and Cedar still decide every concrete obligation.
+        let archive = match archives.entry(dependency.ontology.clone()) {
+            std::collections::btree_map::Entry::Occupied(entry) => {
+                entry.into_mut()
+            },
+            std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
+                backend
+                    .open(&actor.tenant, &dependency.ontology, None)
+                    .await?,
+            ),
+        };
+        let target = resolve(archive, &dependency.target)?;
         let access = Access {
             route: Route::new(target.clone(), dependency.operation),
             instance: Instance {
@@ -903,22 +1014,22 @@ impl GolService {
         };
         let prepared = if dependency.instance_id == "__schema" {
             snapshot::Snapshot::prepare(
-                &archive,
+                archive,
                 &access,
-                &actor,
-                Arc::clone(&worker.admission.context),
-                &worker.facts,
+                actor,
+                Arc::clone(state),
+                facts,
                 &backend.authority,
                 &backend.profile.context_floor,
             )
             .await?
         } else {
             snapshot::Snapshot::prepare_data(
-                &archive,
+                archive,
                 &access,
-                &actor,
-                Arc::clone(&worker.admission.context),
-                &worker.facts,
+                actor,
+                Arc::clone(state),
+                facts,
                 &backend.authority,
                 &backend.profile.context_floor,
                 &dependency.revision,
@@ -1040,7 +1151,9 @@ impl GolService {
             .refresh_lease(&worker, &request.context_id, lease)
             .await?;
         *phase = "dependencies";
-        self.recheck_dependencies(&worker).await?;
+        let mut archives = BTreeMap::new();
+        let mut rechecked =
+            self.recheck_dependencies(&worker, &mut archives).await?;
         let backend = self.backend()?;
         let actor = self
             .actor(&request.tenant_id, &worker.admission.actor.subject_id)
@@ -1102,6 +1215,15 @@ impl GolService {
                 "GOL instance unavailable"
             );
             let target = resolve(&lease.archive, &effect.target)?;
+            let projected = if effect.read_fields.is_some() {
+                ensure!(
+                    matches!(target, Reference::Symbol(_)),
+                    "GOL record projection requires a symbol"
+                );
+                Some(effect.read_fields()?)
+            } else {
+                None
+            };
             let access = Access {
                 route: Route::new(target.clone(), operation),
                 instance: Instance {
@@ -1134,9 +1256,24 @@ impl GolService {
                     receipt.target == target,
                     "GOL provenance target mismatch"
                 );
+                let before = worker.admission.context.current_label()?;
                 worker.admission.context.include_input(&receipt.flow)?;
+                if worker.admission.context.current_label()? != before {
+                    rechecked = self
+                        .recheck_dependencies(&worker, &mut archives)
+                        .await?;
+                }
                 for dependency in &receipt.dependencies {
-                    self.recheck_dependency(&worker, dependency).await?;
+                    if rechecked.insert(dependency.clone()) {
+                        self.recheck_dependency(
+                            &actor,
+                            &worker.admission.context,
+                            &worker.facts,
+                            dependency,
+                            &mut archives,
+                        )
+                        .await?;
+                    }
                 }
                 worker
                     .dependencies
@@ -1167,12 +1304,17 @@ impl GolService {
                     "GOL identity provenance unavailable"
                 );
             }
-            if effect.destination == "causal_state" {
+            if effect.destination == "causal_state" &&
+                (!matches!(target, Reference::Symbol(_)) ||
+                    (operation != Operation::Write &&
+                        !(operation == Operation::Read &&
+                            receipt.is_some())))
+            {
                 worker
                     .admission
                     .context
                     .include_input(&backend.profile.shared_state_floor)?;
-                anyhow::bail!("GOL shared-state provenance unavailable");
+                anyhow::bail!("GOL causal-state provenance unavailable");
             }
             let mut prepared = snapshot::Snapshot::prepare_data(
                 &lease.archive,
@@ -1207,14 +1349,12 @@ impl GolService {
                 receipt.is_some() &&
                 matches!(target, Reference::Symbol(_))
             {
-                // A signed object authenticates all its fields. Its root read
-                // permission alone cannot disclose a protected property.
-                let fields = effect
-                    .proposal
-                    .as_ref()
-                    .and_then(serde_json::Value::as_object)
-                    .context("GOL record provenance required")?;
-                for name in fields.keys() {
+                // Root access does not confer access to the consumed fields.
+                let fields = match projected {
+                    Some(fields) => fields,
+                    None => effect.read_fields()?,
+                };
+                for name in fields {
                     let mut field_access =
                         access_clone(&access, Operation::Read);
                     field_access.route.target =

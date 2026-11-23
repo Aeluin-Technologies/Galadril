@@ -10,9 +10,10 @@ pub struct CausalRun {
 
 #[async_trait::async_trait]
 pub trait CausalStore: Send + Sync {
-    async fn latest_for_entity(
+    async fn for_entity(
         &self,
         tenant_id: &str,
         entity_id: &str,
+        cache_key: Option<&str>,
     ) -> Result<Option<CausalRun>>;
 }

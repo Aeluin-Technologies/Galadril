@@ -79,6 +79,25 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.worker_key_path = Path(directory.name) / "worker-key"
         self.worker_key_path.write_bytes(b"t" * 32)
 
+    def test_projected_read_keeps_the_full_signed_value_on_the_wire(
+        self,
+    ) -> None:
+        effect = GolEffect(
+            operation="read",
+            target="communication.mail::Message",
+            destination="causal_state",
+            purpose="causal_analysis",
+            instanceId="message-one",
+            proposal={"length": 12, "body": "signed value"},
+            receipt="receipt",
+            readFields=("length",),
+        )
+        wire = effect.model_dump(mode="json", by_alias=True, exclude_none=True)
+        self.assertEqual(wire["readFields"], ["length"])
+        self.assertEqual(
+            wire["proposal"], {"length": 12, "body": "signed value"}
+        )
+
     async def test_transport_failure_reports_only_operation_and_category(
         self,
     ) -> None:

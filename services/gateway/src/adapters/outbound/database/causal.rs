@@ -18,10 +18,11 @@ impl PgCausalStore {
 
 #[async_trait::async_trait]
 impl CausalStore for PgCausalStore {
-    async fn latest_for_entity(
+    async fn for_entity(
         &self,
         tenant_id: &str,
         entity_id: &str,
+        cache_key: Option<&str>,
     ) -> Result<Option<CausalRun>> {
         let mut transaction = self.database.tenant(tenant_id).await?;
         let exists: bool = sqlx::query_scalar(
@@ -35,10 +36,12 @@ impl CausalStore for PgCausalStore {
         let row = sqlx::query(
             "SELECT cache_key, result_summary FROM causal_runs
              WHERE tenant_id = $1 AND target = $2 AND status = 'success'
+               AND ($3::text IS NULL OR cache_key = $3)
              ORDER BY created_at DESC LIMIT 1",
         )
         .bind(tenant_id)
         .bind(format!("entity:{entity_id}"))
+        .bind(cache_key)
         .fetch_optional(&mut *transaction)
         .await?;
         let result = row

@@ -799,7 +799,42 @@ async def read_causal_state(entity_id: str) -> dict[str, object] | None:
         raise AssertionError(f"Amarth causal run did not succeed: {run[0]}")
     if run is None or step is None or step[1] != "completed":
         return None
-    return require_mapping(run[1], "Amarth causal result")
+    envelope = require_mapping(run[1], "Amarth causal result envelope")
+    signed = require_mapping(
+        envelope.get("gol_value"), "signed Amarth causal result"
+    )
+    estimate_columns = {
+        "effect_size": "effect_sizes",
+        "confidence_score": "confidence_scores",
+        "time_lag_seconds": "lag_seconds",
+        "p_value": "p_values",
+        "q_value": "q_values",
+        "stability": "stabilities",
+        "supports_counterfactual": "counterfactual_flags",
+    }
+    return {
+        **signed,
+        **{
+            key: int(str(signed[key]))
+            for key in (
+                "causal_links",
+                "validated_effects",
+                "entity_scope_size",
+                "event_scope_size",
+                "observation_count",
+            )
+        },
+        "root_estimates": [
+            dict(zip(estimate_columns, row, strict=True))
+            for row in zip(
+                *(
+                    require_sequence(signed[column], column)
+                    for column in estimate_columns.values()
+                ),
+                strict=True,
+            )
+        ],
+    }
 
 
 async def vision_database_ready() -> bool | None:

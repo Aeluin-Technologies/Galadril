@@ -19,16 +19,36 @@ from amarth.observations import (
 from amarth.router import AmarthRouter
 from galadril_ontology import (
     GolDenied,
+    GolEffect,
     active_gol_lease,
+    make_gol_state_effect,
+    protected_gol_effects,
     protected_gol_state_effect,
+    scoped_instance_id,
 )
 from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+_STATE_SCOPE = (
+    "tenant_id",
+    "entity_id",
+    "event_id",
+    "state_type",
+)
+_STATE_FEATURES = ("event_time", "confidence", "scalar_names", "scalar_values")
+_ESTIMATE_COLUMNS = (
+    ("effect_sizes", "effect_size"),
+    ("confidence_scores", "confidence_score"),
+    ("lag_seconds", "time_lag_seconds"),
+    ("p_values", "p_value"),
+    ("q_values", "q_value"),
+    ("stabilities", "stability"),
+    ("counterfactual_flags", "supports_counterfactual"),
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -155,39 +175,56 @@ def _default_state_metrics_v1() -> tuple[MetricMapping, ...]:
 
 
 async def _cache_get(
-    client: PostgresClient, tenant_id: str, cache_key: str
+    client: PostgresClient, tenant_id: str, cache_key: str, target: str
 ) -> dict[str, object] | None:
-    async with protected_gol_state_effect(
-        operation="read",
-        tenant_id=tenant_id,
-        destination="causal_state",
-        purpose="causal_analysis",
+    if active_gol_lease() is None:
+        raise GolDenied("Causal cache requires an admitted generation")
+    async with client.tenant_connection(tenant_id) as conn:
+        result = await conn.execute(
+            """
+            SELECT result_summary
+            FROM causal_runs
+            WHERE tenant_id = %s AND cache_key = %s AND target = %s
+            """,
+            (tenant_id, cache_key, target),
+        )
+        row = await result.fetchone()
+    if row is None:
+        return None
+    (metadata,) = row
+    if not isinstance(metadata, dict):
+        raise GolDenied("Causal cache unavailable")
+    effect = _read_evidence(metadata, fields=("cache_key", "target", "status"))
+    (signed,) = await _admitted_evidence((effect,), tenant_id)
+    if signed.get("cache_key") != cache_key or signed.get("target") != target:
+        raise GolDenied("Causal cache scope changed")
+    return signed
+
+
+def _causal_run_value(summary: Mapping[str, object]) -> dict[str, JsonValue]:
+    """Keeps every result column individually governable by GOL."""
+    typed = _JSON_OBJECT.validate_python(dict(summary))
+    estimates = typed.pop("root_estimates", [])
+    if not isinstance(estimates, list) or not all(
+        isinstance(row, dict) for row in estimates
     ):
-        async with client.tenant_connection(tenant_id) as conn:
-            result = await conn.execute(
-                """
-                SELECT cache_key, status, result_summary
-                FROM causal_runs
-                WHERE tenant_id = %s AND cache_key = %s
-                """,
-                (tenant_id, cache_key),
-            )
-            row = await result.fetchone()
-        if not row:
-            return None
-        summary = row[2]
-        if isinstance(summary, str):
-            try:
-                summary = orjson.loads(summary)
-            except orjson.JSONDecodeError:
-                summary = {}
-        if not isinstance(summary, dict) or not summary.get("gol_receipt"):
-            return None
-        return {
-            "cache_key": row[0],
-            "status": row[1],
-            "result_summary": summary.get("summary"),
-        }
+        raise CausalJobError("Causal estimates unavailable")
+    for column, attribute in _ESTIMATE_COLUMNS:
+        typed[column] = [
+            row[attribute] for row in estimates if isinstance(row, dict)
+        ]
+    for column in (
+        "persisted_edges",
+        "causal_links",
+        "validated_effects",
+        "entity_scope_size",
+        "event_scope_size",
+        "observation_count",
+        "relationship_count",
+    ):
+        if column in typed:
+            typed[column] = str(typed[column])
+    return typed
 
 
 async def _cache_put(
@@ -201,24 +238,25 @@ async def _cache_put(
     status: str,
     result_summary: Mapping[str, object],
 ) -> None:
-    value = _JSON_OBJECT.validate_python(
-        {
-            "cache_key": cache_key,
-            "target": target,
-            "window_start": window_start.isoformat(),
-            "window_end": window_end.isoformat(),
-            "status": status,
-            "summary": dict(result_summary),
-        }
-    )
-    async with protected_gol_state_effect(
+    value = {
+        **_causal_run_value(result_summary),
+        "cache_key": cache_key,
+        "target": target,
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "status": status,
+    }
+    effect = make_gol_state_effect(
         operation="write",
         tenant_id=tenant_id,
         destination="causal_state",
         purpose="causal_analysis",
-        instance_id="causal-cache:" + cache_key,
+        instance_id=scoped_instance_id("causal-cache:" + cache_key),
         proposal=value,
-    ) as receipt:
+    )
+    async with protected_gol_effects((effect,), tenant_id=tenant_id) as (
+        receipt,
+    ):
         if not receipt:
             raise GolDenied("Causal cache receipt unavailable")
         async with client.tenant_connection(tenant_id) as conn:
@@ -248,11 +286,78 @@ async def _cache_put(
                         {
                             "gol_value": value,
                             "gol_receipt": receipt,
-                            "summary": result_summary,
+                            "gol_symbol_key": effect.target,
+                            "gol_id": effect.instance_id,
                         }
                     ).decode(),
                 ),
             )
+
+
+def _read_evidence(
+    metadata: object,
+    *,
+    fields: Sequence[str],
+    prefix: str = "gol",
+) -> GolEffect:
+    """Builds a read request from the signed proposal and its stored scope."""
+    if not isinstance(metadata, dict):
+        raise GolDenied("Causal evidence unavailable")
+    try:
+        value = _JSON_OBJECT.validate_python(
+            metadata.get(f"{prefix}_value"), strict=True
+        )
+        effect = GolEffect.model_validate(
+            {
+                "operation": "read",
+                "target": metadata.get(f"{prefix}_symbol_key"),
+                "destination": "causal_state",
+                "purpose": "causal_analysis",
+                "instanceId": metadata.get(f"{prefix}_id"),
+                "receipt": metadata.get(f"{prefix}_receipt"),
+                "proposal": value,
+                "readFields": tuple(
+                    field for field in fields if field in value
+                ),
+            }
+        )
+    except ValidationError:
+        raise GolDenied("Causal evidence unavailable") from None
+    if not effect.instance_id or not effect.receipt:
+        raise GolDenied("Causal evidence unavailable")
+    return effect
+
+
+async def _admitted_evidence(
+    effects: Iterable[GolEffect], tenant_id: str
+) -> list[dict[str, JsonValue]]:
+    """Keeps every projected value inside the corresponding live permit."""
+    batch: list[GolEffect] = []
+    values: list[dict[str, JsonValue]] = []
+    size = 0
+    for effect in effects:
+        encoded_size = len(
+            orjson.dumps(
+                effect.model_dump(mode="json", by_alias=True, exclude_none=True)
+            )
+        )
+        if batch and (len(batch) == 64 or size + encoded_size > 144 * 1024):
+            async with protected_gol_effects(batch, tenant_id=tenant_id):
+                values.extend(map(_project_evidence, batch))
+            batch.clear()
+            size = 0
+        batch.append(effect)
+        size += encoded_size + 1
+    if batch:
+        async with protected_gol_effects(batch, tenant_id=tenant_id):
+            values.extend(map(_project_evidence, batch))
+    return values
+
+
+def _project_evidence(effect: GolEffect) -> dict[str, JsonValue]:
+    if effect.proposal is None or effect.read_fields is None:
+        raise GolDenied("Causal evidence unavailable")
+    return {field: effect.proposal[field] for field in effect.read_fields}
 
 
 async def _load_state_rows(
@@ -264,28 +369,72 @@ async def _load_state_rows(
     window_end: datetime,
     max_rows: int,
 ) -> tuple[tuple[datetime, str, Mapping[str, object], str, str], ...]:
-    async with protected_gol_state_effect(
-        operation="read",
-        tenant_id=tenant_id,
-        destination="causal_state",
-        purpose="causal_analysis",
+    if active_gol_lease() is None:
+        raise GolDenied("Causal evidence requires an admitted generation")
+    if not entity_ids:
+        return ()
+    async with client.tenant_connection(tenant_id) as conn:
+        result = await conn.execute(
+            """
+            SELECT event_time, state_type, state_value, entity_id, event_id
+            FROM entity_states
+            WHERE tenant_id = %s AND event_time >= %s AND event_time <= %s
+              AND entity_id = ANY(%s::text[])
+            ORDER BY event_time, entity_id, event_id, state_type
+            LIMIT %s
+            """,
+            (
+                tenant_id,
+                window_start,
+                window_end,
+                list(entity_ids),
+                max_rows + 1,
+            ),
+        )
+        rows = await result.fetchall()
+    if len(rows) > max_rows:
+        raise GolDenied("Causal evidence exceeds the collection budget")
+    effects = (
+        _read_evidence(
+            metadata, fields=_STATE_SCOPE + _STATE_FEATURES, prefix="gol_state"
+        )
+        for _, _, metadata, _, _ in rows
+    )
+    output: list[tuple[datetime, str, Mapping[str, object], str, str]] = []
+    values = await _admitted_evidence(effects, tenant_id)
+    for (created_at, state_type, _, entity_id, event_id), value in zip(
+        rows, values, strict=True
     ):
-        if not entity_ids:
-            return ()
-        async with client.tenant_connection(tenant_id) as conn:
-            result = await conn.execute(
-                """
-                SELECT event_time, state_type, state_value, entity_id, event_id
-                FROM entity_states
-                WHERE event_time >= %s AND event_time <= %s
-                  AND entity_id = ANY(%s::text[])
-                ORDER BY event_time ASC
-                LIMIT %s
-                """,
-                (window_start, window_end, list(entity_ids), max_rows),
-            )
-            rows = await result.fetchall()
-        return tuple(rows)
+        keys = (tenant_id, entity_id, event_id, state_type)
+        if any(
+            value.get(field) != expected
+            for field, expected in zip(_STATE_SCOPE, keys, strict=True)
+        ):
+            raise GolDenied("Causal observation scope changed")
+        observed_at = value.get("event_time")
+        try:
+            if (
+                not isinstance(observed_at, str)
+                or datetime.fromisoformat(observed_at) != created_at
+            ):
+                raise GolDenied("Causal observation time changed")
+        except ValueError:
+            raise GolDenied("Causal observation time unavailable") from None
+        numeric: dict[str, object] = {}
+        if "confidence" in value:
+            numeric["confidence"] = value["confidence"]
+        names, scalars = value.get("scalar_names"), value.get("scalar_values")
+        if names is not None or scalars is not None:
+            if (
+                not isinstance(names, list)
+                or not isinstance(scalars, list)
+                or len(names) != len(scalars)
+                or not all(isinstance(name, str) for name in names)
+            ):
+                raise GolDenied("Causal scalar observation unavailable")
+            numeric["scalar_evidence"] = dict(zip(names, scalars, strict=True))
+        output.append((created_at, state_type, numeric, entity_id, event_id))
+    return tuple(output)
 
 
 async def _load_embedding_rows(
@@ -578,7 +727,7 @@ class AmarthCausalRunner:
         if lease is None:
             raise GolDenied("Causal analysis requires an admitted generation")
         cache_payload = {
-            "v": 5,
+            "v": 6,
             "gol_generation": lease.generation_id,
             "tenant_id": self._tenant_id,
             "target": effective_spec.target,
@@ -590,9 +739,14 @@ class AmarthCausalRunner:
             "k_min": effective_spec.k_min,
             "k_max": effective_spec.k_max,
             "max_vertices": effective_spec.max_vertices,
+            "max_states": effective_spec.max_states,
+            "max_events": effective_spec.max_events,
+            "include_presence_links": effective_spec.include_presence_links,
         }
         cache_key = _make_cache_key(cache_payload)
-        cached = await _cache_get(self._pg, self._tenant_id, cache_key)
+        cached = await _cache_get(
+            self._pg, self._tenant_id, cache_key, effective_spec.target
+        )
         if cached and cached.get("status") == "success":
             return {
                 "status": "skipped",
@@ -610,64 +764,35 @@ class AmarthCausalRunner:
                 "unsupported_target",
             )
 
-        relationship_types = list(_ALLOWED_ESKG_RELATIONSHIPS)
-        if effective_spec.include_presence_links:
-            relationship_types.extend(_PRESENCE_PIVOT_RELATIONSHIPS)
-        neighborhood = await self._graph.get_entity_k_hop_neighbors(
-            entity_id=entity_id,
-            k_min=effective_spec.k_min,
-            k_max=effective_spec.k_max,
-            max_vertices=effective_spec.max_vertices,
-            relationship_types=relationship_types,
-            tenant_id=self._tenant_id,
-        )
-        entity_scope = tuple(dict.fromkeys((entity_id, *neighborhood)))
-        event_ids = await self._graph.get_event_ids_for_entities(
-            entity_ids=list(entity_scope),
-            window_start=window_start,
-            window_end=window_end,
-            max_events=effective_spec.max_events,
-            relationship_types=_PRESENCE_PIVOT_RELATIONSHIPS,
-            tenant_id=self._tenant_id,
-        )
-        vertex_scope = tuple(dict.fromkeys((*entity_scope, *event_ids)))
-
-        (
-            state_rows,
-            embedding_rows,
-            event_rows,
-            relationship_rows,
-        ) = await asyncio.gather(
-            _load_state_rows(
+        if effective_spec.k_max == 0:
+            entity_scope = (entity_id,)
+            state_rows = await _load_state_rows(
                 self._pg,
                 tenant_id=self._tenant_id,
                 entity_ids=entity_scope,
                 window_start=window_start,
                 window_end=window_end,
                 max_rows=effective_spec.max_states,
-            ),
-            _load_embedding_rows(
-                self._pg,
-                tenant_id=self._tenant_id,
-                entity_ids=entity_scope,
-                window_start=window_start,
-                window_end=window_end,
-                max_rows=effective_spec.max_states,
-            ),
-            _load_event_rows(
-                self._pg,
-                tenant_id=self._tenant_id,
-                event_ids=event_ids,
-                window_start=window_start,
-                window_end=window_end,
-                max_rows=effective_spec.max_events,
-            ),
-            self._graph.get_relationship_observations(
-                vertex_ids=list(vertex_scope),
-                relationship_types=tuple(relationship_types),
-                tenant_id=self._tenant_id,
-            ),
-        )
+            )
+            event_ids = tuple(dict.fromkeys(row[4] for row in state_rows))
+            if len(event_ids) > effective_spec.max_events:
+                raise GolDenied(
+                    "Causal event scope exceeds the collection budget"
+                )
+            embedding_rows = ()
+            event_rows = ()
+            relationship_rows = ()
+        else:
+            (
+                entity_scope,
+                event_ids,
+                state_rows,
+                embedding_rows,
+                event_rows,
+                relationship_rows,
+            ) = await self._graph_window(
+                effective_spec, entity_id, window_start, window_end
+            )
         observation_window = _build_observation_window(
             window_start=window_start,
             window_end=window_end,
@@ -677,6 +802,7 @@ class AmarthCausalRunner:
             relationship_rows=relationship_rows,
             event_rows=event_rows,
         )
+
         if not observation_window.observations:
             return await self._skip(
                 effective_spec,
@@ -759,7 +885,91 @@ class AmarthCausalRunner:
             status="success",
             result_summary=summary,
         )
-        return {"status": "success", "cache_key": cache_key, **summary}
+        return {"status": "success", "cache_key": cache_key}
+
+    async def _graph_window(
+        self,
+        spec: CausalSliceSpec,
+        entity_id: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> tuple[
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[tuple[datetime, str, Mapping[str, object], str, str], ...],
+        tuple[
+            tuple[datetime, str, object, str, Mapping[str, object], str], ...
+        ],
+        tuple[tuple[datetime, str, Mapping[str, object], str], ...],
+        tuple[tuple[str, str, str, dict[str, JsonValue]], ...],
+    ]:
+        relationship_types = list(_ALLOWED_ESKG_RELATIONSHIPS)
+        if spec.include_presence_links:
+            relationship_types.extend(_PRESENCE_PIVOT_RELATIONSHIPS)
+        neighborhood = await self._graph.get_entity_k_hop_neighbors(
+            entity_id=entity_id,
+            k_min=spec.k_min,
+            k_max=spec.k_max,
+            max_vertices=spec.max_vertices,
+            relationship_types=relationship_types,
+            tenant_id=self._tenant_id,
+        )
+        entity_scope = tuple(dict.fromkeys((entity_id, *neighborhood)))
+        event_ids = tuple(
+            await self._graph.get_event_ids_for_entities(
+                entity_ids=list(entity_scope),
+                window_start=window_start,
+                window_end=window_end,
+                max_events=spec.max_events,
+                relationship_types=_PRESENCE_PIVOT_RELATIONSHIPS,
+                tenant_id=self._tenant_id,
+            )
+        )
+        vertex_scope = tuple(dict.fromkeys((*entity_scope, *event_ids)))
+        (
+            state_rows,
+            embedding_rows,
+            event_rows,
+            relationship_rows,
+        ) = await asyncio.gather(
+            _load_state_rows(
+                self._pg,
+                tenant_id=self._tenant_id,
+                entity_ids=entity_scope,
+                window_start=window_start,
+                window_end=window_end,
+                max_rows=spec.max_states,
+            ),
+            _load_embedding_rows(
+                self._pg,
+                tenant_id=self._tenant_id,
+                entity_ids=entity_scope,
+                window_start=window_start,
+                window_end=window_end,
+                max_rows=spec.max_states,
+            ),
+            _load_event_rows(
+                self._pg,
+                tenant_id=self._tenant_id,
+                event_ids=event_ids,
+                window_start=window_start,
+                window_end=window_end,
+                max_rows=spec.max_events,
+            ),
+            self._graph.get_relationship_observations(
+                vertex_ids=list(vertex_scope),
+                relationship_types=tuple(relationship_types),
+                tenant_id=self._tenant_id,
+            ),
+        )
+        return (
+            entity_scope,
+            event_ids,
+            state_rows,
+            embedding_rows,
+            event_rows,
+            relationship_rows,
+        )
 
     async def _skip(
         self,
@@ -798,7 +1008,7 @@ class AmarthCausalRunner:
             "inference_id": inference_id,
             "confidence_score": link.confidence_score,
             "time_lag_seconds": link.time_lag_seconds,
-            "lag_steps": link.lag_steps,
+            "lag_steps": str(link.lag_steps),
             "effect_size": link.effect_size,
             "p_value": link.p_value,
             "q_value": link.q_value,
@@ -808,7 +1018,7 @@ class AmarthCausalRunner:
             "window_end": window_end.isoformat(),
             "bucket_seconds": bucket.total_seconds(),
             "target": target,
-            "samples_processed": samples_processed,
+            "samples_processed": str(samples_processed),
             "source_node_ids": list(link.source_node_ids),
             "target_node_ids": list(link.target_node_ids),
             "supports_counterfactual": link.supports_counterfactual,
@@ -831,8 +1041,10 @@ def build_slice_spec_from_step_params(params: object) -> CausalSliceSpec:
     max_events = max(1, int(getattr(params, "max_events", None) or 20_000))
     max_states = max(1, int(getattr(params, "max_states", None) or 20_000))
     target = str(getattr(params, "target", None) or "entity:")
-    k_min = max(1, int(getattr(params, "k_min", None) or 1))
-    k_max = max(k_min, int(getattr(params, "k_max", None) or 2))
+    k_min_value = getattr(params, "k_min", None)
+    k_max_value = getattr(params, "k_max", None)
+    k_min = max(0, int(k_min_value) if k_min_value is not None else 1)
+    k_max = max(k_min, int(k_max_value) if k_max_value is not None else 2)
     max_vertices = max(1, int(getattr(params, "max_vertices", None) or 500))
     include_presence_links = bool(
         getattr(params, "include_presence_links", True)

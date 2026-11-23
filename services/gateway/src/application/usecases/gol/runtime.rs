@@ -1,8 +1,9 @@
 //! Worker transport carries intent; all authority remains in the host.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -71,6 +72,33 @@ pub(crate) struct RequestedEffect {
     pub proposal: Option<Value>,
     pub receipt: Option<String>,
     pub(super) handoff: Option<CommandHandoff>,
+    pub(super) read_fields: Option<Vec<String>>,
+}
+
+impl RequestedEffect {
+    /// Selects fields only after the caller treats the whole proposal as
+    /// signed input.
+    pub(super) fn read_fields(&self) -> Result<Vec<&str>> {
+        let value = self
+            .proposal
+            .as_ref()
+            .and_then(Value::as_object)
+            .context("GOL record provenance required")?;
+        let Some(fields) = &self.read_fields else {
+            return Ok(value.keys().map(String::as_str).collect());
+        };
+        ensure!(
+            self.operation == "read" &&
+                self.receipt.is_some() &&
+                !fields.is_empty() &&
+                fields.len() <= 128 &&
+                fields.iter().collect::<BTreeSet<_>>().len() ==
+                    fields.len() &&
+                fields.iter().all(|field| value.contains_key(field)),
+            "GOL read projection unavailable"
+        );
+        Ok(fields.iter().map(String::as_str).collect())
+    }
 }
 
 #[derive(Deserialize)]
@@ -143,4 +171,40 @@ pub(crate) struct EffectResponse {
     pub allowed: bool,
     pub permit: Option<String>,
     pub receipts: Vec<Option<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn signed_projection_selects_only_existing_fields_of_a_read()
+    -> anyhow::Result<()> {
+        let mut effect: RequestedEffect = serde_json::from_value(json!({
+            "operation": "read",
+            "target": "example::Observation",
+            "destination": "causal_state",
+            "purpose": "causal_analysis",
+            "instanceId": "observation-1",
+            "proposal": {"time": "now", "measurement": 1.5, "private_note": "secret"},
+            "receipt": "signed-value",
+            "readFields": ["time", "measurement"]
+        }))?;
+        assert_eq!(effect.read_fields()?, ["time", "measurement"]);
+        effect.read_fields = Some(vec!["unknown".into()]);
+        assert!(effect.read_fields().is_err());
+        effect.read_fields = Some(vec!["time".into(), "time".into()]);
+        assert!(effect.read_fields().is_err());
+        effect.read_fields = Some(vec![]);
+        assert!(effect.read_fields().is_err());
+        effect.read_fields = Some(vec!["time".into()]);
+        effect.operation = "write".into();
+        assert!(effect.read_fields().is_err());
+        effect.operation = "read".into();
+        effect.receipt = None;
+        assert!(effect.read_fields().is_err());
+        Ok(())
+    }
 }

@@ -50,7 +50,16 @@ def test_on_demand_causal_step_has_no_streaming_input() -> None:
         pipeline_fixture("tenant", "pipeline")
     )
     causal = next(step for step in config.pipeline if step.step == "causal")
-    assert causal.params.model_dump().get("trigger") == "on_demand"
+    parameters = causal.params.model_dump()
+    assert parameters.get("trigger") == "on_demand"
+    assert parameters.get("k_max") == 0
+    assert parameters.get("gol_state_symbol_key") == "e2e.lifecycle::CausalRun"
+    assert (
+        parameters.get("gol_derived_symbol_key") == "e2e.lifecycle::CausalLink"
+    )
+    assert parameters.get("gol_required_symbols") == [
+        "e2e.lifecycle::ObservationState"
+    ]
     assert not causal.input_from
 
 

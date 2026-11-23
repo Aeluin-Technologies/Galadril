@@ -20,7 +20,7 @@ use crate::application::usecases::audit::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
-use crate::application::usecases::causal::CausalService;
+use crate::application::usecases::causal::{CausalService, EVIDENCE_TYPE};
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::identity::IdentityService;
 use crate::application::usecases::search::{
@@ -607,9 +607,9 @@ impl ChatTools {
                 ToolRequest::Causal { entity_id } => {
                     ensure!(!entity_id.trim().is_empty() && entity_id.len() <= 256, "Invalid causal target");
                     let analysis = self.causal.latest(&scope.tenant_id, &scope.user_id, &context, &entity_id).await?;
-                    if analysis.is_some() {
+                    if let Some(analysis) = &analysis {
                         self.record_sources(&scope,
-                            &[source("entity_state", &entity_id, Some(&entity_id), None, None)]).await?;
+                            &[source(EVIDENCE_TYPE, &analysis.evidence_id(), Some(&entity_id), None, None)]).await?;
                     }
                     Ok(json!({"analyses": analysis.into_iter().collect::<Vec<_>>() }))
                 },

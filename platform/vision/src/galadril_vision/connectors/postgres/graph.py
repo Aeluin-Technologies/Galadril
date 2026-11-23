@@ -6,6 +6,7 @@ import re
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from functools import lru_cache
+from hashlib import sha256
 from typing import TYPE_CHECKING, LiteralString
 
 import orjson
@@ -16,6 +17,7 @@ from galadril_ontology import (
     protected_gol_effect,
     protected_gol_effects,
     protected_gol_state_effect,
+    scoped_instance_id,
 )
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
@@ -567,18 +569,27 @@ class GraphStore:
                 "upsert_causal_link", "inference_id is required"
             )
         tenant_id_val = normalize_tenant_id(tenant_id)
-        value = {
+        value: dict[str, JsonValue] = {
+            **properties,
             "source_feature": source_feature,
             "target_feature": target_feature,
-            "properties": properties,
         }
+        source_id = (
+            "causal-variable:" + sha256(source_feature.encode()).hexdigest()
+        )
+        target_id = (
+            "causal-variable:" + sha256(target_feature.encode()).hexdigest()
+        )
+        instance = scoped_instance_id(
+            f"link:{inference_id}:{source_id}:{target_id}"
+        )
         async with protected_gol_state_effect(
             operation="write",
             tenant_id=tenant_id_val,
             destination="eskg",
             purpose="causal_analysis",
             derived=True,
-            instance_id=f"causal:{inference_id}:{source_feature}:{target_feature}",
+            instance_id=instance,
             proposal=value,
         ) as receipt:
             if not receipt:
@@ -589,31 +600,24 @@ class GraphStore:
                 **properties,
                 "gol_value": value,
                 "gol_receipt": receipt,
+                "gol_id": instance,
             }
-            source = GraphVertex(
-                vertex_id=source_feature,
-                label="CausalVariable",
-                tenant_id=tenant_id_val,
-                properties={"name": source_feature},
-            )
-            target = GraphVertex(
-                vertex_id=target_feature,
-                label="CausalVariable",
-                tenant_id=tenant_id_val,
-                properties={"name": target_feature},
-            )
             set_clause, set_params = _cypher_set_clause("r", properties)
             params = {
                 "tenant_id": tenant_id_val,
-                "source_id": source_feature,
-                "target_id": target_feature,
+                "source_id": source_id,
+                "target_id": target_id,
+                "source_name": source_feature,
+                "target_name": target_feature,
                 "inference_id": inference_id,
                 **set_params,
             }
             query = sql.SQL("""
             SELECT * FROM cypher({graph}, $$
-                MATCH (a:CausalVariable {{tenant_id: $tenant_id, id: $source_id}})
-                MATCH (b:CausalVariable {{tenant_id: $tenant_id, id: $target_id}})
+                MERGE (a:CausalVariable {{tenant_id: $tenant_id, id: $source_id}})
+                SET a.name = $source_name
+                MERGE (b:CausalVariable {{tenant_id: $tenant_id, id: $target_id}})
+                SET b.name = $target_name
                 MERGE (a)-[r:CAUSES {{
                     tenant_id: $tenant_id,
                     inference_id: $inference_id
@@ -631,8 +635,12 @@ class GraphStore:
                     tenant_id_val
                 ) as conn:
                     async with conn.transaction():
-                        await self.ensure_vertex_on_connection(conn, source)
-                        await self.ensure_vertex_on_connection(conn, target)
+                        # One tenant lock covers shared variables across concurrent analyses.
+                        await conn.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended("
+                            "'causal-variables:' || %s, 0))",
+                            (tenant_id_val,),
+                        )
                         await conn.execute(
                             query, (orjson.dumps(params).decode(),)
                         )
@@ -1187,6 +1195,7 @@ class GraphStore:
                         "gol_value": business_value,
                         "gol_receipt": business_receipt,
                         "gol_state_symbol_key": gol_target,
+                        "gol_state_id": effect.instance_id,
                         "gol_state_value": effect.proposal,
                         "gol_state_receipt": receipt,
                     }

@@ -342,6 +342,7 @@ async fn main() -> Result<()> {
         let causal = Arc::new(crate::application::usecases::causal::CausalService::new(
             Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
             Arc::clone(&authorization),
+            Arc::clone(&gol),
         ));
         let pengolo_store = Arc::new(crate::adapters::outbound::database::pengolo::PgPengoloStore::new(database.clone()));
         let document_index=Arc::new(crate::adapters::outbound::database::document_index::PgDocumentIndex::new(database.clone()));
@@ -353,7 +354,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&audit),
                 Arc::clone(&search),
                 Arc::clone(&explore),
-                causal,
+                Arc::clone(&causal),
                 conversation_store.clone(),
             ),
         );
@@ -377,7 +378,7 @@ async fn main() -> Result<()> {
         }
         let pengolo = Arc::new(crate::application::usecases::pengolo::PengoloService::new(
             pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
-        ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())));
+        ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())).with_causal_evidence(Arc::clone(&causal)));
         chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
         if let Some(compiler) = crate::adapters::outbound::document_compiler::CompilerClient::from_environment()? { chat_tools.set_document_compiler(Arc::new(compiler))?; }
         let maintenance=Arc::clone(&pengolo);
@@ -392,7 +393,7 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
-        ));
+        ).with_causal_evidence(causal));
 
         let services = Arc::new(GatewayServices {
             gol: Arc::clone(&gol),

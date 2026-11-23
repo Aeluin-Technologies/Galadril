@@ -351,7 +351,10 @@ async def exercise_chatbot(
             )
             == []
         )
-        assert _analysis(root_answer) == summary
+        assert (
+            require_mapping(root_answer.get("causal"), "causal").get("analyses")
+            == []
+        )
         root_graph = require_mapping(root_answer.get("graph"), "root graph")
         assert all(
             require_mapping(node, "node").get("id") == causal_entity

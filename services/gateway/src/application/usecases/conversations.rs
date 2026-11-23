@@ -26,6 +26,9 @@ use crate::application::usecases::audit::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
+use crate::application::usecases::causal::{
+    CausalService, EVIDENCE_TYPE, causal_evidence_visible,
+};
 use crate::application::usecases::identity::IdentityService;
 
 const MAX_ATTACHMENTS: usize = 8;
@@ -52,6 +55,7 @@ pub struct ConversationService {
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
+    causal: Option<Arc<CausalService>>,
 }
 
 impl ConversationService {
@@ -104,6 +108,19 @@ impl ConversationService {
                 )),
                 ..context.clone()
             };
+            if source.resource_type == EVIDENCE_TYPE {
+                if !causal_evidence_visible(
+                    self.causal.as_deref(),
+                    (tenant_id, user_id),
+                    &ctx,
+                    source,
+                )
+                .await?
+                {
+                    return Ok(false);
+                }
+                continue;
+            }
             if !self
                 .auth
                 .is_authorized(
@@ -197,7 +214,16 @@ impl ConversationService {
             identity,
             auth,
             audit,
+            causal: None,
         }
+    }
+
+    pub(crate) fn with_causal_evidence(
+        mut self,
+        causal: Arc<CausalService>,
+    ) -> Self {
+        self.causal = Some(causal);
+        self
     }
 
     /// Starts an audited operation and applies identity, SpiceDB, then Cedar.
