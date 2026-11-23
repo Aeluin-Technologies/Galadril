@@ -1499,7 +1499,7 @@ impl GolService {
             roots.push(access_clone(&access, operation));
             checked.push(access);
         }
-        *phase = "policy";
+        *phase = "write_visibility";
         // Workers observe commit/error status directly. Require its read route
         // as well as its label; a blind write grant cannot authorize that
         // result.
@@ -1531,8 +1531,10 @@ impl GolService {
         checked.extend(observations);
         // Account for all results and control inputs before testing any
         // destination.
+        *phase = "outcome_flow";
         worker.admission.context.include_input(&outcome)?;
         for access in &checked {
+            *phase = "pinned_snapshot";
             let prepared = snapshot::Snapshot::prepare_data(
                 &lease.archive,
                 access,
@@ -1545,16 +1547,24 @@ impl GolService {
                 None,
             )
             .await?;
-            ensure!(
-                lease
-                    .archive
-                    .authorize(access, &prepared, &backend.provider)
-                    .await ==
-                    Decision::Allow,
-                "GOL effect denied"
-            );
+            *phase = "pinned_policy";
+            if let Decision::Deny(reason) = lease
+                .archive
+                .authorize(access, &prepared, &backend.provider)
+                .await
+            {
+                tracing::warn!(
+                    event.name = "gol.worker.policy.denied",
+                    archive = "pinned",
+                    reader_live = lease.archive.is_live(),
+                    operation = ?access.route.operation,
+                    reason = ?reason,
+                );
+                anyhow::bail!("GOL effect denied");
+            }
             // A newly published policy must also approve an already pinned
             // type reader.
+            *phase = "active_snapshot";
             let current_target =
                 resolve(&current, &reference_key(&access.route.target))?;
             let mut current_access =
@@ -1573,20 +1583,27 @@ impl GolService {
                 None,
             )
             .await?;
-            ensure!(
-                current
-                    .authorize(
-                        &current_access,
-                        &current_snapshot,
-                        &backend.provider
-                    )
-                    .await ==
-                    Decision::Allow,
-                "GOL active policy denied"
-            );
+            *phase = "active_policy";
+            if let Decision::Deny(reason) = current
+                .authorize(
+                    &current_access,
+                    &current_snapshot,
+                    &backend.provider,
+                )
+                .await
+            {
+                tracing::warn!(
+                    event.name = "gol.worker.policy.denied",
+                    archive = "active",
+                    reader_live = current.is_live(),
+                    operation = ?access.route.operation,
+                    reason = ?reason,
+                );
+                anyhow::bail!("GOL active policy denied");
+            }
         }
+        *phase = "read_provenance";
         let flow = worker.admission.context.current_label()?;
-        *phase = "release";
         // Persist the original prerequisite routes, even if a future contract
         // removes them. A cached derived value still depends on its old
         // inputs.
@@ -1617,7 +1634,9 @@ impl GolService {
             .lock()
             .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?;
         dependencies.extend(observed);
+        *phase = "provenance_budget";
         ensure!(dependencies.len() <= 1024, "GOL provenance budget exceeded");
+        *phase = "release";
         let lineage =
             if request.effects.iter().zip(&roots).any(|(effect, access)| {
                 access.route.operation == Operation::Write ||
