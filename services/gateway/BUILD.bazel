@@ -65,9 +65,13 @@ rust_test(
 
 rust_test(
     name = "gol_permissions_test",
-    srcs = ["tests/gol_permissions.rs", "src/application/usecases/gol/spicedb.rs"],
+    srcs = [
+        "src/application/usecases/gol/spicedb.rs",
+        "src/application/usecases/relationship_retry.rs",
+        "tests/gol_permissions.rs",
+    ],
     crate_root = "tests/gol_permissions.rs",
-    deps = ["//platform/ontology/rust:ontology", "//platform/registry"] + crate_deps(["anyhow", "loth", "sha2", "tonic", "tracing"]),
+    deps = ["//platform/ontology/rust:ontology", "//platform/registry"] + crate_deps(["anyhow", "loth", "sha2", "tokio", "tonic", "tracing"]),
 )
 
 rust_test(

@@ -723,6 +723,18 @@ async fn integer_encodings_accept_exactly_the_rust_domain()
 
 struct Business(AtomicBool);
 
+struct UnavailableWriteAuthority;
+
+impl PermissionProvider for UnavailableWriteAuthority {
+    async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
+        if request.permission.as_str() == "edit" {
+            PermissionOutcome::Unavailable
+        } else {
+            PermissionOutcome::Allow(request.consistency.clone())
+        }
+    }
+}
+
 impl galadril_ontology::export::GolValidator for Business {
     async fn validate(
         &self,
@@ -859,21 +871,31 @@ async fn a_worker_proposal_uses_the_concrete_write_access()
         Err(ExportError::InvalidJson)
     );
     assert!(!business.0.load(Ordering::Relaxed));
+    let proposal = json!({
+        "title": "example",
+        "revision": u64::MAX.to_string(),
+        "embedding": [0.25, 0.5]
+    });
     reader
         .validate_proposal_for(
-            &request,
-            &json!({
-                "title": "example",
-                "revision": u64::MAX.to_string(),
-                "embedding": [0.25, 0.5]
-            }),
-            &write,
-            &runtime,
-            &provider,
-            &business,
+            &request, &proposal, &write, &runtime, &provider, &business,
         )
         .await?;
     assert!(business.0.load(Ordering::Relaxed));
+
+    business.0.store(false, Ordering::Relaxed);
+    let result = reader
+        .validate_proposal_for(
+            &request,
+            &proposal,
+            &write,
+            &runtime,
+            &UnavailableWriteAuthority,
+            &business,
+        )
+        .await;
+    assert_eq!(result, Err(ExportError::AuthorizationUnavailable));
+    assert!(!business.0.load(Ordering::Relaxed));
     Ok(())
 }
 

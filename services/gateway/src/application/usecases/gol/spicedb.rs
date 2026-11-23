@@ -16,9 +16,14 @@ use loth::spicedb::pb::authzed::api::v1::{
     CheckPermissionRequest, CheckPermissionResponse, ObjectReference,
     SubjectReference, ZedToken, consistency,
 };
+use loth::types::AuthError;
 use sha2::{Digest, Sha256};
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::{Channel, Endpoint};
+
+use super::relationship_retry::resilient_structural_check;
+
+const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) struct SpiceDb {
     client: PermissionsServiceClient<Channel>,
@@ -38,8 +43,8 @@ impl SpiceDb {
     ) -> Result<Self> {
         ensure!(!token.is_empty(), "SpiceDB credentials are required");
         let channel = Endpoint::from_shared(endpoint.to_owned())?
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(5))
+            .connect_timeout(RPC_TIMEOUT)
+            .timeout(RPC_TIMEOUT)
             .connect()
             .await
             .context("GOL relationship authority unavailable")?;
@@ -180,7 +185,7 @@ impl PermissionProvider for SpiceDb {
         let context = (!request.context.is_empty()).then(|| loth::spicedb::pb::google::protobuf::Struct {
             fields: request.context.iter().map(|(name, value)| (name.to_string(), loth::spicedb::pb::google::protobuf::Value {kind:Some(loth::spicedb::pb::google::protobuf::value::Kind::BoolValue(*value))})).collect(),
         });
-        let mut rpc = tonic::Request::new(CheckPermissionRequest {
+        let rpc = CheckPermissionRequest {
             resource: Some(ObjectReference {
                 object_type: request.resource_type.to_owned(),
                 object_id: request.resource_id.to_owned(),
@@ -204,21 +209,37 @@ impl PermissionProvider for SpiceDb {
             ),
             context,
             with_tracing: false,
-        });
-        rpc.metadata_mut()
-            .insert("authorization", self.bearer.clone());
-        match self.client.clone().check_permission(rpc).await {
-            Ok(response) => {
-                outcome(response.into_inner(), request.consistency)
+        };
+        // A retry reads the same live policy without extending the RPC budget.
+        let result = tokio::time::timeout(
+            RPC_TIMEOUT,
+            resilient_structural_check(|| async {
+                let mut attempt = tonic::Request::new(rpc.clone());
+                attempt
+                    .metadata_mut()
+                    .insert("authorization", self.bearer.clone());
+                self.client.clone().check_permission(attempt).await.map_err(
+                    |status| AuthError::SpiceDbStatus {
+                        operation: "check_permission",
+                        status,
+                    },
+                )
+            }),
+        )
+        .await;
+        let code = match result {
+            Ok(Ok(response)) => {
+                return outcome(response.into_inner(), request.consistency);
             },
-            Err(error) => {
-                tracing::warn!(
-                    event.name = "gol.relationship.unavailable",
-                    grpc_code = error.code() as i32
-                );
-                PermissionOutcome::Unavailable
-            },
-        }
+            Ok(Err(AuthError::SpiceDbStatus { status, .. })) => status.code(),
+            Ok(Err(_)) => tonic::Code::Unknown,
+            Err(_) => tonic::Code::DeadlineExceeded,
+        };
+        tracing::warn!(
+            event.name = "gol.relationship.unavailable",
+            grpc_code = code as i32
+        );
+        PermissionOutcome::Unavailable
     }
 }
 

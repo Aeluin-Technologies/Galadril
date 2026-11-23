@@ -5,7 +5,9 @@ use std::future::Future;
 
 use super::model::Definition;
 use super::{ExportError, is_description};
-use crate::authorization::{Access, PermissionProvider, TrustedRuntime};
+use crate::authorization::{
+    Access, Decision, Denial, PermissionProvider, TrustedRuntime,
+};
 use crate::{Name, SymbolRef};
 
 /// An explicit field whitelist and the request that authorizes its metadata.
@@ -44,6 +46,17 @@ pub(super) trait Source: Sync {
         &self,
         owner: &SymbolRef,
     ) -> impl Future<Output = Result<Definition, ExportError>> + Send;
+}
+
+/// Avoids publishing incomplete projections when a permission check failed.
+fn permission_result(decision: Decision) -> Result<bool, ExportError> {
+    match decision {
+        Decision::Allow => Ok(true),
+        Decision::Deny(Denial::Unavailable) => {
+            Err(ExportError::AuthorizationUnavailable)
+        },
+        _ => Ok(false),
+    }
 }
 
 /// An exporter whose security contract was compiled from the same project.
@@ -86,14 +99,15 @@ impl Source for ProjectExporter<'_> {
         runtime: &(impl TrustedRuntime + Sync),
         provider: &(impl PermissionProvider + Sync),
     ) -> Result<bool, ExportError> {
-        Ok(crate::authorization::authorize(
-            &self.contract,
-            access,
-            runtime,
-            provider,
+        permission_result(
+            crate::authorization::authorize(
+                &self.contract,
+                access,
+                runtime,
+                provider,
+            )
+            .await,
         )
-        .await ==
-            crate::authorization::Decision::Allow)
     }
 
     async fn definition(
@@ -123,9 +137,11 @@ impl<R: crate::archive::RangeReader + Sync> Source
         runtime: &(impl TrustedRuntime + Sync),
         provider: &(impl PermissionProvider + Sync),
     ) -> Result<bool, ExportError> {
-        self.permitted(access, runtime, provider)
+        let decision = self
+            .authorization_decision(access, runtime, provider)
             .await
-            .map_err(|_| ExportError::Unavailable)
+            .map_err(|_| ExportError::Unavailable)?;
+        permission_result(decision)
     }
 
     async fn definition(

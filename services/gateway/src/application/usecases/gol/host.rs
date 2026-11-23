@@ -11,10 +11,11 @@ use anyhow::{Context, Result, ensure};
 use chrono::Timelike as _;
 use galadril_ontology::archive::remote::{RemoteArchive, RemoteError};
 use galadril_ontology::authorization::{
-    Access, Decision, ExecutionContext, Flow, Instance, Operation, Route,
+    Access, Decision, Denial, ExecutionContext, Flow, Instance, Operation,
+    Route,
 };
 use galadril_ontology::export::{
-    ExportOptions, ExportRequest, IntegerEncoding, SchemaPart,
+    ExportError, ExportOptions, ExportRequest, IntegerEncoding, SchemaPart,
 };
 use galadril_ontology::{Name, Reference};
 use galadril_registry::proto::GetGolBindingRequest;
@@ -80,6 +81,29 @@ fn worker_json_options() -> ExportOptions {
         integers: IntegerEncoding::DecimalStrings,
         allow_float_rounding: true,
         ..ExportOptions::default()
+    }
+}
+
+/// Keeps authority outages distinguishable on the private worker transport.
+fn worker_runtime_failure(error: &anyhow::Error) -> RuntimeError {
+    if matches!(
+        error.downcast_ref::<ExportError>(),
+        Some(ExportError::AuthorizationUnavailable)
+    ) || matches!(
+        error.downcast_ref::<RuntimeError>(),
+        Some(RuntimeError::Unavailable)
+    ) {
+        RuntimeError::Unavailable
+    } else {
+        RuntimeError::Denied
+    }
+}
+
+fn policy_failure(reason: Denial) -> RuntimeError {
+    if reason == Denial::Unavailable {
+        RuntimeError::Unavailable
+    } else {
+        RuntimeError::Denied
     }
 }
 
@@ -262,9 +286,9 @@ impl GolService {
         self.open_worker(request, &mut phase)
             .await
             .map_err(|error| {
-                tracing::warn!(event.name = "gol.worker.open.denied", phase);
-                drop(error);
-                RuntimeError::Denied
+                let failure = worker_runtime_failure(&error);
+                tracing::warn!(event.name = "gol.worker.open.denied", phase, reason = ?failure);
+                failure
             })
     }
 
@@ -1095,6 +1119,7 @@ impl GolService {
                 reason = ?reason,
                 metadata = dependency.instance_id == "__schema"
             );
+            return Err(policy_failure(reason).into());
         }
         ensure!(decision == Decision::Allow, "GOL dependency unavailable");
         Ok(())
@@ -1151,13 +1176,15 @@ impl GolService {
             EffectRequest::Begin(request) => {
                 let mut phase = "admission";
                 self.begin_effects(request, &mut phase).await.map_err(|error| {
+                    let failure = worker_runtime_failure(&error);
                     tracing::Span::current().record("gol.failure.phase", phase);
                     tracing::warn!(
                         event.name = "gol.worker.effect.denied",
                         phase,
+                        reason = ?failure,
                         archive_error = ?error.downcast_ref::<RemoteError>(),
                     );
-                    RuntimeError::Denied
+                    failure
                 })
             },
         }
@@ -1619,7 +1646,7 @@ impl GolService {
                     operation = ?access.route.operation,
                     reason = ?reason,
                 );
-                anyhow::bail!("GOL effect denied");
+                return Err(policy_failure(reason).into());
             }
             if same_generation {
                 continue;
@@ -1661,7 +1688,7 @@ impl GolService {
                     operation = ?access.route.operation,
                     reason = ?reason,
                 );
-                anyhow::bail!("GOL active policy denied");
+                return Err(policy_failure(reason).into());
             }
         }
         *phase = "read_provenance";

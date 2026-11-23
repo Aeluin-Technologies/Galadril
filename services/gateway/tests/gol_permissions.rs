@@ -1,5 +1,7 @@
 //! The production SpiceDB adapter must preserve freshness and caveat failures.
 
+#[path = "../src/application/usecases/relationship_retry.rs"]
+mod relationship_retry;
 #[path = "../src/application/usecases/gol/spicedb.rs"]
 mod spicedb;
 

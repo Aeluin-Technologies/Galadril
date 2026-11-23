@@ -18,6 +18,7 @@ pub mod identity;
 pub mod mcp_delegation;
 pub mod pengolo;
 pub mod pipelines;
+mod relationship_retry;
 pub mod search;
 pub mod sso_admin;
 pub mod uploads;

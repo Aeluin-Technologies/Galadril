@@ -247,6 +247,8 @@ pub enum ExportError {
     InvalidJson,
     /// Mandatory write permissions were not satisfied.
     WriteDenied,
+    /// The relationship authority could not evaluate a required check.
+    AuthorizationUnavailable,
     /// The host's GOL business validation rejected the proposal.
     Business,
 }
