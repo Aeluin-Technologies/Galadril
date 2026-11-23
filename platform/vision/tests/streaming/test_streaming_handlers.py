@@ -255,6 +255,31 @@ def test_ingress_rows_from_one_object_have_distinct_command_ids() -> None:
 
 
 @pytest.mark.anyio
+async def test_ingress_does_not_acknowledge_a_denied_publication() -> None:
+    """A denied handoff remains eligible for redelivery under live authority."""
+    publisher = _Publisher()
+    gate = _PublicationGate()
+    gate.allowed = False
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+        publication_gate=gate,
+    )
+    envelope = _envelope()
+    with pytest.raises(GolDenied):
+        await handler.handle(envelope)
+    assert publisher.items == []
+
+    gate.allowed = True
+    commands = await handler.handle(envelope)
+    assert len(commands) == 1
+    assert commands[0].lineage is not None
+
+
+@pytest.mark.anyio
 async def test_ingress_validates_and_publishes_deterministic_entry_command() -> (
     None
 ):
@@ -681,7 +706,8 @@ async def test_ingress_without_authority_publishes_no_payload() -> None:
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
     )
-    assert await handler.handle(_envelope()) == ()
+    with pytest.raises(GolDenied):
+        await handler.handle(_envelope())
     assert publisher.items == []
 
 

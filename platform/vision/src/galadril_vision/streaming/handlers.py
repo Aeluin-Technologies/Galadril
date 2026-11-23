@@ -212,7 +212,9 @@ class IngressHandler:
                 )
         except GolDenied:
             logger.warning("gol.publication.denied", operation="ingress")
-            return ()
+            # The broker can redeliver the unchanged source. Each replay
+            # still needs a fresh transfer decision for its deterministic IDs.
+            raise
         self._metrics.message_completed(
             pipeline=self._pipeline,
             step="ingress",
