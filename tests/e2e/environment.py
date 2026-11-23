@@ -32,7 +32,9 @@ _AVRO_SCHEMA_NAMES = (
     "transaction.avsc",
     "video.avsc",
 )
-PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
+# The two empirical cohorts run through the same authorizing worker pipeline.
+EMPIRICAL_STATE_TIMEOUT_SECONDS = 2 * 60 * 60.0
+PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 5 * 60 * 60.0
 _CONFIG_CATEGORIES = (
     "application",
     "observability",

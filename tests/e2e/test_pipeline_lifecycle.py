@@ -1463,6 +1463,9 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             await exercise_empirical_pipeline(gateway, spicedb)
             await exercise_empirical_causal(gateway, spicedb)
+            # The empirical waits can outlast the original Hydra access tokens.
+            uploader_token = await login_user(UPLOADER_ID)
+            outsider_token = await login_user(OUTSIDER_ID)
             print(
                 "E2E stage: measuring shared ESKG and HippoRAG retrieval",
                 flush=True,

@@ -28,6 +28,7 @@ from clients import (
     upload_presigned,
 )
 from empirical_data import load_retail_rows
+from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
 from scenario import ADMIN, build_access_oracle, build_retail_uploads
 
 
@@ -370,6 +371,7 @@ async def _assert_gateway_projection(
         return event
 
     for actor, names in access.items():
+        token = await login_user(actor)
         visible = (
             set().union(*(expected_events[name] for name in names))
             if names
@@ -377,7 +379,7 @@ async def _assert_gateway_projection(
         )
         for entity_id in identity.values():
             hits = await gateway.execute(
-                authenticated_token(actor),
+                token,
                 """
                 query EmpiricalProjection($entityId: String!) {
                   structuredSearch(input: {entityId: $entityId, limit: 50}) {
@@ -402,7 +404,7 @@ async def _assert_gateway_projection(
 
         selected = next(iter(identity.values()))
         graph_data = await gateway.execute(
-            authenticated_token(actor),
+            token,
             """
             query EmpiricalGraph($entityId: String!) {
               entityRelations(entityId: $entityId, depth: 1, limit: 50) {
@@ -513,7 +515,7 @@ async def exercise_empirical_pipeline(
     await _grant_readers(spicedb, keys)
     states = await eventually(
         _retail_states,
-        timeout_seconds=1200.0,
+        timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
         description="240 retail row observations and drained SpiceDB outbox",
         abort_on=(EmpiricalPipelineFailure,),
     )

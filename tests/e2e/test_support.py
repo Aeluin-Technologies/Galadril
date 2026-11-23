@@ -604,7 +604,16 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
         in lifecycle.group("attributes")
     )
     assert '"test.EstimatedComputeUnits": "6"' in testing
-    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 4800.0
+    empirical_timeout = e2e_environment.EMPIRICAL_STATE_TIMEOUT_SECONDS
+    assert empirical_timeout >= 2 * 60 * 60
+    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS >= 2 * empirical_timeout + 3600
+
+    configuration = runfile(".bazelrc").read_text(encoding="utf-8")
+    timeout = re.search(
+        r"^test:ci --test_timeout=-1,-1,-1,(\d+)$", configuration, re.MULTILINE
+    )
+    assert timeout is not None
+    assert int(timeout.group(1)) >= PIPELINE_LIFECYCLE_TIMEOUT_SECONDS + 900
 
 
 def test_vision_runtime_gets_a_cold_start_budget() -> None:

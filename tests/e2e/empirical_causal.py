@@ -12,16 +12,17 @@ import psycopg
 import pytest
 from amarth.estimation.dowhy import DowhyEstimator
 from assertions import eventually, require_mapping
+from authentication import login_user
 from clients import (
     POSTGRES_DSN,
     TENANT_ID,
     GatewayClient,
     SpiceDBProbe,
-    authenticated_token,
     canonical_spicedb_object_id,
     upload_presigned,
 )
 from empirical_data import load_trial_rows, trial_estimate
+from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
 from scenario import ADMIN, encode_trial_rows
 
 
@@ -65,7 +66,7 @@ async def exercise_empirical_causal(
 ) -> None:
     """Runs Amarth over the exact persisted assignment and outcome observations."""
     print("E2E stage: uploading randomized-trial observations", flush=True)
-    token = authenticated_token(ADMIN)
+    token = await login_user(ADMIN)
     staged = require_mapping(
         (
             await gateway.execute(
@@ -94,7 +95,7 @@ async def exercise_empirical_causal(
     assert promoted.get("completeUpload") == raw_key
     persisted = await eventually(
         _persisted_trial,
-        timeout_seconds=1200.0,
+        timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
         description="205 randomized-trial Vision states and drained authz outbox",
     )
     expected = {row.record_id: row for row in rows}
