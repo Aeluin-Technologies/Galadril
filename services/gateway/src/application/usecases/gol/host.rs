@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use chrono::Timelike as _;
-use galadril_ontology::archive::remote::RemoteArchive;
+use galadril_ontology::archive::remote::{RemoteArchive, RemoteError};
 use galadril_ontology::authorization::{
     Access, Decision, ExecutionContext, Flow, Instance, Operation, Route,
 };
@@ -1001,6 +1001,50 @@ impl GolService {
                     .await?,
             ),
         };
+        match self
+            .recheck_archive_dependency(
+                actor, state, facts, dependency, archive,
+            )
+            .await
+        {
+            Err(error)
+                if error.downcast_ref::<RemoteError>() ==
+                    Some(&RemoteError::Expired) =>
+            {
+                let generation = archive.generation().to_string();
+                let refreshed = backend
+                    .open(
+                        &actor.tenant,
+                        &dependency.ontology,
+                        Some(&generation),
+                    )
+                    .await?;
+                ensure!(
+                    refreshed.provenance() == archive.provenance(),
+                    "GOL dependency source binding changed"
+                );
+                *archive = refreshed;
+                tracing::debug!(
+                    event.name = "gol.worker.dependency.reader_refreshed"
+                );
+                self.recheck_archive_dependency(
+                    actor, state, facts, dependency, archive,
+                )
+                .await
+            },
+            result => result,
+        }
+    }
+
+    async fn recheck_archive_dependency(
+        &self,
+        actor: &Actor,
+        state: &Arc<ExecutionContext>,
+        facts: &QueryContext,
+        dependency: &Dependency,
+        archive: &RemoteArchive,
+    ) -> Result<()> {
+        let backend = self.backend()?;
         let target = resolve(archive, &dependency.target)?;
         let access = Access {
             route: Route::new(target.clone(), dependency.operation),
@@ -1038,8 +1082,8 @@ impl GolService {
             .await?
         };
         let decision = archive
-            .authorize(&access, &prepared, &backend.provider)
-            .await;
+            .authorize_checked(&access, &prepared, &backend.provider)
+            .await?;
         if let Decision::Deny(reason) = decision {
             tracing::warn!(
                 event.name = "gol.worker.dependency.denied",
@@ -1101,10 +1145,12 @@ impl GolService {
             },
             EffectRequest::Begin(request) => {
                 let mut phase = "admission";
-                self.begin_effects(request, &mut phase).await.map_err(|_| {
+                self.begin_effects(request, &mut phase).await.map_err(|error| {
+                    tracing::Span::current().record("gol.failure.phase", phase);
                     tracing::warn!(
                         event.name = "gol.worker.effect.denied",
-                        phase
+                        phase,
+                        archive_error = ?error.downcast_ref::<RemoteError>(),
                     );
                     RuntimeError::Denied
                 })
@@ -1147,9 +1193,6 @@ impl GolService {
             self.verify_pipeline_execute(&worker, &lease.binding_pipeline)
                 .await?;
         }
-        let lease = self
-            .refresh_lease(&worker, &request.context_id, lease)
-            .await?;
         *phase = "dependencies";
         let mut archives = BTreeMap::new();
         let mut rechecked =
@@ -1161,6 +1204,22 @@ impl GolService {
         let current = backend
             .open(&request.tenant_id, &lease.ontology, None)
             .await?;
+        *phase = "effect_reader";
+        let same_generation =
+            current.generation() == lease.archive.generation();
+        let pinned = if same_generation {
+            ensure!(
+                current.provenance().is_some_and(|provenance| {
+                    provenance.source_revision.as_ref() ==
+                        lease.source_revision
+                }),
+                "GOL source binding changed"
+            );
+            &current
+        } else {
+            ensure!(lease.archive.is_live(), RemoteError::Expired);
+            lease.archive.as_ref()
+        };
         let mut checked = Vec::with_capacity(request.effects.len());
         let mut roots = Vec::with_capacity(request.effects.len());
         let mut outcome = worker.admission.context.current_label()?;
@@ -1214,7 +1273,7 @@ impl GolService {
                 !id.is_empty() && id != "__schema" && id.len() <= 256,
                 "GOL instance unavailable"
             );
-            let target = resolve(&lease.archive, &effect.target)?;
+            let target = resolve(pinned, &effect.target)?;
             let projected = if effect.read_fields.is_some() {
                 ensure!(
                     matches!(target, Reference::Symbol(_)),
@@ -1317,7 +1376,7 @@ impl GolService {
                 anyhow::bail!("GOL causal-state provenance unavailable");
             }
             let mut prepared = snapshot::Snapshot::prepare_data(
-                &lease.archive,
+                pinned,
                 &access,
                 &actor,
                 Arc::clone(&worker.admission.context),
@@ -1328,8 +1387,7 @@ impl GolService {
                 receipt.as_ref().map(|receipt| &receipt.flow),
             )
             .await?;
-            let requirements =
-                lease.archive.requirements(&access.route).await?;
+            let requirements = pinned.requirements(&access.route).await?;
             for descriptor in requirements.values() {
                 outcome = outcome
                     .join(descriptor.control_flow())
@@ -1363,7 +1421,7 @@ impl GolService {
                             name.parse()?,
                         )
                         .into();
-                    for archive in [lease.archive.as_ref(), &current] {
+                    for archive in [pinned, &current] {
                         let field = resolve(
                             archive,
                             &reference_key(&field_access.route.target),
@@ -1401,8 +1459,7 @@ impl GolService {
                     )
                     .await?;
                 *phase = "write_contract";
-                let contract = lease
-                    .archive
+                let contract = pinned
                     .invariant_contract(&access, &prepared, &backend.provider)
                     .await
                     .context("GOL invariant contract unavailable")?;
@@ -1413,12 +1470,12 @@ impl GolService {
                     .map(|name| name.parse())
                     .collect::<Result<BTreeSet<Name>, _>>()?;
                 prepared
-                    .proposed_fields(&lease.archive, &fields, owner(&target)?)
+                    .proposed_fields(pinned, &fields, owner(&target)?)
                     .await?;
                 let metadata_access = backend
                     .metadata_access(&request.tenant_id, target.clone())?;
                 let metadata = snapshot::Snapshot::prepare(
-                    &lease.archive,
+                    pinned,
                     &metadata_access,
                     &actor,
                     Arc::clone(&worker.admission.context),
@@ -1436,8 +1493,7 @@ impl GolService {
                 let options = worker_json_options();
                 let mappings =
                     galadril_registry::gol::registered_json_mappings()?;
-                lease
-                    .archive
+                pinned
                     .validate_proposal_for(
                         &ExportRequest {
                             projection: &projection,
@@ -1467,8 +1523,7 @@ impl GolService {
                             field,
                         )
                         .into();
-                    for descriptor in lease
-                        .archive
+                    for descriptor in pinned
                         .requirements(&field_access.route)
                         .await?
                         .values()
@@ -1510,7 +1565,7 @@ impl GolService {
             .collect::<Vec<_>>();
         for access in &observations {
             for descriptor in
-                lease.archive.requirements(&access.route).await?.values()
+                pinned.requirements(&access.route).await?.values()
             {
                 outcome = outcome
                     .join(descriptor.flow())
@@ -1536,7 +1591,7 @@ impl GolService {
         for access in &checked {
             *phase = "pinned_snapshot";
             let prepared = snapshot::Snapshot::prepare_data(
-                &lease.archive,
+                pinned,
                 access,
                 &actor,
                 Arc::clone(&worker.admission.context),
@@ -1548,19 +1603,21 @@ impl GolService {
             )
             .await?;
             *phase = "pinned_policy";
-            if let Decision::Deny(reason) = lease
-                .archive
-                .authorize(access, &prepared, &backend.provider)
-                .await
+            if let Decision::Deny(reason) = pinned
+                .authorize_checked(access, &prepared, &backend.provider)
+                .await?
             {
                 tracing::warn!(
                     event.name = "gol.worker.policy.denied",
                     archive = "pinned",
-                    reader_live = lease.archive.is_live(),
+                    reader_live = pinned.is_live(),
                     operation = ?access.route.operation,
                     reason = ?reason,
                 );
                 anyhow::bail!("GOL effect denied");
+            }
+            if same_generation {
+                continue;
             }
             // A newly published policy must also approve an already pinned
             // type reader.
@@ -1585,12 +1642,12 @@ impl GolService {
             .await?;
             *phase = "active_policy";
             if let Decision::Deny(reason) = current
-                .authorize(
+                .authorize_checked(
                     &current_access,
                     &current_snapshot,
                     &backend.provider,
                 )
-                .await
+                .await?
             {
                 tracing::warn!(
                     event.name = "gol.worker.policy.denied",
@@ -1610,9 +1667,7 @@ impl GolService {
         let mut observed = Vec::new();
         for access in &checked {
             if access.route.operation == Operation::Read {
-                for route in
-                    lease.archive.requirements(&access.route).await?.keys()
-                {
+                for route in pinned.requirements(&access.route).await?.keys() {
                     if route.operation == Operation::Read {
                         observed.push(Dependency {
                             ontology: lease.ontology.clone(),

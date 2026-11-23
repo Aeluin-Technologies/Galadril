@@ -12,7 +12,7 @@ use galadril_ontology::archive::remote::{
 };
 use galadril_ontology::archive::{ArchiveReader, Direction, compile_archive};
 use galadril_ontology::authorization::{
-    Consistency, Operation, authorize, compile,
+    Consistency, Decision, Operation, authorize, compile,
 };
 
 use super::{
@@ -175,6 +175,10 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
     let before = store.metrics();
     let remote = store.open().await?;
     assert!(remote.is_live());
+    assert_eq!(
+        remote.authorize_checked(&title, &owner, &spice).await?,
+        Decision::Allow
+    );
     let projection = remote
         .read(&title, &owner, &spice)
         .await
@@ -448,6 +452,14 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
     tokio::time::sleep(Duration::from_millis(6_050)).await;
     assert!(!left.is_live());
     assert!(!right.is_live());
+    assert_eq!(
+        left.authorize_checked(&title, &owner, &spice).await,
+        Err(RemoteError::Expired)
+    );
+    assert!(matches!(
+        store.open_generation(generation).await,
+        Err(RemoteError::Conflict)
+    ));
     assert!(left.read(&title, &owner, &spice).await.is_none());
     assert!(right.read(&title, &owner, &spice).await.is_none());
     assert_eq!(cleanup.sweep().await?, 3);

@@ -56,7 +56,11 @@ pub async fn open(
 
 /// The host validates the exact value and retained dependencies before
 /// release.
-#[tracing::instrument(name = "gol.http.effect", skip_all)]
+#[tracing::instrument(
+    name = "gol.http.effect",
+    skip_all,
+    fields(gol.failure.phase = tracing::field::Empty, otel.status_code = tracing::field::Empty)
+)]
 pub async fn effect(
     Extension(services): Extension<Arc<GatewayServices>>,
     request: Request<Body>,
@@ -68,14 +72,22 @@ pub async fn effect(
         .await
         {
             Ok(request) => request,
-            Err(response) => return response,
+            Err(response) => {
+                let span = tracing::Span::current();
+                span.record("otel.status_code", "ERROR");
+                span.record("gol.failure.phase", "worker_request");
+                return response;
+            },
         };
     match services.gol.runtime_effect(request).await {
         Ok(decision) => {
             ([(header::CACHE_CONTROL, "no-store")], Json(decision))
                 .into_response()
         },
-        Err(error) => failure(error),
+        Err(error) => {
+            tracing::Span::current().record("otel.status_code", "ERROR");
+            failure(error)
+        },
     }
 }
 

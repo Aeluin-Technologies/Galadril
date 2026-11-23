@@ -448,14 +448,26 @@ impl RemoteArchive {
         provider: &impl PermissionProvider,
     ) -> crate::authorization::Decision {
         use crate::authorization::{Decision, Denial};
+        self.authorize_checked(access, runtime, provider)
+            .await
+            .unwrap_or(Decision::Deny(Denial::Runtime))
+    }
+
+    /// Lets the trusted host distinguish a reader expiry from a policy denial.
+    pub async fn authorize_checked(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Result<crate::authorization::Decision, RemoteError> {
+        use crate::authorization::{Decision, Denial};
         if !self.owns(access) {
-            return Decision::Deny(Denial::Runtime);
+            return Ok(Decision::Deny(Denial::Runtime));
         }
-        self.run(async {
-            Some(self.reader.authorize(access, runtime, provider).await)
+        within(self.lifetime, async {
+            Ok(self.reader.authorize(access, runtime, provider).await)
         })
         .await
-        .unwrap_or(Decision::Deny(Denial::Runtime))
     }
 
     /// Releases authorized metadata only within this generation's use window.
