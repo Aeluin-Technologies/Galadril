@@ -110,6 +110,11 @@ revision, value digest and information-flow restrictions. A receipt establishes
 integrity and provenance; it does not replace fresh authorization. Context handles,
 admissions and receipts must be removed before public serialization or prompts.
 
+New receipts group field obligations by ontology, instance, revision and
+operation. The signed representation retains every logical dependency and is
+limited to 4,096 dependencies and 64 KiB on the worker transport. Gateway
+continues to read earlier signed receipts and rechecks their original obligations.
+
 Shared vector, identity and causal state require `gol_state_symbol_key`; derived
 writes additionally require `gol_derived_symbol_key`. Missing routes refuse I/O
 before a SQL transaction or native mutation. When native state lacks complete

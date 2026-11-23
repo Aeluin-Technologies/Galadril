@@ -71,9 +71,9 @@ fn provenance_preserves_repeated_field_dependencies_within_the_wire_budget()
         ModuleVersion::new("e2e.lifecycle".parse()?, Version::new(1, 0, 0))
             .reference("ObservationState".parse()?)
             .into();
-    let dependencies = (0..8)
+    let dependencies = (0..37)
         .flat_map(|instance| {
-            (0..48).map(move |field| Dependency {
+            (0..80).map(move |field| Dependency {
                 ontology: "e2e.lifecycle".into(),
                 target: format!(
                     "e2e.lifecycle::ObservationState.field_{field:02}"
@@ -144,19 +144,34 @@ fn legacy_receipts_preserve_live_dependencies_for_value_reads() -> Result<()> {
     let fields = legacy.as_object_mut().ok_or_else(|| {
         anyhow::anyhow!("The issued receipt lacks a JSON object")
     })?;
-    fields.insert("format".into(), json!(2));
-    fields.insert("dependencies".into(), serde_json::to_value(&dependencies)?);
-    let bytes = serde_json::to_vec(&legacy)?;
-    let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, &key), &bytes);
-    let legacy_token = format!(
-        "{}.{}",
-        URL_SAFE_NO_PAD.encode(&bytes),
-        URL_SAFE_NO_PAD.encode(tag.as_ref())
-    );
-    let verified =
-        signer.verify(&legacy_token, "tenant_a", "observation_1", &value)?;
-    assert!(verified.dependencies == dependencies);
-    assert!(verified.lineage.is_none());
+    for (version, wire) in [
+        (2, serde_json::to_value(&dependencies)?),
+        (
+            3,
+            json!({
+                "strings": ["", "raw:tenant_a/source", "original_etag"],
+                "rows": [[0, 0, 1, 2, Operation::Read]]
+            }),
+        ),
+    ] {
+        fields.insert("format".into(), json!(version));
+        fields.insert("dependencies".into(), wire);
+        let bytes = serde_json::to_vec(&*fields)?;
+        let tag = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, &key), &bytes);
+        let legacy_token = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(&bytes),
+            URL_SAFE_NO_PAD.encode(tag.as_ref())
+        );
+        let verified = signer.verify(
+            &legacy_token,
+            "tenant_a",
+            "observation_1",
+            &value,
+        )?;
+        assert!(verified.dependencies == dependencies);
+        assert!(verified.lineage.is_none());
+    }
     Ok(())
 }
 

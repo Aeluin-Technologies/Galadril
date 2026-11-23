@@ -24,7 +24,9 @@ use uuid::Uuid;
 
 use super::admission::{Actor, Admission, VerifiedInput};
 use super::effect_scope::Permits;
-use super::receipts::{Dependency, LineageOrigin, ReceiptScope};
+use super::receipts::{
+    Dependency, LineageOrigin, MAX_DEPENDENCIES, ReceiptScope,
+};
 use super::runtime::{
     BeginEffects, EffectRequest, EffectResponse, ResumeRequest,
     ResumeResponse, RuntimeError, RuntimeLease, RuntimeRequest, RuntimeSymbol,
@@ -610,7 +612,10 @@ impl GolService {
                     operation: Operation::Describe,
                 });
             }
-            ensure!(history.len() <= 1024, "GOL provenance budget exceeded");
+            ensure!(
+                history.len() <= MAX_DEPENDENCIES,
+                "GOL provenance budget exceeded"
+            );
             symbols.push(RuntimeSymbol {
                 key: described.key,
                 name: described.name,
@@ -1690,8 +1695,15 @@ impl GolService {
             .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?;
         dependencies.extend(observed);
         *phase = "provenance_budget";
-        ensure!(dependencies.len() <= 1024, "GOL provenance budget exceeded");
-        *phase = "release";
+        if dependencies.len() > MAX_DEPENDENCIES {
+            tracing::warn!(
+                event.name = "gol.worker.provenance.capacity",
+                count = dependencies.len(),
+                limit = MAX_DEPENDENCIES,
+            );
+            anyhow::bail!("GOL provenance budget exceeded");
+        }
+        *phase = "sign_receipts";
         let lineage =
             if request.effects.iter().zip(&roots).any(|(effect, access)| {
                 access.route.operation == Operation::Write ||
@@ -1768,6 +1780,7 @@ impl GolService {
             })
             .collect::<Result<Vec<_>>>()?;
         drop(dependencies);
+        *phase = "release";
         let permit = self.workers.permits.begin(
             &request.tenant_id,
             &request.context_id,

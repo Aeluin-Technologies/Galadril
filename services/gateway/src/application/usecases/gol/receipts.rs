@@ -22,7 +22,8 @@ const MAX_RECEIPT_TOKEN_BYTES: usize = 64 * 1024;
 // The worker accepts 64 KiB on the wire, including the 43-byte encoded
 // SHA-256 tag and its separator.
 const MAX_RECEIPT_BYTES: usize = (MAX_RECEIPT_TOKEN_BYTES - 44) / 4 * 3;
-const MAX_DEPENDENCIES: usize = 1024;
+const LEGACY_MAX_DEPENDENCIES: usize = 1024;
+pub(super) const MAX_DEPENDENCIES: usize = 4096;
 
 /// Persisted provenance retains revocable obligations, rather than decisions.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -42,9 +43,17 @@ struct IndexedDependencies<T> {
     rows: Vec<(u16, u16, u16, u16, Operation)>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupedDependencies<T> {
+    strings: Vec<T>,
+    groups: Vec<([u16; 3], Operation, Vec<u16>)>,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum DependenciesWire {
+    Grouped(GroupedDependencies<String>),
     Indexed(IndexedDependencies<String>),
     Legacy(BTreeSet<Dependency>),
 }
@@ -55,64 +64,113 @@ fn serialize_dependencies<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let mut keys = BTreeMap::new();
-    let mut dictionary = IndexedDependencies {
-        strings: Vec::new(),
-        rows: Vec::with_capacity(dependencies.len()),
-    };
+    let mut strings = Vec::new();
+    let mut groups = BTreeMap::<([u16; 3], Operation), Vec<u16>>::new();
     let mut index = |value| match keys.entry(value) {
         Entry::Occupied(entry) => Ok(*entry.get()),
         Entry::Vacant(entry) => {
-            let id = u16::try_from(dictionary.strings.len())
+            let id = u16::try_from(strings.len())
                 .map_err(serde::ser::Error::custom)?;
-            dictionary.strings.push(value);
+            strings.push(value);
             Ok(*entry.insert(id))
         },
     };
     for dependency in dependencies {
-        dictionary.rows.push((
+        let scope = [
             index(dependency.ontology.as_str())?,
-            index(dependency.target.as_str())?,
             index(dependency.instance_id.as_str())?,
             index(dependency.revision.as_str())?,
-            dependency.operation,
-        ));
+        ];
+        groups
+            .entry((scope, dependency.operation))
+            .or_default()
+            .push(index(dependency.target.as_str())?);
     }
-    dictionary.serialize(serializer)
+    GroupedDependencies {
+        strings,
+        groups: groups
+            .into_iter()
+            .map(|((scope, operation), targets)| (scope, operation, targets))
+            .collect(),
+    }
+    .serialize(serializer)
 }
 
 fn deserialize_dependencies<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<BTreeSet<Dependency>, D::Error> {
+    let dependency = |strings: &[String],
+                      ontology,
+                      target,
+                      instance,
+                      revision,
+                      operation| {
+        let read = |key| {
+            strings.get(usize::from(key)).cloned().ok_or_else(|| {
+                serde::de::Error::custom("Invalid GOL dependency reference")
+            })
+        };
+        Ok(Dependency {
+            ontology: read(ontology)?,
+            target: read(target)?,
+            instance_id: read(instance)?,
+            revision: read(revision)?,
+            operation,
+        })
+    };
     match DependenciesWire::deserialize(deserializer)? {
+        DependenciesWire::Grouped(grouped)
+            if grouped.groups.len() <= MAX_DEPENDENCIES &&
+                grouped
+                    .groups
+                    .iter()
+                    .all(|(_, _, targets)| !targets.is_empty()) &&
+                grouped
+                    .groups
+                    .iter()
+                    .map(|(_, _, targets)| targets.len())
+                    .sum::<usize>() <=
+                    MAX_DEPENDENCIES &&
+                grouped.strings.len() <= 4 * MAX_DEPENDENCIES =>
+        {
+            let mut dependencies = BTreeSet::new();
+            for ([ontology, instance, revision], operation, targets) in
+                grouped.groups
+            {
+                for target in targets {
+                    dependencies.insert(dependency(
+                        &grouped.strings,
+                        ontology,
+                        target,
+                        instance,
+                        revision,
+                        operation,
+                    )?);
+                }
+            }
+            Ok(dependencies)
+        },
         DependenciesWire::Legacy(dependencies)
-            if dependencies.len() <= MAX_DEPENDENCIES =>
+            if dependencies.len() <= LEGACY_MAX_DEPENDENCIES =>
         {
             Ok(dependencies)
         },
         DependenciesWire::Indexed(indexed)
-            if indexed.rows.len() <= MAX_DEPENDENCIES &&
+            if indexed.rows.len() <= LEGACY_MAX_DEPENDENCIES &&
                 indexed.strings.len() <= 4 * indexed.rows.len() =>
         {
-            let read = |key| {
-                indexed.strings.get(usize::from(key)).cloned().ok_or_else(
-                    || {
-                        serde::de::Error::custom(
-                            "Invalid GOL dependency reference",
-                        )
-                    },
-                )
-            };
             indexed
                 .rows
                 .into_iter()
                 .map(|(ontology, target, instance, revision, operation)| {
-                    Ok(Dependency {
-                        ontology: read(ontology)?,
-                        target: read(target)?,
-                        instance_id: read(instance)?,
-                        revision: read(revision)?,
+                    dependency(
+                        &indexed.strings,
+                        ontology,
+                        target,
+                        instance,
+                        revision,
                         operation,
-                    })
+                    )
                 })
                 .collect()
         },
@@ -229,7 +287,7 @@ impl ReceiptSigner {
         );
         scope.generation.parse::<Generation>()?;
         let receipt = LabelReceipt {
-            format: 3,
+            format: 4,
             tenant: scope.tenant.to_owned(),
             target: scope.target.clone(),
             instance_id: scope.instance_id.to_owned(),
@@ -323,7 +381,7 @@ impl ReceiptSigner {
         let receipt: LabelReceipt = serde_json::from_slice(&bytes)
             .context("GOL provenance unavailable")?;
         ensure!(
-            matches!(receipt.format, 2 | 3) && receipt.tenant == tenant,
+            matches!(receipt.format, 2..=4) && receipt.tenant == tenant,
             "GOL provenance unavailable"
         );
         receipt.generation.parse::<Generation>()?;
