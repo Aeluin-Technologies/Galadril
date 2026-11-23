@@ -56,7 +56,9 @@ class EventStatus(StrEnum):
 class EventEnvelope(BaseModel):
     """Common identity and causality fields for all durable events."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", hide_input_in_errors=True
+    )
 
     schema_version: Literal[1] = 1
     event_id: UUID = Field(default_factory=uuid4)
