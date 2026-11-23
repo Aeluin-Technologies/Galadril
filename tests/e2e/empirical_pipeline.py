@@ -12,6 +12,8 @@ import pytest
 from assertions import eventually, require_mapping, require_sequence
 from authentication import login_user
 from clients import (
+    ONTOLOGY_ID,
+    PIPELINE_ID,
     POSTGRES_DSN,
     TENANT_ID,
     UPLOADER_ID,
@@ -22,6 +24,7 @@ from clients import (
     authenticated_token,
     canonical_spicedb_object_id,
     read_s3_object,
+    seed_public_clearances,
     upload_presigned,
 )
 from empirical_data import load_retail_rows
@@ -112,11 +115,63 @@ async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
         await grant(domain, reader, "READ")
 
 
+async def _grant_pipeline_execution(
+    spicedb: SpiceDBProbe, actors: set[str]
+) -> None:
+    """Grants the empirical writers access to the exact pipeline and its GOL contracts."""
+    schema_ids = tuple(
+        "-".join(
+            part.encode("utf-8").hex()
+            for part in (TENANT_ID, ONTOLOGY_ID, symbol, "__schema")
+        )
+        for symbol in (
+            "E2EEntity",
+            "E2EObservation",
+            "IdentityPrototype",
+            "ObservationEdge",
+            "ObservationEmbedding",
+            "ObservationState",
+        )
+    )
+    await spicedb.touch(
+        *(
+            RelationshipSpec(
+                resource_type,
+                f"{TENANT_ID}/{resource}",
+                relation,
+                "user",
+                actor,
+            )
+            for actor in sorted(actors - {ADMIN})
+            for resource_type, resource, relation in (
+                ("pipeline", PIPELINE_ID, "executor"),
+                ("ontology", ONTOLOGY_ID, "editor"),
+            )
+        ),
+        *(
+            RelationshipSpec(
+                "gol_resource", resource_id, "metadata_readers", "user", actor
+            )
+            for actor in sorted(actors)
+            for resource_id in schema_ids
+        ),
+    )
+
+
 async def _upload_rows(
     gateway: GatewayClient, spicedb: SpiceDBProbe
 ) -> dict[str, str]:
     """Promotes 36 independently owned Gateway uploads without timing sleeps."""
     uploads = build_retail_uploads(load_retail_rows())
+    first, *_ = uploads
+    actors = {upload.actor for upload in uploads}
+    await _grant_pipeline_execution(spicedb, actors)
+    await seed_public_clearances(*sorted(actors - {first.actor}))
+    promote = """
+        mutation PromoteEmpirical($key: String!, $name: String!, $groupId: String!) {
+          completeUpload(stagingKey: $key, targetName: $name, groupId: $groupId)
+        }
+        """
     keys: dict[str, str] = {}
     for upload in uploads:
         token = authenticated_token(upload.actor)
@@ -140,21 +195,21 @@ async def _upload_rows(
         staging_key = staged.get("stagingKey")
         assert isinstance(upload_url, str) and isinstance(staging_key, str)
         await upload_presigned(upload_url, upload.payload)
-        completed = await gateway.execute(
-            token,
-            """
-            mutation PromoteEmpirical($key: String!, $name: String!, $groupId: String!) {
-              completeUpload(stagingKey: $key, targetName: $name, groupId: $groupId)
-            }
-            """,
-            {
-                "key": staging_key,
-                "name": upload.name,
-                "groupId": upload.data_type,
-            },
-        )
+        variables = {
+            "key": staging_key,
+            "name": upload.name,
+            "groupId": upload.data_type,
+        }
         nonce = staging_key.rsplit("/", 1)[-1]
         key = f"{TENANT_ID}/raw/{upload.data_type}/{nonce}/{upload.name}"
+        if upload is first:
+            with pytest.raises(
+                GraphQLOperationError, match="Upload admission unavailable"
+            ):
+                await gateway.execute(token, promote, variables)
+            assert await read_s3_object(key) is None
+            await seed_public_clearances(upload.actor)
+        completed = await gateway.execute(token, promote, variables)
         assert completed.get("completeUpload") == key
         evidence = await read_s3_object(key)
         assert evidence is not None

@@ -504,6 +504,22 @@ async def seed_users() -> None:
         )
 
 
+async def seed_public_clearances(*user_ids: str) -> None:
+    """Grants Public clearance through the isolated database fixture authority."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        await connection.execute(
+            """
+            INSERT INTO iam_ifc_clearances (tenant_id, user_id, classification, compartments)
+            SELECT %s, subject.user_id, 0, ARRAY[]::TEXT[]
+            FROM unnest(%s::TEXT[]) AS subject(user_id)
+            ON CONFLICT (tenant_id, user_id) DO NOTHING
+            """,
+            (TENANT_ID, list(user_ids)),
+        )
+
+
 class PipelineExecutionError(AssertionError):
     """Reports a durable failure for a pipeline with retries disabled."""
 

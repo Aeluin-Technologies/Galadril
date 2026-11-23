@@ -49,6 +49,38 @@ E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 
 
+def test_fixture_clearance_grant_is_public_and_preserves_existing_clearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fixture authority must keep tenant scope and existing classifications."""
+    statements: list[tuple[str, tuple[object, ...]]] = []
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(
+            self, query: str, parameters: tuple[object, ...]
+        ) -> None:
+            statements.append((" ".join(query.split()), parameters))
+
+    async def connect(dsn: str) -> Connection:
+        assert dsn == e2e_clients.POSTGRES_DSN
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    asyncio.run(e2e_clients.seed_public_clearances("sales-a", "sales-b"))
+
+    ((query, parameters),) = statements
+    assert parameters == (e2e_clients.TENANT_ID, ["sales-a", "sales-b"])
+    assert "INSERT INTO iam_ifc_clearances" in query
+    assert "0, ARRAY[]::TEXT[]" in query
+    assert query.endswith("ON CONFLICT (tenant_id, user_id) DO NOTHING")
+
+
 def test_causal_dispatch_continues_the_completed_sink_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
