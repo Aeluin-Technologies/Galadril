@@ -129,10 +129,14 @@ class GatewayGolClient:
 
     async def open(self, request: GolRequest, admission: str) -> GolLease:
         """Leaves calculation reuse and source provenance under Gateway control."""
+        scope: dict[str, object] = {
+            **request.model_dump(by_alias=True),
+            "admission": admission,
+        }
+        if request.metadata_target is not None:
+            scope["metadataTarget"] = request.metadata_target
         response = await self._post(
-            "/internal/gol/runtime",
-            {**request.model_dump(by_alias=True), "admission": admission},
-            phase="open",
+            "/internal/gol/runtime", scope, phase="open"
         )
         try:
             return GolLease.model_validate_json(response)

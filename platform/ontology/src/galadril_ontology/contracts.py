@@ -129,6 +129,13 @@ class GolRequest(Transport):
     source_object_id: str = Field(
         alias="sourceObjectId", min_length=1, max_length=4096
     )
+    metadata_target: str | None = Field(
+        default=None,
+        alias="metadataTarget",
+        min_length=1,
+        max_length=512,
+        exclude=True,
+    )
 
     @field_validator("tenant_id")
     @classmethod

@@ -100,6 +100,7 @@ class GatewayPublicationGate:
                 pipeline_revision_id=self._revision,
                 block_id=command.step,
                 source_object_id=source,
+                metadata_target=binding.target,
             )
         except ValueError:
             raise GolDenied("GOL publication unavailable") from None

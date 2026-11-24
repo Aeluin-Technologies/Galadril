@@ -35,7 +35,7 @@ use super::receipts::{
 use super::runtime::{
     BeginEffects, EffectRequest, EffectResponse, RequestedEffect,
     ResumeRequest, ResumeResponse, RuntimeError, RuntimeLease, RuntimeRequest,
-    RuntimeSymbol,
+    RuntimeSymbol, worker_metadata_targets,
 };
 use super::spicedb::DecisionProvider;
 use super::{GolService, owner, resolve, snapshot, symbol};
@@ -383,6 +383,9 @@ impl GolService {
             request.pipeline_revision_id.len() > 128 ||
             request.block_id.len() > 128 ||
             request.source_object_id.len() > 1024 ||
+            request.metadata_target.as_ref().is_some_and(|target| {
+                target.is_empty() || target.len() > 512
+            }) ||
             request.admission.len() != 32
         {
             return Err(RuntimeError::Invalid);
@@ -650,7 +653,10 @@ impl GolService {
         let mut symbols = Vec::new();
         let mut schemas = BTreeMap::new();
         let mut reader_lease = Arc::clone(&lease);
-        for key in &lease.targets {
+        for key in worker_metadata_targets(
+            &lease.targets,
+            request.metadata_target.as_deref(),
+        )? {
             let (refreshed, metadata) = retry_worker_metadata(|| {
                 let worker = worker.as_ref();
                 let context_id = context_id.as_str();
@@ -668,6 +674,9 @@ impl GolService {
             .await?;
             reader_lease = refreshed;
             let Some(metadata) = metadata else {
+                if request.metadata_target.is_some() {
+                    return Err(RuntimeError::Denied.into());
+                }
                 continue;
             };
             if let Some(schema) = metadata.schema {

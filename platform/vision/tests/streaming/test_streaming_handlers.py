@@ -957,6 +957,7 @@ async def test_concrete_gate_preserves_scope_and_fresh_release_checks() -> None:
         and request.pipeline_revision_id == "revision-one"
         and request.block_id == "__linked_1"
         and request.source_object_id == "raw:tenant-1/source/object"
+        and request.metadata_target == "communication.mail::Message"
         and admission == "opaque-server-handle"
         for request, admission in gateway.opens
     )

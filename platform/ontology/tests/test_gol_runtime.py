@@ -179,10 +179,16 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
 
     async def test_transport_read_budget_allows_gateway_to_finish(self) -> None:
         """The worker can receive the result of live checks within the proxy budget."""
-        request = WorkerCredential.request()
+        target = "communication.mail::Message"
+        request = WorkerCredential.request().model_copy(
+            update={"metadata_target": target}
+        )
         original_client = httpx.AsyncClient
 
         def transport(outgoing: httpx.Request) -> httpx.Response:
+            self.assertEqual(
+                json.loads(outgoing.content)["metadataTarget"], target
+            )
             self.assertEqual(
                 outgoing.extensions["timeout"],
                 {"connect": 10.0, "read": 35.0, "write": 10.0, "pool": 10.0},
@@ -221,11 +227,14 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         def transport(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/internal/gol/runtime":
                 return httpx.Response(403, text="protected response")
+            self.assertNotIn("metadataTarget", json.loads(request.content))
             raise httpx.ReadTimeout(
                 "protected transport details", request=request
             )
 
-        request = WorkerCredential.request()
+        request = WorkerCredential.request().model_copy(
+            update={"metadata_target": "communication.mail::Message"}
+        )
         client = GatewayGolClient(
             "http://api-proxy:8082", worker_key_path=self.worker_key_path
         )

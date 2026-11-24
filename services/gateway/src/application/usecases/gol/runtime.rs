@@ -34,6 +34,20 @@ pub(crate) struct RuntimeRequest {
     pub block_id: String,
     pub source_object_id: String,
     pub admission: String,
+    pub metadata_target: Option<String>,
+}
+
+/// A projection can only narrow the immutable binding selected by Registry.
+pub(super) fn worker_metadata_targets<'a>(
+    binding: &'a BTreeSet<String>,
+    requested: Option<&str>,
+) -> Result<impl Iterator<Item = &'a String> + use<'a>> {
+    let target = requested
+        .map(|key| binding.get(key).context("GOL metadata target unavailable"))
+        .transpose()?;
+    Ok(binding
+        .iter()
+        .filter(move |key| target.is_none_or(|target| target == *key)))
 }
 
 #[derive(Deserialize)]
@@ -200,6 +214,25 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn worker_metadata_projection_cannot_escape_the_declared_binding()
+    -> Result<()> {
+        let declared =
+            BTreeSet::from(["mail::Message".into(), "mail::Thread".into()]);
+        assert_eq!(
+            worker_metadata_targets(&declared, Some("mail::Message"))?
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["mail::Message"]
+        );
+        assert!(
+            worker_metadata_targets(&declared, Some("other::Message"))
+                .is_err()
+        );
+        assert_eq!(worker_metadata_targets(&declared, None)?.count(), 2);
+        Ok(())
+    }
 
     #[test]
     fn read_selection_requires_only_concrete_signed_reads() -> Result<()> {
