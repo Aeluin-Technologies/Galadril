@@ -154,7 +154,15 @@ def test_retail_smoke_preserves_actor_scopes_and_repeated_observations() -> (
     assert {
         upload.actor for upload in uploads if upload.data_type == "returns"
     } == set(RETURNS_STEWARDS)
-    assert len(build_access_oracle(uploads)["e2e-exact-reader"]) == 1
+    access = build_access_oracle(uploads)
+    assert access["e2e-exact-reader"] == {"sales-00.csv"}
+    assert access["e2e-analyst"] == {
+        "returns-00.csv",
+        "returns-02.csv",
+        "sales-01.csv",
+        "sales-03.csv",
+        "sales-05.csv",
+    }
     assert sum(len(upload.rows) for upload in uploads) == len(rows)
 
 

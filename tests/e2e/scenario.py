@@ -209,7 +209,7 @@ def build_access_oracle(
     access["e2e-sales-reader"] = sales
     access["e2e-returns-reader"] = returns
     access["e2e-analyst"] = frozenset(
-        upload.name for index, upload in enumerate(uploads) if index % 2 == 0
+        name for index, name in enumerate(sorted(names)) if index % 2 == 0
     )
     access["e2e-exact-reader"] = frozenset({"sales-00.csv"})
     access["e2e-member"] = frozenset()

@@ -1,5 +1,7 @@
 """Checks the real E2E DAG without importing model or Docker runtimes."""
 
+import re
+
 import pytest
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
@@ -15,6 +17,21 @@ def test_empirical_pipeline_routes_are_streaming_safe() -> None:
     assert routes.entry_steps("e2e_empirical") == ("empirical_infer",)
     assert routes.route("empirical_resolve").dependencies == (
         "empirical_infer",
+    )
+
+
+@pytest.mark.parametrize("size", [24, 205])
+def test_each_trial_cohort_matches_the_published_intake_source(
+    size: int,
+) -> None:
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    source = next(
+        source for source in config.sources if source.id == "e2e_empirical"
+    )
+    assert re.fullmatch(
+        source.match_pattern, f"tenant/raw/trial/{'a' * 32}/trial-{size}.csv"
     )
 
 

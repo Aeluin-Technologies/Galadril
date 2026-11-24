@@ -21,7 +21,7 @@ def pipeline_fixture(tenant_id: str, pipeline_id: str) -> dict[str, object]:
                 "id": "e2e_empirical",
                 "topic": "e2e.raw",
                 "match_pattern": (
-                    rf"^{tenant_id}/raw/(?:sales/(?:[a-f0-9]{{32}}/)?sales-[0-9]{{2}}|returns/(?:[a-f0-9]{{32}}/)?returns-[0-9]{{2}}|trial/(?:[a-f0-9]{{32}}/)?trial-205)\.csv$"
+                    rf"^{tenant_id}/raw/(?:sales/(?:[a-f0-9]{{32}}/)?sales-[0-9]{{2}}|returns/(?:[a-f0-9]{{32}}/)?returns-[0-9]{{2}}|trial/(?:[a-f0-9]{{32}}/)?trial-(?:24|205))\.csv$"
                 ),
                 "schema_path": "schemas/avro/text.avsc",
                 "parser": "csv",
