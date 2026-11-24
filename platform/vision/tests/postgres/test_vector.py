@@ -9,7 +9,10 @@ import pytest
 from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import EntityEmbedding
-from galadril_vision.connectors.postgres.vector import VectorStore
+from galadril_vision.connectors.postgres.vector import (
+    CandidateSnapshot,
+    VectorStore,
+)
 
 
 @pytest.mark.anyio
@@ -155,6 +158,37 @@ async def test_prototype_reads_share_bounded_authorization_batches(
     assert sum(batch_sizes) == count
     assert max(batch_sizes) <= 64
     assert len(batch_sizes) == (count + 31) // 32
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("revisions", "confirmed"),
+    [
+        ([("entity-a", "revision-a")], True),
+        ([("entity-a", "changed")], False),
+        ([], False),
+        ([("entity-a", "revision-a"), ("entity-b", "revision-b")], False),
+    ],
+)
+async def test_confirmation_detects_changes_to_even_denied_prototypes(
+    mock_postgres_client: MagicMock,
+    mock_config: MagicMock,
+    revisions: list[tuple[str, str]],
+    confirmed: bool,
+) -> None:
+    store = VectorStore(mock_postgres_client, mock_config)
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=revisions)
+    snapshot = CandidateSnapshot((), (("entity-a", "revision-a"),))
+    assert (
+        await store.confirm_resolution_candidates(
+            connection, "tenant-a", "text", snapshot
+        )
+        is confirmed
+    )
+    statement, parameters = connection.execute.call_args.args
+    assert statement.startswith("SELECT entity_id, prototype_revision::text")
+    assert parameters == ("tenant-a", "text")
 
 
 @pytest.fixture

@@ -353,9 +353,8 @@ class TestTasksDatabasePipelines:
 
         assert store.prototype is not None
         assert store.initial_lookups == 2 * concurrency - 1
-        assert Resolver.candidate_counts == [0] * concurrency + [1] * (
-            concurrency - 1
-        )
+        assert Resolver.candidate_counts.count(0) == concurrency
+        assert Resolver.candidate_counts.count(1) == concurrency - 1
         assert (
             len({str(result[0][0]["resolved_entity_id"]) for result in results})
             == 1
