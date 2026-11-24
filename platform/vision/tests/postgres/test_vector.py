@@ -28,23 +28,26 @@ async def test_candidate_ranking_follows_receipt_authorization(
     }
     connection = _connection_mock()
     connection.execute.return_value.fetchall = AsyncMock(
-        return_value=[("entity-a", value, "signed-receipt")]
+        return_value=[("entity-a", value, "signed-receipt", "revision-a")]
     )
     held = False
 
     @asynccontextmanager
-    async def authorized(**kwargs: object) -> AsyncIterator[str]:
+    async def authorized(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
         nonlocal held
-        assert kwargs["receipt"] == "signed-receipt"
-        assert kwargs["proposal"] == value
+        assert tenant_id == "tenant-a"
+        assert effects[0].receipt == "signed-receipt"
+        assert effects[0].proposal == value
         held = True
         try:
-            yield "read-receipt"
+            yield (True,)
         finally:
             held = False
 
     with patch(
-        "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
         new=authorized,
     ):
         candidates = await store.find_resolution_candidates(
@@ -78,8 +81,8 @@ async def test_unreadable_candidates_cannot_displace_readable_ones(
         "embedding": [1.0, 0.0, 0.0, 0.0],
     }
     rows = [
-        ("public", public, "public-receipt"),
-        ("secret", secret, "secret-receipt"),
+        ("public", public, "public-receipt", "public-revision"),
+        ("secret", secret, "secret-receipt", "secret-revision"),
     ]
     if secret_first:
         rows.reverse()
@@ -87,14 +90,15 @@ async def test_unreadable_candidates_cannot_displace_readable_ones(
     connection.execute.return_value.fetchall = AsyncMock(return_value=rows)
 
     @asynccontextmanager
-    async def authorized(**kwargs: object) -> AsyncIterator[str]:
-        if kwargs["receipt"] == "secret-receipt":
-            raise GolDenied("Denied")
-        yield "read-receipt"
+    async def authorized(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        assert tenant_id == "tenant-a"
+        yield tuple(effect.receipt != "secret-receipt" for effect in effects)
 
     store = VectorStore(mock_postgres_client, mock_config)
     with patch(
-        "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
         new=authorized,
     ):
         candidates = await store.find_resolution_candidates(
@@ -105,6 +109,52 @@ async def test_unreadable_candidates_cannot_displace_readable_ones(
             connection=connection,
         )
     assert [candidate.entity_id for candidate in candidates] == ["public"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("count", [1, 16, 128, 512])
+async def test_prototype_reads_share_bounded_authorization_batches(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, count: int
+) -> None:
+    store = VectorStore(mock_postgres_client, mock_config)
+    rows = [
+        (
+            f"entity-{i}",
+            {
+                "entity_id": f"entity-{i}",
+                "licorne_identity_id": str(i + 1),
+                "modality": "text",
+                "embedding": [1.0, 0.0, 0.0, 0.0],
+                "observation_key": "test",
+            },
+            f"receipt-{i}",
+            f"revision-{i}",
+        )
+        for i in range(count)
+    ]
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=rows)
+    batch_sizes: list[int] = []
+
+    @asynccontextmanager
+    async def authorize(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        assert tenant_id == "tenant-a"
+        batch_sizes.append(len(effects))
+        yield tuple(effect.instance_id == "entity-0" for effect in effects)
+
+    with patch(
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
+        new=authorize,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [1.0, 0.0, 0.0, 0.0], "text", "tenant-a", 1, connection=connection
+        )
+    assert [candidate.entity_id for candidate in candidates] == ["entity-0"]
+    assert sum(batch_sizes) == count
+    assert max(batch_sizes) <= 64
+    assert len(batch_sizes) == (count + 31) // 32
 
 
 @pytest.fixture
@@ -405,7 +455,7 @@ def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
         return
     with (
         patch(
-            "galadril_vision.connectors.postgres.vector.protected_gol_effect",
+            "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
             new=_unit_scope,
         ),
         patch(
@@ -453,7 +503,6 @@ async def test_vector_sql_is_inside_the_live_effect_scope(
     with patch(
         "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
         new=scope,
-        create=True,
     ):
         assert await VectorStore(
             mock_postgres_client, mock_config

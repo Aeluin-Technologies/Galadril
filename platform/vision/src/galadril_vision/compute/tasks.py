@@ -42,6 +42,7 @@ from galadril_vision.compute.helpers import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import (
+    CandidateSnapshot,
     IdentityCandidate,
     VectorStore,
 )
@@ -245,28 +246,18 @@ async def resolve_entities_batch(
             record_id = str(record.get("record_id") or "record")
             observation_key = f"{record_id}:{modality_key}:{ordinal}"
 
-            async def find_candidates(
-                connection: AsyncConnection[TupleRow] | None = None,
-            ) -> Sequence[IdentityCandidate | _LegacyCandidate]:
+            async def find_candidates() -> Sequence[
+                IdentityCandidate | _LegacyCandidate
+            ]:
                 try:
                     if hasattr(vector_store, "find_resolution_candidates"):
-                        if connection is not None:
-                            search = vector_store.find_resolution_candidates(
-                                embedding=padded_vector,
-                                modality=modality_key,
-                                tenant_id=tenant_id_val,
-                                top_k=candidate_top_k,
-                                connection=connection,
-                            )
-                        else:
-                            search = vector_store.find_resolution_candidates(
-                                embedding=padded_vector,
-                                modality=modality_key,
-                                tenant_id=tenant_id_val,
-                                top_k=candidate_top_k,
-                            )
                         return await asyncio.wait_for(
-                            search,
+                            vector_store.find_resolution_candidates(
+                                embedding=padded_vector,
+                                modality=modality_key,
+                                tenant_id=tenant_id_val,
+                                top_k=candidate_top_k,
+                            ),
                             timeout=_get_vector_search_timeout_s(
                                 postgres_config
                             ),
@@ -333,21 +324,57 @@ async def resolve_entities_batch(
                 )
 
             if resolver is not None and isinstance(vector_store, VectorStore):
-                async with vector_store.resolution_transaction(
-                    tenant_id_val, modality_key
-                ) as connection:
-                    candidates = await find_candidates(connection)
-                    decision = await native_decision(resolver, candidates)
-                    if (
-                        decision.entity_id is not None
-                        and decision.licorne_identity_id is not None
-                        and not any(
-                            candidate.entity_id == decision.entity_id
-                            for candidate in candidates
+
+                async def discover() -> CandidateSnapshot:
+                    try:
+                        return await asyncio.wait_for(
+                            vector_store.discover_resolution_candidates(
+                                embedding=padded_vector,
+                                modality=modality_key,
+                                tenant_id=tenant_id_val,
+                                top_k=candidate_top_k,
+                            ),
+                            timeout=_get_vector_search_timeout_s(
+                                postgres_config
+                            ),
                         )
-                    ):
-                        await (
-                            vector_store.store_identity_prototype_on_connection(
+                    except TimeoutError:
+                        logger.warning(
+                            "identity.candidate_search.failed",
+                            reason="deadline",
+                        )
+                        raise IdentityResolutionError(
+                            "candidate discovery timed out"
+                        ) from None
+                    except Exception:
+                        logger.warning(
+                            "identity.candidate_search.failed", reason="backend"
+                        )
+                        raise IdentityResolutionError(
+                            "candidate discovery failed"
+                        ) from None
+
+                for _ in range(4):
+                    snapshot = await discover()
+                    decision = await native_decision(
+                        resolver, snapshot.candidates
+                    )
+                    async with vector_store.resolution_transaction(
+                        tenant_id_val, modality_key
+                    ) as connection:
+                        if not await vector_store.confirm_resolution_candidates(
+                            connection, tenant_id_val, modality_key, snapshot
+                        ):
+                            continue
+                        if (
+                            decision.entity_id is not None
+                            and decision.licorne_identity_id is not None
+                            and not any(
+                                candidate.entity_id == decision.entity_id
+                                for candidate in snapshot.candidates
+                            )
+                        ):
+                            await vector_store.store_identity_prototype_on_connection(
                                 connection,
                                 tenant_id=tenant_id_val,
                                 modality=modality_key,
@@ -356,7 +383,11 @@ async def resolve_entities_batch(
                                 observation_key=observation_key,
                                 spatial=spatial,
                             )
-                        )
+                        break
+                else:
+                    raise IdentityResolutionError(
+                        "identity candidate domain changed during confirmation"
+                    )
             else:
                 candidates = await find_candidates()
                 if resolver is None:

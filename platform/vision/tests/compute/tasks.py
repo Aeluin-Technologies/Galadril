@@ -21,6 +21,7 @@ from galadril_vision.compute.tasks import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import (
+    CandidateSnapshot,
     IdentityCandidate,
     VectorStore,
 )
@@ -203,16 +204,20 @@ class TestTasksDatabasePipelines:
 
     @pytest.mark.anyio
     @pytest.mark.parametrize("first_created", [False, True])
+    @pytest.mark.parametrize("concurrency", [2, 8])
     async def test_overlapping_resolves_share_a_durable_identity_candidate(
         self,
         first_created: bool,
+        concurrency: int,
     ) -> None:
-        """Serializes candidate lookup and creation before the sink step."""
+        """Confirms concurrent lookups before publishing a single prototype."""
 
         class CandidateStore(VectorStore):
             def __init__(self) -> None:
                 super().__init__(MagicMock(), _postgres_config())
                 self.lock = asyncio.Lock()
+                self.initial_lookups = 0
+                self.both_searching = asyncio.Event()
                 self.prototype: tuple[str, int, tuple[float, ...]] | None = None
 
             @asynccontextmanager
@@ -224,26 +229,44 @@ class TestTasksDatabasePipelines:
                 async with self.lock:
                     yield object()
 
-            async def find_resolution_candidates(
+            async def discover_resolution_candidates(
                 self,
                 embedding: Sequence[float],
                 modality: str,
                 tenant_id: str,
                 top_k: int,
-                *,
-                connection: object | None = None,
-            ) -> list[IdentityCandidate]:
-                assert connection is not None
+            ) -> CandidateSnapshot:
+                assert not self.lock.locked()
                 assert tenant_id == "acme"
                 assert modality == "face"
                 assert top_k == 8
                 assert len(embedding) == 1024
-                if self.prototype is None:
-                    return []
-                entity_id, identity_id, _ = self.prototype
-                return [
-                    IdentityCandidate(entity_id, 0.99, modality, identity_id)
-                ]
+                prototype = self.prototype
+                self.initial_lookups += 1
+                if self.initial_lookups == concurrency:
+                    self.both_searching.set()
+                await asyncio.wait_for(self.both_searching.wait(), timeout=1)
+                if prototype is None:
+                    return CandidateSnapshot((), ())
+                entity_id, identity_id, _ = prototype
+                return CandidateSnapshot(
+                    (
+                        IdentityCandidate(
+                            entity_id, 0.99, modality, identity_id
+                        ),
+                    ),
+                    ((entity_id, "revision"),),
+                )
+
+            async def confirm_resolution_candidates(
+                self,
+                connection: object,
+                tenant_id: str,
+                modality: str,
+                snapshot: CandidateSnapshot,
+            ) -> bool:
+                assert self.lock.locked()
+                return bool(snapshot.revisions) == (self.prototype is not None)
 
             async def store_identity_prototype_on_connection(
                 self,
@@ -324,19 +347,21 @@ class TestTasksDatabasePipelines:
             "galadril_vision.compute.tasks.get_pg_stores",
             return_value=(MagicMock(), store, MagicMock()),
         ):
-            first, second = await asyncio.gather(resolve("one"), resolve("two"))
+            results = await asyncio.gather(
+                *(resolve(str(index)) for index in range(concurrency))
+            )
 
         assert store.prototype is not None
-        assert Resolver.candidate_counts == [0, 1]
+        assert store.initial_lookups == 2 * concurrency - 1
+        assert Resolver.candidate_counts == [0] * concurrency + [1] * (
+            concurrency - 1
+        )
         assert (
-            first[0][0]["resolved_entity_id"]
-            == second[0][0]["resolved_entity_id"]
+            len({str(result[0][0]["resolved_entity_id"]) for result in results})
+            == 1
         )
         assert sum(
-            (
-                bool(first[0][0]["licorne_created_identity"]),
-                bool(second[0][0]["licorne_created_identity"]),
-            )
+            bool(result[0][0]["licorne_created_identity"]) for result in results
         ) == int(first_created)
 
     @pytest.mark.anyio

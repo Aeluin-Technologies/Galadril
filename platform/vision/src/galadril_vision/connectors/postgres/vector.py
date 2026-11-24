@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
@@ -14,13 +14,13 @@ from uuid import uuid4
 import orjson
 import structlog
 from galadril_ontology import (
-    GolDenied,
     GolEffect,
+    authorized_gol_reads,
     make_gol_state_effect,
-    protected_gol_effect,
     protected_gol_effects,
     protected_gol_state_effect,
 )
+from opentelemetry import trace
 from pgvector.psycopg import register_vector_async
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
@@ -45,22 +45,38 @@ if TYPE_CHECKING:
     )
 
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+_MAX_PROTOTYPES = 4096
+_MAX_READ_BATCH = 32
+# Leave room for the trusted runtime scope and permit metadata on the wire.
+_READ_BATCH_BYTES = 152 * 1024
+_PROTOTYPE_DOMAIN = """
+    FROM identity_prototypes
+    WHERE tenant_id = %s AND modality = %s
+      AND gol_value IS NOT NULL AND gol_receipt IS NOT NULL
+    ORDER BY entity_id
+    LIMIT 4097
+"""
+
+
+def _normalize_similarity_vector(vector: Sequence[float]) -> tuple[float, ...]:
+    """Rescaling avoids overflow and underflow for finite signed vectors."""
+    scale = max(abs(value) for value in vector)
+    if scale == 0:
+        return ()
+    norm = math.sqrt(math.fsum((value / scale) ** 2 for value in vector))
+    return tuple(value / scale / norm for value in vector)
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
-    """Rescaling avoids overflow and underflow for finite signed vectors."""
-    left_scale = max(abs(value) for value in left)
     right_scale = max(abs(value) for value in right)
-    if left_scale == 0 or right_scale == 0:
+    if not left or right_scale == 0:
         return 0.0
-    left_norm = math.sqrt(
-        math.fsum((value / left_scale) ** 2 for value in left)
-    )
     right_norm = math.sqrt(
         math.fsum((value / right_scale) ** 2 for value in right)
     )
     similarity = math.fsum(
-        (a / left_scale / left_norm) * (b / right_scale / right_norm)
+        a * (b / right_scale / right_norm)
         for a, b in zip(left, right, strict=True)
     )
     return max(-1.0, min(similarity, 1.0))
@@ -83,6 +99,14 @@ class IdentityCandidate:
     latitude: float | None = None
     longitude: float | None = None
     accuracy_meters: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateSnapshot:
+    """The ranking and its exact backing catalogue, including denied rows."""
+
+    candidates: tuple[IdentityCandidate, ...]
+    revisions: tuple[tuple[str, str], ...]
 
 
 class _PrototypeValue(BaseModel):
@@ -280,7 +304,7 @@ class VectorStore:
     async def resolution_transaction(
         self, tenant_id: str, modality: str
     ) -> AsyncIterator[AsyncConnection[TupleRow]]:
-        """Serializes candidate discovery and new identity publication."""
+        """Serializes only confirmation and publication for this domain."""
         tenant_id = normalize_tenant_id(tenant_id)
         modality = normalize_embedding_modality(modality)
         digest = hashlib.blake2b(digest_size=8, person=b"gala-id")
@@ -292,7 +316,14 @@ class VectorStore:
             await conn.execute(
                 "SELECT set_config('lock_timeout', %s, true)", ("30s",)
             )
-            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            with tracer.start_as_current_span(
+                "vision.identity.lock.wait",
+                record_exception=False,
+                set_status_on_exception=False,
+            ):
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(%s)", (lock_key,)
+                )
             yield conn
 
     async def store_identity_prototype_on_connection(
@@ -385,6 +416,21 @@ class VectorStore:
         connection: AsyncConnection[TupleRow] | None = None,
     ) -> list[IdentityCandidate]:
         """Ranks only values whose signed provenance and live read routes pass."""
+        snapshot = await self.discover_resolution_candidates(
+            embedding, modality, tenant_id, top_k, connection=connection
+        )
+        return list(snapshot.candidates)
+
+    async def discover_resolution_candidates(
+        self,
+        embedding: Sequence[float],
+        modality: str | EmbeddingModality,
+        tenant_id: str,
+        top_k: int,
+        *,
+        connection: AsyncConnection[TupleRow] | None = None,
+    ) -> CandidateSnapshot:
+        """Finishes the SQL snapshot before opening any Gateway read scope."""
         tenant_id = normalize_tenant_id(tenant_id)
         modality_key = normalize_embedding_modality(modality)
         target = make_gol_state_effect(
@@ -398,65 +444,150 @@ class VectorStore:
             raise VectorSearchError("Invalid identity vector")
         if not 1 <= top_k <= 256:
             raise VectorSearchError("Invalid identity candidate limit")
+        normalized = _normalize_similarity_vector(vector)
+
+        async def read(connection: AsyncConnection[TupleRow]) -> list[TupleRow]:
+            with tracer.start_as_current_span(
+                "vision.identity.sql.discover",
+                record_exception=False,
+                set_status_on_exception=False,
+            ) as span:
+                cursor = await connection.execute(
+                    "SELECT entity_id, gol_value, gol_receipt, prototype_revision::text "
+                    + _PROTOTYPE_DOMAIN,
+                    (tenant_id, modality_key),
+                )
+                rows = await cursor.fetchall()
+                span.set_attribute("identity.prototype.count", len(rows))
+                return rows
+
         if connection is None:
             async with self._client.tenant_connection(tenant_id) as conn:
-                return await self.find_resolution_candidates(
-                    vector, modality_key, tenant_id, top_k, connection=conn
-                )
-        # Never let an unauthorized row enter a SQL ranking, join, or LIMIT.
-        cursor = await connection.execute(
-            """
-            SELECT entity_id, gol_value, gol_receipt
-            FROM identity_prototypes
-            WHERE tenant_id = %s AND modality = %s
-              AND gol_value IS NOT NULL AND gol_receipt IS NOT NULL
-            ORDER BY entity_id
-            LIMIT 4097
-            """,
-            (tenant_id, modality_key),
-        )
-        rows = await cursor.fetchall()
-        if len(rows) > 4096:
+                rows = await read(conn)
+        else:
+            rows = await read(connection)
+        if len(rows) > _MAX_PROTOTYPES:
             raise VectorSearchError("Identity candidate budget exceeded")
-        candidates = []
-        for entity_id, value, receipt in rows:
-            if not isinstance(value, dict) or not isinstance(receipt, str):
-                raise VectorSearchError("Identity provenance unavailable")
-            try:
-                async with protected_gol_effect(
-                    operation="read",
-                    target=target,
-                    tenant_id=tenant_id,
-                    destination="identity_state",
-                    purpose="identity_resolution",
-                    instance_id=str(entity_id),
-                    proposal=value,
-                    receipt=receipt,
-                ):
-                    prototype = _PrototypeValue.model_validate(value)
-                    if prototype.entity_id != entity_id:
-                        raise VectorSearchError("Identity provenance mismatch")
-                    if prototype.modality != modality_key:
-                        raise VectorSearchError("Identity modality mismatch")
-                    identity = int(prototype.licorne_identity_id)
-                    if not 0 < identity < (1 << 63):
-                        raise VectorSearchError("Invalid identity prototype")
-                    stored = self._validate_embedding(prototype.embedding)
-                    candidates.append(
-                        IdentityCandidate(
-                            entity_id=str(entity_id),
-                            similarity=_cosine_similarity(vector, stored),
-                            modality=modality_key,
-                            licorne_identity_id=identity,
-                            latitude=prototype.latitude,
-                            longitude=prototype.longitude,
-                            accuracy_meters=prototype.accuracy_meters,
-                        )
+        revisions: list[tuple[str, str]] = []
+        batches: list[GolEffect] = []
+        batch_bytes = 0
+        candidates: list[IdentityCandidate] = []
+
+        async def score_batch() -> None:
+            async with AsyncExitStack() as stack:
+                with tracer.start_as_current_span(
+                    "vision.identity.gol.authorize",
+                    record_exception=False,
+                    set_status_on_exception=False,
+                ) as span:
+                    span.set_attribute("identity.prototype.count", len(batches))
+                    allowed = await stack.enter_async_context(
+                        authorized_gol_reads(batches, tenant_id=tenant_id)
                     )
-            except GolDenied:
-                logger.info("identity.candidate.denied")
+                with tracer.start_as_current_span(
+                    "vision.identity.similarity",
+                    record_exception=False,
+                    set_status_on_exception=False,
+                ) as scoring:
+                    scoring.set_attribute(
+                        "identity.prototype.count", sum(allowed)
+                    )
+                    candidates.extend(
+                        self._score_prototype(effect, modality_key, normalized)
+                        for effect, accepted in zip(
+                            batches, allowed, strict=True
+                        )
+                        if accepted
+                    )
+
+        for entity_id, value, receipt, revision in rows:
+            if (
+                not isinstance(entity_id, str)
+                or not isinstance(value, dict)
+                or not isinstance(receipt, str)
+                or not isinstance(revision, str)
+            ):
+                raise VectorSearchError("Identity provenance unavailable")
+            revisions.append((entity_id, revision))
+            effect = GolEffect(
+                operation="read",
+                target=target,
+                destination="identity_state",
+                purpose="identity_resolution",
+                instance_id=entity_id,
+                proposal=value,
+                receipt=receipt,
+            )
+            size = (
+                len(
+                    orjson.dumps(
+                        effect.model_dump(by_alias=True, exclude_none=True)
+                    )
+                )
+                + 1
+            )
+            if batches and (
+                len(batches) >= _MAX_READ_BATCH
+                or batch_bytes + size > _READ_BATCH_BYTES
+            ):
+                await score_batch()
+                batches.clear()
+                batch_bytes = 0
+            batches.append(effect)
+            batch_bytes += size
+        if batches:
+            await score_batch()
         candidates.sort(key=lambda item: (-item.similarity, item.entity_id))
-        return candidates[:top_k]
+        return CandidateSnapshot(tuple(candidates[:top_k]), tuple(revisions))
+
+    async def confirm_resolution_candidates(
+        self,
+        connection: AsyncConnection[TupleRow],
+        tenant_id: str,
+        modality: str,
+        snapshot: CandidateSnapshot,
+    ) -> bool:
+        """Detects updates, insertions and deletions before a decision can commit."""
+        with tracer.start_as_current_span(
+            "vision.identity.sql.confirm",
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            cursor = await connection.execute(
+                "SELECT entity_id, prototype_revision::text "
+                + _PROTOTYPE_DOMAIN,
+                (
+                    normalize_tenant_id(tenant_id),
+                    normalize_embedding_modality(modality),
+                ),
+            )
+            unchanged = tuple(await cursor.fetchall()) == snapshot.revisions
+            span.set_attribute(
+                "identity.prototype.snapshot_confirmed", unchanged
+            )
+            return unchanged
+
+    def _score_prototype(
+        self, effect: GolEffect, modality: str, vector: Sequence[float]
+    ) -> IdentityCandidate:
+        prototype = _PrototypeValue.model_validate(effect.proposal)
+        if prototype.entity_id != effect.instance_id:
+            raise VectorSearchError("Identity provenance mismatch")
+        if prototype.modality != modality:
+            raise VectorSearchError("Identity modality mismatch")
+        identity = int(prototype.licorne_identity_id)
+        if not 0 < identity < (1 << 63):
+            raise VectorSearchError("Invalid identity prototype")
+        stored = self._validate_embedding(prototype.embedding)
+        return IdentityCandidate(
+            entity_id=prototype.entity_id,
+            similarity=_cosine_similarity(vector, stored),
+            modality=modality,
+            licorne_identity_id=identity,
+            latitude=prototype.latitude,
+            longitude=prototype.longitude,
+            accuracy_meters=prototype.accuracy_meters,
+        )
 
     async def has_embeddings(
         self,

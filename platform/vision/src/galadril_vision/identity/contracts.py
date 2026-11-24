@@ -68,5 +68,5 @@ class IdentityResolver(Protocol):
     """Async resolution contract consumed by the compute pipeline."""
 
     async def resolve(self, request: ResolutionRequest) -> ResolutionDecision:
-        """Resolves one observation against a bounded candidate domain."""
+        """Evaluates one snapshot without durable writes, so confirmation can retry."""
         ...
