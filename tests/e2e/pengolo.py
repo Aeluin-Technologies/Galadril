@@ -142,10 +142,14 @@ async def _invalid_input(
 
 
 async def _events(
-    gateway: GatewayClient, identifier: str, *, temporary: bool = False
+    gateway: GatewayClient,
+    identifier: str,
+    *,
+    actor: str = UPLOADER_ID,
+    temporary: bool = False,
 ) -> dict[str, object]:
     result = await gateway.execute(
-        authenticated_token(UPLOADER_ID),
+        authenticated_token(actor),
         "query Events($id:String!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:0, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
         {"id": identifier, "temporary": temporary},
     )
@@ -157,9 +161,13 @@ class GenerationFailure(RuntimeError):
 
 
 async def _completed(
-    gateway: GatewayClient, identifier: str, *, temporary: bool = False
+    gateway: GatewayClient,
+    identifier: str,
+    *,
+    actor: str = UPLOADER_ID,
+    temporary: bool = False,
 ) -> dict[str, object] | None:
-    page = await _events(gateway, identifier, temporary=temporary)
+    page = await _events(gateway, identifier, actor=actor, temporary=temporary)
     if page.get("status") in {"failed", "cancelled"}:
         raise GenerationFailure(f"Pengolo generation is terminal: {page}")
     return page if page.get("status") == "completed" else None
@@ -649,13 +657,12 @@ async def exercise_pengolo(
         },
         actor=OUTSIDER_ID,
     )
+    accessible_id = _text(_object(accessible.get("generation")), "id")
     await eventually(
-        lambda: _completed(
-            gateway, _text(_object(accessible.get("generation")), "id")
-        ),
+        lambda: _completed(gateway, accessible_id, actor=OUTSIDER_ID),
         timeout_seconds=30,
         description="shared project without private graph context",
-        abort_on=(GenerationFailure,),
+        abort_on=(GenerationFailure, GraphQLOperationError),
     )
     restricted = await _object_mutation(
         gateway,

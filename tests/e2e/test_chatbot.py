@@ -106,6 +106,36 @@ def test_pengolo_input_denials_require_precise_graphql_validation(
             asyncio.run(operation)
 
 
+def test_pengolo_follows_backend_events_with_the_initiating_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class EventsGateway(GatewayClient):
+        def __init__(self) -> None:
+            pass
+
+        async def execute(
+            self,
+            token: str,
+            query: str,
+            variables: Mapping[str, object] | None = None,
+            *,
+            trace_id: str | None = None,
+        ) -> dict[str, object]:
+            assert token == "token:shared-project-member"
+            assert "pengoloEvents" in query
+            assert variables == {"id": "member-generation", "temporary": False}
+            return {"pengoloEvents": {"status": "completed"}}
+
+    monkeypatch.setattr(
+        pengolo, "authenticated_token", lambda actor: f"token:{actor}"
+    )
+    assert asyncio.run(
+        pengolo._completed(
+            EventsGateway(), "member-generation", actor="shared-project-member"
+        )
+    ) == {"status": "completed"}
+
+
 @pytest.mark.parametrize("status", ["failed", "cancelled"])
 def test_pengolo_terminal_failure_aborts_polling(
     monkeypatch: pytest.MonkeyPatch, status: str
@@ -113,10 +143,16 @@ def test_pengolo_terminal_failure_aborts_polling(
     calls = 0
 
     async def events(
-        gateway: GatewayClient, identifier: str, *, temporary: bool = False
+        gateway: GatewayClient,
+        identifier: str,
+        *,
+        actor: str,
+        temporary: bool = False,
     ) -> dict[str, object]:
         nonlocal calls
         calls += 1
+        assert actor == pengolo.UPLOADER_ID
+        assert temporary
         return {"status": status, "events": []}
 
     monkeypatch.setattr(pengolo, "_events", events)
