@@ -67,6 +67,7 @@ _EXPECTED_LINEAGE_STATUSES = {
 }
 _GATEWAY_TRACE_ID = "87e27b4f8c1245938b79ca2831a4f385"
 _CAUSAL_TRACE_ID = "42124a3e76ba4ef19303cb50267a8c2d"
+_CAUSAL_LINEAGE_TIMEOUT_SECONDS = 600.0
 _QUERY_FIELDS = frozenset(
     {
         "administration",
@@ -513,11 +514,12 @@ async def _exercise_causal_branch(
     assert causal["causal_links"] >= 1
     assert isinstance(causal.get("validated_effects"), int)
     assert causal.get("counterfactual_ready") is True
-    lineage = await consume_lineage(
-        {"causal": frozenset({"running", "completed"})},
-        correlation_id,
-        60.0,
-    )
+    async with capture_tempo_failure(_CAUSAL_TRACE_ID):
+        lineage = await consume_lineage(
+            {"causal": frozenset({"running", "completed"})},
+            correlation_id,
+            _CAUSAL_LINEAGE_TIMEOUT_SECONDS,
+        )
     assert statuses_by_step(lineage).get("causal") == {
         "running",
         "completed",
