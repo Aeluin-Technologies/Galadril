@@ -21,6 +21,7 @@ where
                     matches!(
                         status.code(),
                         tonic::Code::Cancelled |
+                            tonic::Code::Internal |
                             tonic::Code::Unavailable |
                             tonic::Code::DeadlineExceeded |
                             tonic::Code::ResourceExhausted |

@@ -870,6 +870,7 @@ mod tests {
     {
         for (code, expected) in [
             (tonic::Code::Cancelled, 3),
+            (tonic::Code::Internal, 3),
             (tonic::Code::Unavailable, 3),
             (tonic::Code::DeadlineExceeded, 3),
             (tonic::Code::PermissionDenied, 1),

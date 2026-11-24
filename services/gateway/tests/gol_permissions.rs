@@ -8,6 +8,30 @@ mod spicedb;
 use galadril_ontology::authorization::{Consistency, PermissionOutcome};
 use loth::spicedb::pb::authzed::api::v1::check_permission_response::Permissionship;
 use loth::spicedb::pb::authzed::api::v1::{CheckPermissionResponse, ZedToken};
+use loth::types::AuthError;
+
+#[tokio::test]
+async fn internal_spicedb_failure_is_retried_without_reusing_permissions() {
+    let attempts = std::cell::Cell::new(0);
+    let response = relationship_retry::resilient_structural_check(|| {
+        attempts.set(attempts.get() + 1);
+        std::future::ready(if attempts.get() == 1 {
+            Err(AuthError::SpiceDbStatus {
+                operation: "check_permission",
+                status: tonic::Status::internal("private dependency detail"),
+            })
+        } else {
+            Ok(CheckPermissionResponse {
+                permissionship: Permissionship::NoPermission as i32,
+                ..Default::default()
+            })
+        })
+    })
+    .await
+    .map(|response| spicedb::outcome(response, &Consistency::FullyConsistent));
+    assert!(matches!(response, Ok(PermissionOutcome::Deny)));
+    assert_eq!(attempts.get(), 2);
+}
 
 #[test]
 fn unresolved_and_unknown_permissions_never_become_allow() {
