@@ -192,6 +192,49 @@ async def test_shared_project_generation_with_attachment_and_calculator_uses_nat
     assert "checkpoint" in state
 
 
+@pytest.mark.anyio
+async def test_fixture_streams_large_tool_results_in_bounded_chunks() -> None:
+    """Exercises durable replay without synthetic per-token callback load."""
+    evidence = {"text": "a" * 8192}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://model"
+    ) as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "e2e",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "entity_id": "entity-a",
+                                "causal_entity_id": "entity-a",
+                                "question": "Find evidence",
+                            }
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "search",
+                        "content": json.dumps(evidence),
+                    },
+                ],
+            },
+        )
+    response.raise_for_status()
+    content = []
+    for line in response.text.splitlines():
+        if line.startswith("data: ") and line != "data: [DONE]":
+            delta = json.loads(line.removeprefix("data: "))["choices"][0][
+                "delta"
+            ]
+            if "content" in delta:
+                content.append(delta["content"])
+    assert 2 <= len(content) <= 4
+    assert json.loads("".join(content)) == {"search": evidence}
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
 
