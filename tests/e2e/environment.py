@@ -54,9 +54,11 @@ class CommandFailure(RuntimeError):
 def _pipeline_failure_events(logs: str) -> str:
     """Preserves failure stages when metrics crowd out the final collector tail."""
     events = {
+        "gol.publication.denied",
         "gol.worker.dependency.denied",
         "gol.worker.effect.denied",
         "gol.worker.invariant.denied",
+        "gol.worker.metadata.withheld",
         "gol.worker.open.denied",
         "gol.worker.resume.denied",
         "gol.worker.write_contract.denied",
@@ -69,7 +71,7 @@ def _pipeline_failure_events(logs: str) -> str:
         "ray.actor.task.failed",
     }
     details = re.compile(
-        r"-> (phase|reason|error_type|step|topic|status|archive_error): Str\(([\w.()-]{1,64})\)",
+        r"-> (phase|reason|error_type|step|topic|status|archive_error|export_error): Str\(([\w.()-]{1,64})\)",
         re.ASCII,
     )
     names = re.compile(

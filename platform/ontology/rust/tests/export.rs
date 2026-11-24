@@ -18,11 +18,14 @@ fn export_limits_are_always_bounded() {
 #[path = "support/export_fixture.rs"]
 mod fixture;
 
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use galadril_ontology::archive::{ArchiveReader, compile_archive};
+use galadril_ontology::archive::{
+    ArchiveReader, RangeReader, compile_archive,
+};
 use galadril_ontology::authorization::{
-    Operation, PermissionCheck, PermissionOutcome, PermissionProvider,
+    Denial, Operation, PermissionCheck, PermissionOutcome, PermissionProvider,
 };
 use galadril_ontology::export::{
     ExportError, ExportRequest, ExternalMappings, IntegerEncoding,
@@ -94,6 +97,126 @@ impl PermissionProvider for Rebac {
             PermissionOutcome::Allow(request.consistency.clone())
         }
     }
+}
+
+struct UnavailableMetadataAuthority;
+
+struct DeniedMetadataAuthority;
+
+impl PermissionProvider for DeniedMetadataAuthority {
+    async fn check(&self, _: PermissionCheck<'_>) -> PermissionOutcome {
+        PermissionOutcome::Deny
+    }
+}
+
+struct MetadataStorage<'a> {
+    bytes: &'a [u8],
+    offline: &'a AtomicBool,
+}
+
+impl RangeReader for MetadataStorage<'_> {
+    fn length(&self) -> io::Result<u64> {
+        self.bytes.length()
+    }
+
+    fn read_exact_at(&self, offset: u64, buffer: &mut [u8]) -> io::Result<()> {
+        if self.offline.load(Ordering::Relaxed) {
+            return Err(io::Error::from(io::ErrorKind::TimedOut));
+        }
+        self.bytes.read_exact_at(offset, buffer)
+    }
+}
+
+impl PermissionProvider for UnavailableMetadataAuthority {
+    async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
+        if request.permission.as_str() == "view_body" {
+            PermissionOutcome::Unavailable
+        } else {
+            PermissionOutcome::Allow(request.consistency.clone())
+        }
+    }
+}
+
+#[tokio::test]
+async fn trusted_descriptions_distinguish_authority_outages_from_hidden_fields()
+-> fixture::base::TestResult {
+    let project = fixture::project()?;
+    let environment = fixture::environment(&project)?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let exporter = ProjectExporter::new(&project, &environment)?;
+    let runtime = fixture::base::runtime(exporter.contract());
+    let projection = fixture::projection(&project, &["title", "secret"])?;
+
+    assert_eq!(
+        reader
+            .describe_checked(
+                &projection,
+                &runtime,
+                &UnavailableMetadataAuthority
+            )
+            .await,
+        Err(ExportError::AuthorizationUnavailable)
+    );
+    assert!(
+        reader
+            .describe(&projection, &runtime, &UnavailableMetadataAuthority)
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        reader
+            .describe_checked(&projection, &runtime, &DeniedMetadataAuthority)
+            .await,
+        Err(ExportError::DescriptionDenied(Denial::Relationship))
+    );
+
+    let visible = reader
+        .describe_checked(
+            &projection,
+            &runtime,
+            &Rebac(AtomicBool::new(false)),
+        )
+        .await?;
+    assert_eq!(visible.properties.len(), 1);
+    assert!(
+        visible
+            .properties
+            .iter()
+            .all(|field| field.name.as_str() == "title")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn trusted_descriptions_report_unavailable_storage()
+-> fixture::base::TestResult {
+    let project = fixture::project()?;
+    let environment = fixture::environment(&project)?;
+    let archive = compile_archive(&project, &environment)?;
+    let offline = AtomicBool::new(false);
+    let reader = ArchiveReader::open(
+        MetadataStorage {
+            bytes: archive.bytes(),
+            offline: &offline,
+        },
+        archive.pin(),
+    )?;
+    let exporter = ProjectExporter::new(&project, &environment)?;
+    let runtime = fixture::base::runtime(exporter.contract());
+    let projection = fixture::projection(&project, &["title"])?;
+    offline.store(true, Ordering::Relaxed);
+    assert_eq!(
+        reader
+            .describe_checked(
+                &projection,
+                &runtime,
+                &Rebac(AtomicBool::new(true))
+            )
+            .await,
+        Err(ExportError::ArchiveUnavailable)
+    );
+    Ok(())
 }
 
 #[tokio::test]

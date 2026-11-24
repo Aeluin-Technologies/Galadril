@@ -4,9 +4,11 @@
 use std::collections::BTreeSet;
 
 use super::model::{Definition, FieldKind};
-use super::source::Source;
+use super::source::{Source, permission_result};
 use super::{ExportError, Projection, Selection, access_for, is_description};
-use crate::authorization::{PermissionProvider, TrustedRuntime};
+use crate::authorization::{
+    Decision, Denial, PermissionProvider, TrustedRuntime,
+};
 use crate::{
     Cardinality, FieldRef, Name, Reference, Role, SymbolKind, SymbolRef,
     TypeRef,
@@ -62,13 +64,23 @@ impl<R: crate::archive::RangeReader + Sync> crate::archive::ArchiveReader<R> {
         runtime: &(impl TrustedRuntime + Sync),
         provider: &(impl PermissionProvider + Sync),
     ) -> Option<SymbolDescription> {
-        match describe(self, projection, runtime, provider).await {
+        match self.describe_checked(projection, runtime, provider).await {
             Ok(value) => Some(value),
             Err(_) => {
                 tracing::debug!(event.name = "gol.description.unavailable");
                 None
             },
         }
+    }
+
+    /// Preserves backend failures for hosts that can retry a read.
+    pub async fn describe_checked(
+        &self,
+        projection: &Projection,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+    ) -> Result<SymbolDescription, ExportError> {
+        describe(self, projection, runtime, provider).await
     }
 }
 
@@ -79,11 +91,20 @@ async fn describe(
     provider: &(impl PermissionProvider + Sync),
 ) -> Result<SymbolDescription, ExportError> {
     if projection.definitions.len() > 1024 ||
-        projection.root.fields.len() > 1024 ||
-        !approved(source, projection, &projection.root, runtime, provider)
-            .await?
+        projection.root.fields.len() > 1024
     {
         return Err(ExportError::Unavailable);
+    }
+    match decision(source, projection, &projection.root, runtime, provider)
+        .await?
+    {
+        Decision::Allow => {},
+        Decision::Deny(Denial::Unavailable) => {
+            return Err(ExportError::AuthorizationUnavailable);
+        },
+        Decision::Deny(reason) => {
+            return Err(ExportError::DescriptionDenied(reason));
+        },
     }
     let target = &projection.root.access.route.target;
     let owner = match target {
@@ -281,10 +302,10 @@ async fn type_allowed(
                 {
                     return Ok(false);
                 }
-                return approved(
-                    source, projection, selection, runtime, provider,
-                )
-                .await;
+                return permission_result(
+                    decision(source, projection, selection, runtime, provider)
+                        .await?,
+                );
             },
             TypeRef::Primitive(_) | TypeRef::External(_) => return Ok(true),
         }
@@ -292,13 +313,13 @@ async fn type_allowed(
     Err(ExportError::Limit)
 }
 
-async fn approved(
+async fn decision(
     source: &impl Source,
     projection: &Projection,
     selection: &Selection,
     runtime: &(impl TrustedRuntime + Sync),
     provider: &(impl PermissionProvider + Sync),
-) -> Result<bool, ExportError> {
+) -> Result<Decision, ExportError> {
     let root = &projection.root.access;
     let access = &selection.access;
     let owner: &SymbolRef = match &access.route.target {
@@ -314,5 +335,5 @@ async fn approved(
     {
         return Err(ExportError::Unavailable);
     }
-    source.permitted(access, runtime, provider).await
+    source.decision(access, runtime, provider).await
 }

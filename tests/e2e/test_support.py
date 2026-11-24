@@ -1133,6 +1133,12 @@ otel-collector-1  | LogRecord #9
 otel-collector-1  | EventName: gol.worker.effect.denied
 otel-collector-1  |      -> phase: Str(write_invariant)
 otel-collector-1  |      -> archive_error: Str(Some(Expired))
+otel-collector-1  | LogRecord #10
+otel-collector-1  | EventName: gol.worker.open.denied
+otel-collector-1  |      -> phase: Str(metadata)
+otel-collector-1  |      -> export_error: Str(Some(AuthorizationUnavailable))
+otel-collector-1  | LogRecord #11
+otel-collector-1  | EventName: gol.publication.denied
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
@@ -1144,6 +1150,8 @@ otel-collector-1  |      -> archive_error: Str(Some(Expired))
         "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
         "gol.worker.invariant.denied reason=Relationship",
         "gol.worker.effect.denied phase=write_invariant archive_error=Some(Expired)",
+        "gol.worker.open.denied phase=metadata export_error=Some(AuthorizationUnavailable)",
+        "gol.publication.denied",
     ]
 
 

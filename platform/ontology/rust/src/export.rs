@@ -249,6 +249,10 @@ pub enum ExportError {
     WriteDenied,
     /// The relationship authority could not evaluate a required check.
     AuthorizationUnavailable,
+    /// The description's root authorization decision withheld the metadata.
+    DescriptionDenied(crate::authorization::Denial),
+    /// Archive storage could not complete a required read.
+    ArchiveUnavailable,
     /// The host's GOL business validation rejected the proposal.
     Business,
 }

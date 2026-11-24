@@ -189,6 +189,16 @@ pub enum RemoteError {
     Capacity,
 }
 
+/// Private failure of a remote metadata projection by a trusted host.
+#[cfg(feature = "export")]
+#[derive(Debug)]
+pub enum RemoteDescriptionError {
+    /// The reader's storage or lifetime prevented the projection.
+    Archive(RemoteError),
+    /// The checked projection was denied or could not be completed.
+    Projection(crate::export::ExportError),
+}
+
 impl fmt::Display for RemoteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "GOLC remote operation: {self:?}")
@@ -433,10 +443,7 @@ impl RemoteArchive {
         RemoteError,
     > {
         within(self.lifetime, async {
-            self.reader
-                .requirements(route)
-                .await
-                .map_err(|_| RemoteError::Integrity)
+            self.reader.requirements(route).await.map_err(map_archive)
         })
         .await
     }
@@ -488,16 +495,38 @@ impl RemoteArchive {
         runtime: &(impl TrustedRuntime + Sync),
         provider: &(impl PermissionProvider + Sync),
     ) -> Option<crate::export::SymbolDescription> {
+        self.describe_checked(projection, runtime, provider)
+            .await
+            .ok()
+    }
+
+    /// Separates an expired reader from a denied or unavailable projection.
+    #[cfg(feature = "export")]
+    pub async fn describe_checked(
+        &self,
+        projection: &crate::export::Projection,
+        runtime: &(impl TrustedRuntime + Sync),
+        provider: &(impl PermissionProvider + Sync),
+    ) -> Result<crate::export::SymbolDescription, RemoteDescriptionError> {
         if !self.owns(&projection.root.access) ||
             !projection
                 .definitions
                 .values()
                 .all(|selection| self.owns(&selection.access))
         {
-            return None;
+            return Err(RemoteDescriptionError::Projection(
+                crate::export::ExportError::Unavailable,
+            ));
         }
-        self.run(self.reader.describe(projection, runtime, provider))
-            .await
+        within(self.lifetime, async {
+            Ok(self
+                .reader
+                .describe_checked(projection, runtime, provider)
+                .await)
+        })
+        .await
+        .map_err(RemoteDescriptionError::Archive)?
+        .map_err(RemoteDescriptionError::Projection)
     }
 
     /// Admits an effect while this snapshot is live. Once admitted, storage

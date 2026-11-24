@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, ensure};
 use chrono::Timelike as _;
 use galadril_ontology::archive::InvariantContractError;
-use galadril_ontology::archive::remote::{RemoteArchive, RemoteError};
+use galadril_ontology::archive::remote::{
+    RemoteArchive, RemoteDescriptionError, RemoteError,
+};
 use galadril_ontology::authorization::{
     Access, Decision, Denial, ExecutionContext, Flow, Instance, Operation,
     Route,
@@ -107,7 +109,10 @@ fn worker_json_options() -> ExportOptions {
 fn worker_runtime_failure(error: &anyhow::Error) -> RuntimeError {
     if matches!(
         error.downcast_ref::<ExportError>(),
-        Some(ExportError::AuthorizationUnavailable)
+        Some(
+            ExportError::AuthorizationUnavailable |
+                ExportError::ArchiveUnavailable
+        )
     ) || matches!(
         error.downcast_ref::<RuntimeError>(),
         Some(RuntimeError::Unavailable)
@@ -133,18 +138,16 @@ fn policy_failure(reason: Denial) -> RuntimeError {
     }
 }
 
-/// A metadata read can reopen the same generation without reusing its
-/// decision.
-async fn retry_expired_reader<T, F>(mut read: impl FnMut() -> F) -> Result<T>
+/// A metadata retry repeats the live checks against the same generation.
+async fn retry_worker_metadata<T, F>(mut read: impl FnMut() -> F) -> Result<T>
 where
     F: Future<Output = Result<T>>,
 {
     match read().await {
         Err(error)
-            if error.downcast_ref::<RemoteError>() ==
-                Some(&RemoteError::Expired) =>
+            if worker_runtime_failure(&error) == RuntimeError::Unavailable =>
         {
-            tracing::debug!(event.name = "gol.worker.metadata.reader_expired");
+            tracing::debug!(event.name = "gol.worker.metadata.retry", archive_error = ?error.downcast_ref::<RemoteError>(), export_error = ?error.downcast_ref::<ExportError>());
             read().await
         },
         result => result,
@@ -190,7 +193,7 @@ mod tests {
     #[tokio::test]
     async fn worker_metadata_retries_an_expired_reader_once() -> Result<()> {
         let mut attempts = 0;
-        let value = retry_expired_reader(|| {
+        let value = retry_worker_metadata(|| {
             attempts += 1;
             std::future::ready(match attempts {
                 1 => Err(RemoteError::Expired.into()),
@@ -205,9 +208,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn worker_metadata_rechecks_authorization_after_an_outage()
+    -> Result<()> {
+        let mut attempts = 0;
+        let value = retry_worker_metadata(|| {
+            attempts += 1;
+            std::future::ready(match attempts {
+                1 => Err(ExportError::AuthorizationUnavailable.into()),
+                2 => Ok("approved metadata"),
+                _ => Err(anyhow::anyhow!("Unexpected authority retry")),
+            })
+        })
+        .await?;
+        assert_eq!(attempts, 2);
+        assert_eq!(value, "approved metadata");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn worker_metadata_keeps_denials_and_persistent_expiry_closed() {
         let mut denied_attempts = 0;
-        let denied = retry_expired_reader(|| {
+        let denied = retry_worker_metadata(|| {
             denied_attempts += 1;
             std::future::ready(Err::<(), _>(RuntimeError::Denied.into()))
         })
@@ -216,7 +237,7 @@ mod tests {
         assert!(denied.is_err_and(|error| error.is::<RuntimeError>()));
 
         let mut expired_attempts = 0;
-        let expired = retry_expired_reader(|| {
+        let expired = retry_worker_metadata(|| {
             expired_attempts += 1;
             std::future::ready(Err::<(), _>(RemoteError::Expired.into()))
         })
@@ -371,7 +392,7 @@ impl GolService {
             .await
             .map_err(|error| {
                 let failure = worker_runtime_failure(&error);
-                tracing::warn!(event.name = "gol.worker.open.denied", phase, reason = ?failure, archive_error = ?error.downcast_ref::<RemoteError>());
+                tracing::warn!(event.name = "gol.worker.open.denied", phase, reason = ?failure, archive_error = ?error.downcast_ref::<RemoteError>(), export_error = ?error.downcast_ref::<ExportError>());
                 failure
             })
     }
@@ -630,7 +651,7 @@ impl GolService {
         let mut schemas = BTreeMap::new();
         let mut reader_lease = Arc::clone(&lease);
         for key in &lease.targets {
-            let (refreshed, metadata) = retry_expired_reader(|| {
+            let (refreshed, metadata) = retry_worker_metadata(|| {
                 let worker = worker.as_ref();
                 let context_id = context_id.as_str();
                 let actor = &actor;
@@ -720,12 +741,32 @@ impl GolService {
         )
         .await?;
         let projection = prepared.projection(access, BTreeSet::new())?;
-        let description = archive
-            .describe(&projection, &prepared, &backend.provider)
-            .await;
-        ensure!(archive.is_live(), RemoteError::Expired);
-        let Some(description) = description else {
-            return Ok(None);
+        let description = match archive
+            .describe_checked(&projection, &prepared, &backend.provider)
+            .await
+        {
+            Ok(description) => description,
+            Err(RemoteDescriptionError::Archive(error)) => {
+                return Err(error.into());
+            },
+            Err(RemoteDescriptionError::Projection(
+                ExportError::DescriptionDenied(reason),
+            )) => {
+                tracing::warn!(event.name = "gol.worker.metadata.withheld", reason = ?reason);
+                return Ok(None);
+            },
+            Err(RemoteDescriptionError::Projection(
+                ExportError::Unavailable,
+            )) => {
+                tracing::warn!(
+                    event.name = "gol.worker.metadata.withheld",
+                    reason = "projection_unavailable"
+                );
+                return Ok(None);
+            },
+            Err(RemoteDescriptionError::Projection(error)) => {
+                return Err(error.into());
+            },
         };
         let mut fields = BTreeSet::new();
         let mut properties = BTreeMap::new();
@@ -780,10 +821,16 @@ impl GolService {
                 &prepared,
                 &backend.provider,
             )
-            .await
-            .ok()
-            .map(|document| document.schema().clone());
+            .await;
         ensure!(archive.is_live(), RemoteError::Expired);
+        let schema = match schema {
+            Ok(document) => Some(document.schema().clone()),
+            Err(
+                error @ (ExportError::AuthorizationUnavailable |
+                ExportError::ArchiveUnavailable),
+            ) => return Err(error.into()),
+            Err(_) => None,
+        };
         Ok(Some(WorkerMetadata {
             symbol: RuntimeSymbol {
                 key: described.key,
