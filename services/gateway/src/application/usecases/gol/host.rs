@@ -3,6 +3,7 @@
 mod business;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,6 +48,12 @@ struct Lease {
     source_revision: String,
     archive: Arc<RemoteArchive>,
     targets: BTreeSet<String>,
+}
+
+struct WorkerMetadata {
+    symbol: RuntimeSymbol,
+    schema: Option<serde_json::Value>,
+    fields: BTreeSet<Name>,
 }
 
 struct EffectBatch<'a> {
@@ -126,6 +133,24 @@ fn policy_failure(reason: Denial) -> RuntimeError {
     }
 }
 
+/// A metadata read can reopen the same generation without reusing its
+/// decision.
+async fn retry_expired_reader<T, F>(mut read: impl FnMut() -> F) -> Result<T>
+where
+    F: Future<Output = Result<T>>,
+{
+    match read().await {
+        Err(error)
+            if error.downcast_ref::<RemoteError>() ==
+                Some(&RemoteError::Expired) =>
+        {
+            tracing::debug!(event.name = "gol.worker.metadata.reader_expired");
+            read().await
+        },
+        result => result,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use galadril_ontology::Classification;
@@ -160,6 +185,46 @@ mod tests {
         );
         assert!(ingress_floor(&floors, "tenant_c", "default").is_none());
         assert!(ingress_floor(&floors, "tenant_a", "other").is_none());
+    }
+
+    #[tokio::test]
+    async fn worker_metadata_retries_an_expired_reader_once() -> Result<()> {
+        let mut attempts = 0;
+        let value = retry_expired_reader(|| {
+            attempts += 1;
+            std::future::ready(match attempts {
+                1 => Err(RemoteError::Expired.into()),
+                2 => Ok("approved metadata"),
+                _ => Err(anyhow::anyhow!("Unexpected reader retry")),
+            })
+        })
+        .await?;
+        assert_eq!(attempts, 2);
+        assert_eq!(value, "approved metadata");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn worker_metadata_keeps_denials_and_persistent_expiry_closed() {
+        let mut denied_attempts = 0;
+        let denied = retry_expired_reader(|| {
+            denied_attempts += 1;
+            std::future::ready(Err::<(), _>(RuntimeError::Denied.into()))
+        })
+        .await;
+        assert_eq!(denied_attempts, 1);
+        assert!(denied.is_err_and(|error| error.is::<RuntimeError>()));
+
+        let mut expired_attempts = 0;
+        let expired = retry_expired_reader(|| {
+            expired_attempts += 1;
+            std::future::ready(Err::<(), _>(RemoteError::Expired.into()))
+        })
+        .await;
+        assert_eq!(expired_attempts, 2);
+        assert!(expired.is_err_and(|error| {
+            error.downcast_ref::<RemoteError>() == Some(&RemoteError::Expired)
+        }));
     }
 }
 
@@ -306,7 +371,7 @@ impl GolService {
             .await
             .map_err(|error| {
                 let failure = worker_runtime_failure(&error);
-                tracing::warn!(event.name = "gol.worker.open.denied", phase, reason = ?failure);
+                tracing::warn!(event.name = "gol.worker.open.denied", phase, reason = ?failure, archive_error = ?error.downcast_ref::<RemoteError>());
                 failure
             })
     }
@@ -491,7 +556,6 @@ impl GolService {
                     lease.source_revision == binding.source_revision,
                 "GOL binding changed"
             );
-            let lease = self.refresh_lease(&worker, &id, lease).await?;
             (id, lease)
         } else {
             let archive = self
@@ -564,76 +628,29 @@ impl GolService {
             .await?;
         let mut symbols = Vec::new();
         let mut schemas = BTreeMap::new();
+        let mut reader_lease = Arc::clone(&lease);
         for key in &lease.targets {
-            let target = resolve(&lease.archive, key)?;
-            let access =
-                backend.metadata_access(&request.tenant_id, target.clone())?;
-            let prepared = snapshot::Snapshot::prepare(
-                &lease.archive,
-                &access,
-                &actor,
-                Arc::clone(&worker.admission.context),
-                &worker.facts,
-                &backend.authority,
-                &backend.profile.context_floor,
-            )
+            let (refreshed, metadata) = retry_expired_reader(|| {
+                let worker = worker.as_ref();
+                let context_id = context_id.as_str();
+                let actor = &actor;
+                let reader = Arc::clone(&reader_lease);
+                async move {
+                    let reader =
+                        self.refresh_lease(worker, context_id, reader).await?;
+                    let metadata = self
+                        .worker_metadata(worker, actor, &reader.archive, key)
+                        .await?;
+                    Ok((reader, metadata))
+                }
+            })
             .await?;
-            let projection = prepared.projection(access, BTreeSet::new())?;
-            let Some(description) = lease
-                .archive
-                .describe(&projection, &prepared, &backend.provider)
-                .await
-            else {
+            reader_lease = refreshed;
+            let Some(metadata) = metadata else {
                 continue;
             };
-            let mut fields = BTreeSet::new();
-            let properties = description.properties.iter().map(|property| {
-                fields.insert(property.name.clone());
-                let ty = match &property.kind {
-                    galadril_ontology::FieldKind::Key(ty) | galadril_ontology::FieldKind::Value(ty) => ty.clone(),
-                    galadril_ontology::FieldKind::OwnedAttribute { attribute, .. } => galadril_ontology::TypeRef::Named(attribute.clone()),
-                    _ => anyhow::bail!("GOL property unavailable"),
-                };
-                Ok((property.name.to_string(), serde_json::json!({"type":super::type_name(&ty, &mut BTreeSet::new())?})))
-            }).collect::<Result<BTreeMap<_,_>>>()?;
-            let roles = description
-                .roles
-                .iter()
-                .map(|role| {
-                    (
-                        role.name.to_string(),
-                        galadril_registry::gol_service::symbol_key(
-                            &role.role.entity,
-                        ),
-                    )
-                })
-                .collect();
-            let version = owner(&target)?.version().to_string();
-            let mut described = symbol(description)?;
-            if matches!(target, Reference::Field(_)) {
-                described.kind = "field".into();
-            }
-            let projection = prepared.projection(
-                backend.metadata_access(&request.tenant_id, target.clone())?,
-                fields.clone(),
-            )?;
-            let options = worker_json_options();
-            let mappings = galadril_registry::gol::registered_json_mappings()?;
-            if let Ok(document) = lease
-                .archive
-                .export_schema(
-                    &ExportRequest {
-                        projection: &projection,
-                        part: SchemaPart::Value,
-                        options: &options,
-                        mappings: &mappings,
-                    },
-                    &prepared,
-                    &backend.provider,
-                )
-                .await
-            {
-                schemas.insert(key.clone(), document.schema().clone());
+            if let Some(schema) = metadata.schema {
+                schemas.insert(key.clone(), schema);
             }
             let mut history = worker
                 .dependencies
@@ -646,7 +663,7 @@ impl GolService {
                 revision: lease.source_revision.clone(),
                 operation: Operation::Describe,
             });
-            for field in fields {
+            for field in metadata.fields {
                 history.insert(Dependency {
                     ontology: lease.ontology.clone(),
                     target: format!("{key}.{field}"),
@@ -659,15 +676,7 @@ impl GolService {
                 history.len() <= MAX_DEPENDENCIES,
                 "GOL provenance budget exceeded"
             );
-            symbols.push(RuntimeSymbol {
-                key: described.key,
-                name: described.name,
-                kind: described.kind,
-                version,
-                references: described.references,
-                properties,
-                roles,
-            });
+            symbols.push(metadata.symbol);
         }
         let version = lease
             .archive
@@ -688,6 +697,106 @@ impl GolService {
             symbols,
             schemas,
         })
+    }
+
+    async fn worker_metadata(
+        &self,
+        worker: &Worker,
+        actor: &Actor,
+        archive: &RemoteArchive,
+        key: &str,
+    ) -> Result<Option<WorkerMetadata>> {
+        let backend = self.backend()?;
+        let target = resolve(archive, key)?;
+        let access = backend.metadata_access(&actor.tenant, target.clone())?;
+        let prepared = snapshot::Snapshot::prepare(
+            archive,
+            &access,
+            actor,
+            Arc::clone(&worker.admission.context),
+            &worker.facts,
+            &backend.authority,
+            &backend.profile.context_floor,
+        )
+        .await?;
+        let projection = prepared.projection(access, BTreeSet::new())?;
+        let description = archive
+            .describe(&projection, &prepared, &backend.provider)
+            .await;
+        ensure!(archive.is_live(), RemoteError::Expired);
+        let Some(description) = description else {
+            return Ok(None);
+        };
+        let mut fields = BTreeSet::new();
+        let mut properties = BTreeMap::new();
+        for property in &description.properties {
+            fields.insert(property.name.clone());
+            let ty = match &property.kind {
+                galadril_ontology::FieldKind::Key(ty) |
+                galadril_ontology::FieldKind::Value(ty) => ty.clone(),
+                galadril_ontology::FieldKind::OwnedAttribute {
+                    attribute,
+                    ..
+                } => galadril_ontology::TypeRef::Named(attribute.clone()),
+                _ => anyhow::bail!("GOL property unavailable"),
+            };
+            let ty = super::type_name(&ty, &mut BTreeSet::new())?;
+            properties.insert(
+                property.name.to_string(),
+                serde_json::json!({"type": ty}),
+            );
+        }
+        let roles = description
+            .roles
+            .iter()
+            .map(|role| {
+                (
+                    role.name.to_string(),
+                    galadril_registry::gol_service::symbol_key(
+                        &role.role.entity,
+                    ),
+                )
+            })
+            .collect();
+        let version = owner(&target)?.version().to_string();
+        let mut described = symbol(description)?;
+        if matches!(target, Reference::Field(_)) {
+            described.kind = "field".into();
+        }
+        let projection = prepared.projection(
+            backend.metadata_access(&actor.tenant, target)?,
+            fields.clone(),
+        )?;
+        let options = worker_json_options();
+        let mappings = galadril_registry::gol::registered_json_mappings()?;
+        let schema = archive
+            .export_schema(
+                &ExportRequest {
+                    projection: &projection,
+                    part: SchemaPart::Value,
+                    options: &options,
+                    mappings: &mappings,
+                },
+                &prepared,
+                &backend.provider,
+            )
+            .await
+            .ok()
+            .map(|document| document.schema().clone());
+        ensure!(archive.is_live(), RemoteError::Expired);
+        Ok(Some(WorkerMetadata {
+            symbol: RuntimeSymbol {
+                key: described.key,
+                name: described.name,
+                kind: described.kind,
+                version,
+                references: described.references,
+                properties,
+                roles,
+            },
+            schema,
+            fields,
+        }))
     }
 
     /// Refreshes expired physical readers without resetting calculation state.
@@ -711,9 +820,7 @@ impl GolService {
             )
             .await?;
         ensure!(
-            archive.provenance().is_some_and(|provenance| {
-                provenance.source_revision.as_ref() == lease.source_revision
-            }),
+            archive.provenance() == lease.archive.provenance(),
             "GOL source binding changed"
         );
         let refreshed = Arc::new(Lease {
