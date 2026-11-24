@@ -85,6 +85,22 @@ def _event_identifier(phrase: str) -> str:
     return ".".join(tokens)
 
 
+def _publication_startup_handler() -> logging.Handler:
+    """Mirrors only the readiness event for supervisors that cannot depend on OTLP."""
+    handler = logging.StreamHandler()
+    handler.addFilter(
+        lambda record: (
+            record.__dict__.get("event.name") == "pipeline.publication.pending"
+        )
+    )
+    handler.setFormatter(
+        logging.Formatter(
+            '{"event.name":"pipeline.publication.pending"}', validate=False
+        )
+    )
+    return handler
+
+
 def configure_logging(
     default_level: str = "INFO",
     enable_json_format: bool = False,
@@ -137,6 +153,7 @@ def configure_logging(
         )
         for handler in root_logger.handlers:
             handler.addFilter(EventSchemaFilter())
+    root_logger.addHandler(_publication_startup_handler())
 
 
 def shutdown_logging() -> None:

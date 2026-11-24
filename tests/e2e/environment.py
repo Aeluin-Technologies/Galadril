@@ -516,20 +516,21 @@ class ComposeEnvironment:
         )
 
     async def vision_waiting_for_publication(self) -> bool | None:
-        """Requires an OTLP waiting event from the worker before provisioning."""
+        """Observes the worker waiting without depending on the collector tail."""
         await self.assert_vision_did_not_restart()
         logs = await _run(
-            (
-                *self._command,
-                "logs",
-                "--no-color",
-                "--tail",
-                "2000",
-                "otel-collector",
-            ),
+            (*self._command, "logs", "--no-color", "--tail", "50", "vision"),
             environment=self._environment,
         )
-        return True if "pipeline.publication.pending" in logs else None
+        event = '{"event.name":"pipeline.publication.pending"}'
+        return next(
+            (
+                True
+                for line in logs.splitlines()
+                if line.partition("|")[2].strip() == event
+            ),
+            None,
+        )
 
     async def logs(self) -> str:
         """Returns bounded service state and logs for a failed test."""

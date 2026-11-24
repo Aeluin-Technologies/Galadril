@@ -1017,15 +1017,18 @@ def test_vision_startup_rejects_restarts(
         asyncio.run(ComposeEnvironment().assert_vision_did_not_restart())
 
 
-def test_vision_pending_requires_an_otlp_startup_event(
+def test_vision_pending_reads_the_container_startup_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    logs = "unrelated log"
+    logs = "vision-1 | warning that mentions pipeline.publication.pending"
 
     async def record_run(command: tuple[str, ...], **_kwargs: object) -> str:
         if command[:2] == ("docker", "inspect"):
             return "running 0"
-        return logs if "logs" in command else "vision-id"
+        if "logs" in command:
+            assert command[-1] == "vision"
+            return logs
+        return "vision-id"
 
     monkeypatch.setattr(e2e_environment, "_run", record_run)
 
@@ -1033,7 +1036,7 @@ def test_vision_pending_requires_an_otlp_startup_event(
         nonlocal logs
         environment = ComposeEnvironment()
         assert not await environment.vision_waiting_for_publication()
-        logs = "event.name: Str(pipeline.publication.pending)"
+        logs = 'vision-1 | {"event.name":"pipeline.publication.pending"}'
         assert await environment.vision_waiting_for_publication()
 
     asyncio.run(exercise())
