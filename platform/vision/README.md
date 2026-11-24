@@ -20,10 +20,19 @@ the value participates in similarity ranking. The `gol_state_symbol_key`
 parameter names the prototype's declared GOL type.
 
 Each native LI-ESKG ledger is in memory and closes after one calculation.
-Durable native ledgers require provenance support and are rejected. PostgreSQL
-advisory transaction locks serialize candidate discovery and prototype
-publication within a tenant and modality. Configuration validation still
-requires `ray.actor_replicas: 1`. A representative configuration is:
+Durable native ledgers require provenance support and are rejected. Candidate
+discovery reads the tenant and modality's indexed domain of signed prototypes.
+Gateway approves bounded read batches using one fresh SpiceDB revision per
+read-only decision. Gateway still checks GOL receipts, applicable Cedar
+policies and IFC, and Vision scores each value inside its approved read scope.
+The grant expires with that scope. Subsequent effects check live authorization.
+
+Vision discovers, ranks and computes a proposed resolution before taking the
+PostgreSQL advisory transaction lock. Under the lock, it compares the full
+catalogue's row revisions and publishes only against an unchanged catalogue.
+A concurrent insertion, deletion or update makes Vision rediscover and
+recompute outside the lock. Configuration validation still requires
+`ray.actor_replicas: 1`. A representative configuration is:
 
 ```yaml
 identity_resolution:
@@ -45,6 +54,23 @@ oversized pool refuses the operation. Existing unsigned prototypes remain
 stored and are excluded from resolution. Spatial evidence comes from the
 signed prototype. Unsigned identity and location joins cannot influence a
 decision. Other vector query APIs retain their admission requirements.
+
+## Identity resolution benchmarks
+
+The standard CI lifecycle exercises the full service chain with a representative
+retail and randomized-trial cohort. The separate benchmark uses the same
+services and assertions with all 240 retail and 205 trial observations.
+
+```sh
+bazel test --config=ci //tests/e2e:pipeline_lifecycle_benchmark --nocache_test_results
+```
+
+Compare retail time to durable observations and to the final authorization
+oracle using the elapsed times in the benchmark log. The OTLP spans
+`vision.identity.sql.discover`, `vision.identity.gol.authorize`,
+`vision.identity.similarity`, `vision.identity.lock.wait`, and
+`vision.identity.sql.confirm` separate selection, authorization, scoring,
+lock contention, and transactional confirmation.
 
 ## Architecture
 

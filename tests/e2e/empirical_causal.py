@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Mapping
+from time import monotonic
 
 import networkx as nx
 import pandas as pd
@@ -26,9 +27,9 @@ from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
 from scenario import ADMIN, encode_trial_rows
 
 
-async def _persisted_trial() -> (
-    tuple[tuple[str, str, str, Mapping[str, object]], ...] | None
-):
+async def _persisted_trial(
+    expected: int,
+) -> tuple[tuple[str, str, str, Mapping[str, object]], ...] | None:
     """Waits for the complete cross-sectional cohort and replicated lineage."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
@@ -47,9 +48,9 @@ async def _persisted_trial() -> (
             (TENANT_ID,),
         )
         outbox_row = await outbox.fetchone()
-    if len(rows) < 205 or outbox_row is None or int(outbox_row[0]) != 0:
+    if len(rows) < expected or outbox_row is None or int(outbox_row[0]) != 0:
         return None
-    assert len(rows) == 205, "Vision duplicated randomized-trial rows"
+    assert len(rows) == expected, "Vision duplicated randomized-trial rows"
     return tuple(
         (
             str(entity),
@@ -62,10 +63,11 @@ async def _persisted_trial() -> (
 
 
 async def exercise_empirical_causal(
-    gateway: GatewayClient, spicedb: SpiceDBProbe
+    gateway: GatewayClient, spicedb: SpiceDBProbe, *, full: bool
 ) -> None:
     """Runs Amarth over the exact persisted assignment and outcome observations."""
     print("E2E stage: uploading randomized-trial observations", flush=True)
+    started = monotonic()
     token = await login_user(ADMIN)
     staged = require_mapping(
         (
@@ -80,23 +82,29 @@ async def exercise_empirical_causal(
     staging_key = staged.get("stagingKey")
     assert isinstance(upload_url, str) and isinstance(staging_key, str)
     rows = load_trial_rows()
+    if not full:
+        rows = (
+            tuple(row for row in rows if row.condition == 1)[:12]
+            + tuple(row for row in rows if row.condition == 6)[:12]
+        )
+    target = f"trial-{len(rows)}.csv"
     await upload_presigned(upload_url, encode_trial_rows(rows))
     promoted = await gateway.execute(
         token,
         """
-        mutation PromoteTrial($key: String!) {
-          completeUpload(stagingKey: $key, targetName: "trial-205.csv", groupId: "trial")
+        mutation PromoteTrial($key: String!, $target: String!) {
+          completeUpload(stagingKey: $key, targetName: $target, groupId: "trial")
         }
         """,
-        {"key": staging_key},
+        {"key": staging_key, "target": target},
     )
     nonce = staging_key.rsplit("/", 1)[-1]
-    raw_key = f"{TENANT_ID}/raw/trial/{nonce}/trial-205.csv"
+    raw_key = f"{TENANT_ID}/raw/trial/{nonce}/{target}"
     assert promoted.get("completeUpload") == raw_key
     persisted = await eventually(
-        _persisted_trial,
+        lambda: _persisted_trial(len(rows)),
         timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
-        description="205 randomized-trial Vision states and drained authz outbox",
+        description=f"{len(rows)} randomized-trial Vision states and drained authz outbox",
     )
     expected = {row.record_id: row for row in rows}
     observed: dict[int, tuple[float, float]] = {}
@@ -116,7 +124,7 @@ async def exercise_empirical_causal(
         observed[record_id] = (treatment, outcome)
         event_ids.add(event_id)
     assert observed.keys() == expected.keys()
-    assert len(event_ids) == 205
+    assert len(event_ids) == len(rows)
     source_map = await spicedb.event_sources()
     assert all(
         source_map.get(canonical_spicedb_object_id(f"{TENANT_ID}/{event_id}"))
@@ -142,4 +150,9 @@ async def exercise_empirical_causal(
     assert math.isfinite(estimate.ate)
     independent = trial_estimate(rows)
     assert estimate.ate == pytest.approx(independent.difference, abs=0.01)
-    assert independent.lower < 0 < independent.upper
+    if full:
+        assert independent.lower < 0 < independent.upper
+    print(
+        f"E2E trial: {len(rows)} observations and causal estimate in {monotonic() - started:.1f}s",
+        flush=True,
+    )

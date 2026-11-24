@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Mapping, Sequence
 
@@ -1463,8 +1464,13 @@ async def _run_gateway_upload_lifecycle() -> None:
                 "E2E stage: running empirical multi-principal branch",
                 flush=True,
             )
-            await exercise_empirical_pipeline(gateway, spicedb)
-            await exercise_empirical_causal(gateway, spicedb)
+            full_empirical = os.getenv("GALADRIL_E2E_FULL_EMPIRICAL") == "1"
+            await exercise_empirical_pipeline(
+                gateway, spicedb, full=full_empirical
+            )
+            await exercise_empirical_causal(
+                gateway, spicedb, full=full_empirical
+            )
             # The empirical waits can outlast the original Hydra access tokens.
             uploader_token = await login_user(UPLOADER_ID)
             outsider_token = await login_user(OUTSIDER_ID)

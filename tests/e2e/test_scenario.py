@@ -19,6 +19,7 @@ from scenario import (
     build_access_oracle,
     build_retail_uploads,
     encode_trial_rows,
+    retail_smoke_rows,
 )
 
 
@@ -139,6 +140,22 @@ def test_trial_payload_preserves_all_anonymous_randomized_rows() -> None:
         1,
         6,
     }
+
+
+def test_retail_smoke_preserves_actor_scopes_and_repeated_observations() -> (
+    None
+):
+    rows = retail_smoke_rows(load_retail_rows())
+    uploads = build_retail_uploads(rows, full=False)
+    assert len(rows) == 24
+    assert {
+        upload.actor for upload in uploads if upload.data_type == "sales"
+    } == set(SALES_STEWARDS)
+    assert {
+        upload.actor for upload in uploads if upload.data_type == "returns"
+    } == set(RETURNS_STEWARDS)
+    assert len(build_access_oracle(uploads)["e2e-exact-reader"]) == 1
+    assert sum(len(upload.rows) for upload in uploads) == len(rows)
 
 
 if __name__ == "__main__":

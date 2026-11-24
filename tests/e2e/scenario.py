@@ -109,13 +109,30 @@ def _encode_rows(rows: tuple[RetailRow, ...]) -> bytes:
     return output.getvalue().encode("utf-8")
 
 
+def retail_smoke_rows(rows: tuple[RetailRow, ...]) -> tuple[RetailRow, ...]:
+    """Keeps repeated purchases and returns across all stewardship roles."""
+    customers = set(sorted({row.customer_id for row in rows})[:6])
+    sales: dict[int, int] = defaultdict(int)
+    selected: list[RetailRow] = []
+    for row in rows:
+        if row.customer_id not in customers:
+            continue
+        if row.cancelled:
+            selected.append(row)
+        elif sales[row.customer_id] < 3:
+            sales[row.customer_id] += 1
+            selected.append(row)
+    return tuple(selected)
+
+
 def build_retail_uploads(
-    rows: tuple[RetailRow, ...],
+    rows: tuple[RetailRow, ...], *, full: bool = True
 ) -> tuple[UploadBatch, ...]:
-    """Packs 24 customer sales files and 12 paired return files."""
+    """Packs customer sales files and paired return files."""
     customers = sorted({row.customer_id for row in rows})
-    if len(rows) != 240 or len(customers) != 24:
-        raise ValueError("Expected the pinned 240-row, 24-customer fixture")
+    expected_customers, sales_per_customer = (24, 9) if full else (6, 3)
+    if len(customers) != expected_customers:
+        raise ValueError("Unexpected retail cohort")
     uploads: list[UploadBatch] = []
     returns: list[RetailRow] = []
     for index, customer in enumerate(customers):
@@ -124,7 +141,7 @@ def build_retail_uploads(
         )
         sales = tuple(row for row in customer_rows if not row.cancelled)
         refunds = tuple(row for row in customer_rows if row.cancelled)
-        if len(sales) != 9 or len(refunds) != 1:
+        if len(sales) != sales_per_customer or len(refunds) != 1:
             raise ValueError(f"Unexpected transaction selection for {customer}")
         uploads.append(
             UploadBatch(
@@ -136,7 +153,7 @@ def build_retail_uploads(
             )
         )
         returns.extend(refunds)
-    for index in range(12):
+    for index in range(len(returns) // 2):
         batch_rows = tuple(returns[index * 2 : index * 2 + 2])
         uploads.append(
             UploadBatch(

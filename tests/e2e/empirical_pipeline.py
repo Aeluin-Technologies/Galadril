@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Mapping
+from time import monotonic
 
 import psycopg
 import pytest
@@ -31,9 +32,11 @@ from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
 from scenario import (
     ADMIN,
     RetailState,
+    UploadBatch,
     assert_retail_identities,
     build_access_oracle,
     build_retail_uploads,
+    retail_smoke_rows,
 )
 
 
@@ -41,11 +44,11 @@ class EmpiricalPipelineFailure(RuntimeError):
     """Signals a terminal empirical DAG result that polling cannot repair."""
 
 
-async def _create_principals(gateway: GatewayClient) -> None:
+async def _create_principals(
+    gateway: GatewayClient, uploads: tuple[UploadBatch, ...]
+) -> None:
     """Uses the public administrator mutation for every scenario identity."""
-    actors = {
-        upload.actor for upload in build_retail_uploads(load_retail_rows())
-    }
+    actors = {upload.actor for upload in uploads}
     actors.update(
         {
             "e2e-sales-reader",
@@ -74,9 +77,12 @@ async def _create_principals(gateway: GatewayClient) -> None:
         await login_user(actor)
 
 
-async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
+async def _grant_domains(
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    uploads: tuple[UploadBatch, ...],
+) -> None:
     """Uses tenant-admin Gateway mutations for scoped ingest and read grants."""
-    uploads = build_retail_uploads(load_retail_rows())
     await spicedb.touch(
         RelationshipSpec("tenant", TENANT_ID, "administrator", "user", ADMIN)
     )
@@ -155,10 +161,11 @@ async def _grant_pipeline_execution(
 
 
 async def _upload_rows(
-    gateway: GatewayClient, spicedb: SpiceDBProbe
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    uploads: tuple[UploadBatch, ...],
 ) -> dict[str, str]:
-    """Promotes 36 independently owned Gateway uploads without timing sleeps."""
-    uploads = build_retail_uploads(load_retail_rows())
+    """Promotes independently owned Gateway uploads without timing sleeps."""
     first, *_ = uploads
     actors = {upload.actor for upload in uploads}
     await _grant_pipeline_execution(spicedb, actors)
@@ -239,7 +246,7 @@ async def _grant_readers(
     await spicedb.touch(*grants)
 
 
-async def _retail_states() -> tuple[RetailState, ...] | None:
+async def _retail_states(expected: int) -> tuple[RetailState, ...] | None:
     """Reports empirical DAG progress and fails on terminal worker errors."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
@@ -280,14 +287,14 @@ async def _retail_states() -> tuple[RetailState, ...] | None:
             raise EmpiricalPipelineFailure(
                 f"Vision {step} failed: {str(error)[-2000:]}"
             )
-    if len(rows) > 240:
+    if len(rows) > expected:
         raise EmpiricalPipelineFailure(
             f"Intake duplicated empirical observations: {len(rows)} states"
         )
     outbox_count = int(outbox_row[0]) if outbox_row is not None else -1
-    if len(rows) < 240 or outbox_count != 0:
+    if len(rows) < expected or outbox_count != 0:
         raise RuntimeError(
-            f"Empirical progress: states={len(rows)}/240, "
+            f"Empirical progress: states={len(rows)}/{expected}, "
             f"authz_outbox={outbox_count}, executions=[{summary}]"
         )
     return tuple(
@@ -301,9 +308,9 @@ async def _assert_gateway_projection(
     spicedb: SpiceDBProbe,
     states: tuple[RetailState, ...],
     keys: Mapping[str, str],
+    uploads: tuple[UploadBatch, ...],
 ) -> None:
     """Matches Gateway output against each caller's independent object oracle."""
-    uploads = build_retail_uploads(load_retail_rows())
     entity_events = assert_retail_identities(states, uploads)
     access = build_access_oracle(uploads)
     source_by_event = await spicedb.event_sources()
@@ -403,12 +410,16 @@ async def _assert_gateway_projection(
 
 
 async def exercise_empirical_pipeline(
-    gateway: GatewayClient, spicedb: SpiceDBProbe
+    gateway: GatewayClient, spicedb: SpiceDBProbe, *, full: bool
 ) -> None:
     """Runs real multi-principal retail ingestion and permission projection."""
+    rows = load_retail_rows()
+    if not full:
+        rows = retail_smoke_rows(rows)
+    uploads = build_retail_uploads(rows, full=full)
     print("E2E stage: preparing empirical principals", flush=True)
-    await _create_principals(gateway)
-    await _grant_domains(gateway, spicedb)
+    await _create_principals(gateway, uploads)
+    await _grant_domains(gateway, spicedb, uploads)
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
             authenticated_token("e2e-sales-reader"),
@@ -474,12 +485,21 @@ async def exercise_empirical_pipeline(
         user_id="e2e-sales-a",
     )
     print("E2E stage: uploading empirical retail observations", flush=True)
-    keys = await _upload_rows(gateway, spicedb)
+    started = monotonic()
+    keys = await _upload_rows(gateway, spicedb, uploads)
     await _grant_readers(spicedb, keys)
     states = await eventually(
-        _retail_states,
+        lambda: _retail_states(len(rows)),
         timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
-        description="240 retail row observations and drained SpiceDB outbox",
+        description=f"{len(rows)} retail row observations and drained SpiceDB outbox",
         abort_on=(EmpiricalPipelineFailure,),
     )
-    await _assert_gateway_projection(gateway, spicedb, states, keys)
+    print(
+        f"E2E retail: {len(states)} observations durable after {monotonic() - started:.1f}s",
+        flush=True,
+    )
+    await _assert_gateway_projection(gateway, spicedb, states, keys, uploads)
+    print(
+        f"E2E retail: authorization oracle complete after {monotonic() - started:.1f}s",
+        flush=True,
+    )
