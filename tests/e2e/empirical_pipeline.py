@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
 
 import psycopg
 import pytest
@@ -29,17 +28,13 @@ from clients import (
 )
 from empirical_data import load_retail_rows
 from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
-from scenario import ADMIN, build_access_oracle, build_retail_uploads
-
-
-@dataclass(frozen=True, slots=True)
-class RetailState:
-    """One persisted row whose source identity is independently checked."""
-
-    entity_id: str
-    event_id: str
-    customer_id: int
-    source_row: int
+from scenario import (
+    ADMIN,
+    RetailState,
+    assert_retail_identities,
+    build_access_oracle,
+    build_retail_uploads,
+)
 
 
 class EmpiricalPipelineFailure(RuntimeError):
@@ -301,30 +296,6 @@ async def _retail_states() -> tuple[RetailState, ...] | None:
     )
 
 
-async def _assert_identity_oracle(
-    states: tuple[RetailState, ...],
-) -> dict[int, str]:
-    """Compares the entire empirical source-customer to LI-ESKG identity map."""
-    expected = Counter(row.customer_id for row in load_retail_rows())
-    actual = Counter(state.customer_id for state in states)
-    assert actual == expected
-    expected_rows = {
-        row.source_row: row.customer_id for row in load_retail_rows()
-    }
-    assert {
-        state.source_row: state.customer_id for state in states
-    } == expected_rows
-    assert len({state.event_id for state in states}) == 240
-    entities: dict[int, set[str]] = defaultdict(set)
-    for state in states:
-        entities[state.customer_id].add(state.entity_id)
-    assert len(entities) == 24
-    assert all(len(ids) == 1 for ids in entities.values())
-    distinct = {next(iter(ids)) for ids in entities.values()}
-    assert len(distinct) == 24
-    return {customer: next(iter(ids)) for customer, ids in entities.items()}
-
-
 async def _assert_gateway_projection(
     gateway: GatewayClient,
     spicedb: SpiceDBProbe,
@@ -333,33 +304,25 @@ async def _assert_gateway_projection(
 ) -> None:
     """Matches Gateway output against each caller's independent object oracle."""
     uploads = build_retail_uploads(load_retail_rows())
+    entity_events = assert_retail_identities(states, uploads)
     access = build_access_oracle(uploads)
     source_by_event = await spicedb.event_sources()
     source_by_row = {
-        row.source_row: canonical_spicedb_object_id(keys[upload.name])
-        for upload in uploads
-        for row in upload.rows
+        row.source_row: upload.name for upload in uploads for row in upload.rows
     }
-    assert all(
-        source_by_event.get(
-            canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
-        )
-        == source_by_row[state.source_row]
-        for state in states
-    )
+    source_ids = {
+        name: canonical_spicedb_object_id(key) for name, key in keys.items()
+    }
     expected_events: dict[str, set[str]] = defaultdict(set)
-    for upload in uploads:
-        key = canonical_spicedb_object_id(keys[upload.name])
-        for state in states:
-            if (
-                source_by_event.get(
-                    canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
-                )
-                == key
-            ):
-                expected_events[upload.name].add(state.event_id)
-        assert len(expected_events[upload.name]) == len(upload.rows)
-    identity = await _assert_identity_oracle(states)
+    for state in states:
+        name = source_by_row[state.source_row]
+        assert (
+            source_by_event.get(
+                canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
+            )
+            == source_ids[name]
+        )
+        expected_events[name].add(state.event_id)
 
     def source_event(hit: object) -> str:
         """Decodes the public JSON scalar without trusting its wire representation."""
@@ -377,7 +340,7 @@ async def _assert_gateway_projection(
             if names
             else set()
         )
-        for entity_id in identity.values():
+        for entity_id, events in entity_events.items():
             hits = await gateway.execute(
                 token,
                 """
@@ -395,20 +358,22 @@ async def _assert_gateway_projection(
                     hits.get("structuredSearch"), "empirical search"
                 )
             }
-            expected_for_entity = {
-                state.event_id
-                for state in states
-                if state.entity_id == entity_id
-            } & visible
-            assert returned == expected_for_entity, (actor, entity_id)
+            assert returned == events & visible, (actor, entity_id)
 
-        selected = next(iter(identity.values()))
+        selected = min(
+            (
+                entity
+                for entity, events in entity_events.items()
+                if events & visible
+            ),
+            default=min(entity_events),
+        )
         graph_data = await gateway.execute(
             token,
             """
             query EmpiricalGraph($entityId: String!) {
               entityRelations(entityId: $entityId, depth: 1, limit: 50) {
-                nodes { id label properties }
+                nodes { id kind properties }
                 edges { fromId toId properties }
               }
             }
@@ -423,11 +388,9 @@ async def _assert_gateway_projection(
             for node in require_sequence(graph.get("nodes"), "graph nodes")
         ]
         event_nodes = {
-            str(node["id"])
-            for node in nodes
-            if str(node["id"]).startswith("evt_")
+            str(node["id"]) for node in nodes if node["kind"] == "Event"
         }
-        assert event_nodes <= visible, actor
+        assert event_nodes == entity_events[selected] & visible, actor
         if actor == ADMIN:
             assert event_nodes
             assert any(node["properties"] not in ({}, "{}") for node in nodes)

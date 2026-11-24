@@ -6,6 +6,7 @@ import csv
 import io
 import json
 from collections import Counter
+from dataclasses import replace
 
 import pytest
 from empirical_data import load_retail_rows, load_trial_rows
@@ -13,10 +14,54 @@ from scenario import (
     ADMIN,
     RETURNS_STEWARDS,
     SALES_STEWARDS,
+    RetailState,
+    assert_retail_identities,
     build_access_oracle,
     build_retail_uploads,
     encode_trial_rows,
 )
+
+
+@pytest.mark.parametrize(
+    "violation", [None, "cross-owner", "split", "duplicate-event"]
+)
+def test_retail_identities_follow_the_uploader_scope(
+    violation: str | None,
+) -> None:
+    """Checks both authorized merges and separation across uploader scopes."""
+    uploads = build_retail_uploads(load_retail_rows())
+    states = [
+        RetailState(
+            entity_id=f"{row.customer_id}/{upload.actor}",
+            event_id=f"event/{row.source_row}",
+            customer_id=row.customer_id,
+            source_row=row.source_row,
+        )
+        for upload in uploads
+        for row in upload.rows
+    ]
+    first = states[0]
+    if violation == "cross-owner":
+        other_index = next(
+            index
+            for index, state in enumerate(states)
+            if state.customer_id == first.customer_id
+            and state.entity_id != first.entity_id
+        )
+        states[other_index] = replace(
+            states[other_index], entity_id=first.entity_id
+        )
+    elif violation == "split":
+        assert states[1].entity_id == first.entity_id
+        states[1] = replace(states[1], entity_id="separate-identity")
+    elif violation == "duplicate-event":
+        states[1] = replace(states[1], event_id=first.event_id)
+    if violation is not None:
+        with pytest.raises(AssertionError):
+            assert_retail_identities(states, uploads)
+        return
+    events = assert_retail_identities(states, uploads)
+    assert Counter(map(len, events.values())) == {1: 22, 9: 22, 10: 2}
 
 
 def test_upload_plan_preserves_lineage_and_principals() -> None:

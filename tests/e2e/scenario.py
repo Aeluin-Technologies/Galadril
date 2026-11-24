@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -36,6 +38,48 @@ class UploadBatch:
     data_type: DataType
     rows: tuple[RetailRow, ...]
     payload: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class RetailState:
+    """One persisted row whose source and identity are checked independently."""
+
+    entity_id: str
+    event_id: str
+    customer_id: int
+    source_row: int
+
+
+def assert_retail_identities(
+    states: Sequence[RetailState], uploads: Sequence[UploadBatch]
+) -> dict[str, set[str]]:
+    """Checks the identity partition and returns each entity's events."""
+    expected = {
+        row.source_row: (row.customer_id, upload.actor)
+        for upload in uploads
+        for row in upload.rows
+    }
+    actual = {state.source_row: state.customer_id for state in states}
+    assert len(states) == len(expected) == len(actual)
+    assert actual == {row: customer for row, (customer, _) in expected.items()}
+    assert len({state.event_id for state in states}) == len(states), (
+        "Each retail observation must retain its own event"
+    )
+
+    entities: dict[tuple[int, str], str] = {}
+    scopes: dict[str, tuple[int, str]] = {}
+    events: dict[str, set[str]] = defaultdict(set)
+    for state in states:
+        # Uploader grants govern candidate reuse; reader grants only project evidence.
+        scope = expected[state.source_row]
+        assert entities.setdefault(scope, state.entity_id) == state.entity_id, (
+            "LI-ESKG split a customer within one uploader's candidate scope"
+        )
+        assert scopes.setdefault(state.entity_id, scope) == scope, (
+            "LI-ESKG merged different customers or uploader scopes"
+        )
+        events[state.entity_id].add(state.event_id)
+    return events
 
 
 def _encode_rows(rows: tuple[RetailRow, ...]) -> bytes:
