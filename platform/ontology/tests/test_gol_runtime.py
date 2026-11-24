@@ -1,5 +1,6 @@
 """Runtime projections require a server-admitted calculation for every effect."""
 
+import json
 import unittest
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -19,6 +20,8 @@ from galadril_ontology import (
     GolSymbolKind,
     GolUnavailable,
     active_gol_lease,
+    authorized_gol_reads,
+    protected_gol_effects,
 )
 from pydantic import ValidationError
 
@@ -98,6 +101,79 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             wire["proposal"], {"length": 12, "body": "signed value"}
         )
+
+    async def test_selected_reads_keep_masks_bound_to_a_live_permit(
+        self,
+    ) -> None:
+        request = WorkerCredential.request()
+        client = GatewayGolClient(
+            "http://gateway", worker_key_path=self.worker_key_path
+        )
+        self.addAsyncCleanup(client.close)
+        manager = GolRuntimeManager(client)
+        effects = tuple(
+            GolEffect(
+                operation="read",
+                target="communication.mail::Message",
+                destination="identity_state",
+                purpose="identity_resolution",
+                instance_id=f"message-{index}",
+                proposal={"length": index},
+                receipt="signed-value",
+            )
+            for index in range(2)
+        )
+        completions: list[bool] = []
+        calls = 0
+
+        def transport(outgoing: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            body = json.loads(outgoing.content)
+            if outgoing.url.path.endswith("/runtime"):
+                return httpx.Response(
+                    200, json=lease().model_dump(by_alias=True)
+                )
+            if "completion" in body:
+                self.assertEqual(body["completion"], "read-permit")
+                completions.append(body["succeeded"])
+                return httpx.Response(200, json={"allowed": True})
+            calls += 1
+            self.assertIs(body["selectReadable"], True)
+            self.assertEqual(len(body["effects"]), 2)
+            mask = [True, False] if calls == 1 else [False, False]
+            return httpx.Response(
+                200,
+                json={
+                    "allowed": True,
+                    "allowedReads": mask,
+                    "permit": "read-permit",
+                    "receipts": [None, None],
+                },
+            )
+
+        original_client = httpx.AsyncClient
+        with patch.object(
+            httpx,
+            "AsyncClient",
+            side_effect=lambda **kwargs: original_client(
+                **kwargs, transport=httpx.MockTransport(transport)
+            ),
+        ):
+            async with manager.bind(request, admission="server-admission"):
+                async with authorized_gol_reads(
+                    effects, tenant_id=request.tenant_id
+                ) as mask:
+                    self.assertEqual(mask, (True, False))
+                    self.assertEqual(completions, [])
+                    with self.assertRaises(GolDenied):
+                        async with protected_gol_effects(effects):
+                            self.fail("Nested read scope obtained a permit")
+                async with authorized_gol_reads(
+                    effects, tenant_id=request.tenant_id
+                ) as mask:
+                    self.assertEqual(mask, (False, False))
+        self.assertEqual(completions, [True, True])
+        self.assertEqual(calls, 2)
 
     async def test_transport_read_budget_allows_gateway_to_finish(self) -> None:
         """The worker can receive the result of live checks within the proxy budget."""

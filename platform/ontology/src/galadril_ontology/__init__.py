@@ -16,6 +16,7 @@ from .identity import normalize_tenant_id, require_same_tenant, source_object_id
 from .runtime import (
     GolRuntimeManager,
     active_gol_lease,
+    authorized_gol_reads,
     make_gol_state_effect,
     protected_gol_effect,
     protected_gol_effects,
@@ -38,6 +39,7 @@ __all__ = [
     "GolSymbolKind",
     "GolUnavailable",
     "active_gol_lease",
+    "authorized_gol_reads",
     "normalize_tenant_id",
     "protected_gol_effect",
     "protected_gol_effects",

@@ -1,7 +1,8 @@
 //! Transport GOL obligations to SpiceDB without collapsing caveats into
 //! grants.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::future::Future;
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
@@ -18,6 +19,7 @@ use loth::spicedb::pb::authzed::api::v1::{
 };
 use loth::types::AuthError;
 use sha2::{Digest, Sha256};
+use tokio::sync::Mutex;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::{Channel, Endpoint};
 
@@ -156,8 +158,57 @@ impl SpiceDb {
     }
 }
 
-impl PermissionProvider for SpiceDb {
-    async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
+impl SpiceDb {
+    pub fn live(&self) -> DecisionProvider<'_> {
+        DecisionProvider {
+            authority: self,
+            consistency: Consistency::FullyConsistent,
+            snapshot: None,
+        }
+    }
+
+    /// A fully consistent check selects the revision. Its authorization result
+    /// cannot grant access to any record in the subsequent decision.
+    pub async fn read_snapshot(
+        &self,
+        user: &str,
+    ) -> Option<DecisionProvider<'_>> {
+        let response = self
+            .check_rpc(CheckPermissionRequest {
+                resource: Some(ObjectReference {
+                    object_type: self.resource_type.to_string(),
+                    object_id: "__gol_snapshot".into(),
+                }),
+                subject: Some(SubjectReference {
+                    object: Some(ObjectReference {
+                        object_type: "user".into(),
+                        object_id:
+                            galadril_registry::gol::authorization_object_id(
+                                user,
+                            )
+                            .into_owned(),
+                    }),
+                    optional_relation: String::new(),
+                }),
+                permission: self.permissions.first()?.to_string(),
+                consistency: Some(wire_consistency(
+                    consistency::Requirement::FullyConsistent(true),
+                )),
+                ..Default::default()
+            })
+            .await?;
+        let consistency = snapshot_consistency(response)?;
+        Some(DecisionProvider {
+            authority: self,
+            consistency,
+            snapshot: Some(ReadSnapshot::default()),
+        })
+    }
+
+    fn request(
+        &self,
+        request: &PermissionCheck<'_>,
+    ) -> Option<CheckPermissionRequest> {
         if request.resource_type != self.resource_type.as_ref() ||
             request.versions.relationship_schema != self.schema ||
             request.versions.bridge != self.bridge ||
@@ -167,7 +218,7 @@ impl PermissionProvider for SpiceDb {
                 "user" | "service"
             )
         {
-            return PermissionOutcome::Unavailable;
+            return None;
         }
         let requirement = match request.consistency {
             Consistency::FullyConsistent => {
@@ -180,12 +231,19 @@ impl PermissionProvider for SpiceDb {
                     token: token.to_string(),
                 })
             },
-            _ => return PermissionOutcome::Unavailable,
+            Consistency::AtExactSnapshot(token)
+                if !token.is_empty() && token.len() <= 4096 =>
+            {
+                consistency::Requirement::AtExactSnapshot(ZedToken {
+                    token: token.to_string(),
+                })
+            },
+            _ => return None,
         };
         let context = (!request.context.is_empty()).then(|| loth::spicedb::pb::google::protobuf::Struct {
             fields: request.context.iter().map(|(name, value)| (name.to_string(), loth::spicedb::pb::google::protobuf::Value {kind:Some(loth::spicedb::pb::google::protobuf::value::Kind::BoolValue(*value))})).collect(),
         });
-        let rpc = CheckPermissionRequest {
+        Some(CheckPermissionRequest {
             resource: Some(ObjectReference {
                 object_type: request.resource_type.to_owned(),
                 object_id: request.resource_id.to_owned(),
@@ -202,14 +260,16 @@ impl PermissionProvider for SpiceDb {
                 }),
                 optional_relation: String::new(),
             }),
-            consistency: Some(
-                loth::spicedb::pb::authzed::api::v1::Consistency {
-                    requirement: Some(requirement),
-                },
-            ),
+            consistency: Some(wire_consistency(requirement)),
             context,
             with_tracing: false,
-        };
+        })
+    }
+
+    async fn check_rpc(
+        &self,
+        rpc: CheckPermissionRequest,
+    ) -> Option<CheckPermissionResponse> {
         // A retry reads the same live policy without extending the RPC budget.
         let result = tokio::time::timeout(
             RPC_TIMEOUT,
@@ -228,9 +288,7 @@ impl PermissionProvider for SpiceDb {
         )
         .await;
         let code = match result {
-            Ok(Ok(response)) => {
-                return outcome(response.into_inner(), request.consistency);
-            },
+            Ok(Ok(response)) => return Some(response.into_inner()),
             Ok(Err(AuthError::SpiceDbStatus { status, .. })) => status.code(),
             Ok(Err(_)) => tonic::Code::Unknown,
             Err(_) => tonic::Code::DeadlineExceeded,
@@ -239,7 +297,170 @@ impl PermissionProvider for SpiceDb {
             event.name = "gol.relationship.unavailable",
             grpc_code = code as i32
         );
-        PermissionOutcome::Unavailable
+        None
+    }
+}
+
+impl PermissionProvider for SpiceDb {
+    async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
+        let Some(rpc) = self.request(&request) else {
+            return PermissionOutcome::Unavailable;
+        };
+        self.check_rpc(rpc)
+            .await
+            .map_or(PermissionOutcome::Unavailable, |response| {
+                outcome(response, request.consistency)
+            })
+    }
+}
+
+fn wire_consistency(
+    requirement: consistency::Requirement,
+) -> loth::spicedb::pb::authzed::api::v1::Consistency {
+    loth::spicedb::pb::authzed::api::v1::Consistency {
+        requirement: Some(requirement),
+    }
+}
+
+pub(super) fn snapshot_consistency(
+    response: CheckPermissionResponse,
+) -> Option<Consistency> {
+    let permission = Permissionship::try_from(response.permissionship).ok()?;
+    (permission != Permissionship::Unspecified).then_some(())?;
+    let token = response.checked_at?.token;
+    (!token.is_empty() && token.len() <= 4096)
+        .then(|| Consistency::AtExactSnapshot(token.into()))
+}
+
+/// Reuses exact relationship results only within one read decision.
+pub(super) struct DecisionProvider<'a> {
+    authority: &'a SpiceDb,
+    pub consistency: Consistency,
+    snapshot: Option<ReadSnapshot>,
+}
+
+impl DecisionProvider<'_> {
+    pub fn is_pinned(&self) -> bool {
+        self.snapshot.is_some()
+    }
+}
+
+impl PermissionProvider for DecisionProvider<'_> {
+    async fn check(&self, request: PermissionCheck<'_>) -> PermissionOutcome {
+        let Some(snapshot) = &self.snapshot else {
+            return self.authority.check(request).await;
+        };
+        if request.consistency != &self.consistency {
+            return PermissionOutcome::Unavailable;
+        }
+        let Some(rpc) = self.authority.request(&request) else {
+            return PermissionOutcome::Unavailable;
+        };
+        snapshot
+            .check(rpc, request.consistency, |rpc| {
+                self.authority.check_rpc(rpc)
+            })
+            .await
+    }
+}
+
+#[derive(Default)]
+pub(super) struct ReadSnapshot {
+    state: Mutex<ReadState>,
+}
+
+#[derive(Default)]
+struct ReadState {
+    checks: HashMap<String, Vec<(CheckPermissionRequest, Permissionship)>>,
+    calls: usize,
+    reused: usize,
+    retained: usize,
+}
+
+impl Drop for ReadSnapshot {
+    fn drop(&mut self) {
+        let state = self.state.get_mut();
+        if state.calls != 0 {
+            tracing::debug!(
+                event.name = "gol.relationship.read_snapshot",
+                checks = state.calls,
+                reused = state.reused
+            );
+        }
+    }
+}
+
+impl ReadSnapshot {
+    pub async fn check<F: Future<Output = Option<CheckPermissionResponse>>>(
+        &self,
+        rpc: CheckPermissionRequest,
+        required: &Consistency,
+        call: impl FnOnce(CheckPermissionRequest) -> F,
+    ) -> PermissionOutcome {
+        let Consistency::AtExactSnapshot(revision) = required else {
+            return PermissionOutcome::Unavailable;
+        };
+        if !matches!(
+            rpc.consistency.as_ref().and_then(|wire| wire.requirement.as_ref()),
+            Some(consistency::Requirement::AtExactSnapshot(token))
+                if token.token == revision.as_ref()
+        ) {
+            return PermissionOutcome::Unavailable;
+        }
+        let mut state = self.state.lock().await;
+        let Some(resource) = rpc.resource.as_ref() else {
+            return PermissionOutcome::Unavailable;
+        };
+        if let Some(permission) =
+            state.checks.get(&resource.object_id).and_then(|checks| {
+                checks.iter().find_map(|(prior, decision)| {
+                    (prior == &rpc).then_some(*decision)
+                })
+            })
+        {
+            state.reused += 1;
+            return known_outcome(permission, required);
+        }
+        state.calls += 1;
+        let Some(response) = call(rpc.clone()).await else {
+            return PermissionOutcome::Unavailable;
+        };
+        if response
+            .checked_at
+            .as_ref()
+            .is_none_or(|token| token.token != revision.as_ref())
+        {
+            return PermissionOutcome::Unavailable;
+        }
+        let Ok(permission) = Permissionship::try_from(response.permissionship)
+        else {
+            return PermissionOutcome::Unavailable;
+        };
+        if permission != Permissionship::Unspecified && state.retained < 4096 {
+            state
+                .checks
+                .entry(resource.object_id.clone())
+                .or_default()
+                .push((rpc, permission));
+            state.retained += 1;
+        }
+        known_outcome(permission, required)
+    }
+}
+
+fn known_outcome(
+    permission: Permissionship,
+    required: &Consistency,
+) -> PermissionOutcome {
+    match permission {
+        Permissionship::HasPermission => {
+            PermissionOutcome::Allow(required.clone())
+        },
+        Permissionship::NoPermission => PermissionOutcome::Deny,
+        Permissionship::ConditionalPermission => {
+            PermissionOutcome::Conditional
+        },
+        Permissionship::Unspecified => PermissionOutcome::Unavailable,
     }
 }
 

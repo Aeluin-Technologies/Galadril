@@ -99,13 +99,16 @@ class GatewayGolClient:
                 follow_redirects=False,
                 trust_env=False,
             )
-        headers = {"x-galadril-gol-worker-key": credential}
+        headers = {
+            "content-type": "application/json",
+            "x-galadril-gol-worker-key": credential,
+        }
         propagate.inject(headers)
         try:
             async with self._client.stream(
                 "POST",
                 self._endpoint + path,
-                json=body,
+                content=orjson.dumps(body),
                 headers=headers,
             ) as response:
                 if response.status_code != 200:
@@ -167,6 +170,39 @@ class GatewayGolClient:
         effects: Sequence[GolEffect | Mapping[str, object]],
     ) -> AsyncIterator[tuple[str | None, ...]]:
         """Retains the host's exclusion boundary until real I/O has completed."""
+        async with self._protected_batch(
+            request, selected, admission, effects=effects, select_readable=False
+        ) as (receipts, _):
+            yield receipts
+
+    @asynccontextmanager
+    async def authorized_reads(
+        self,
+        request: GolRequest,
+        selected: GolLease,
+        admission: str,
+        *,
+        effects: Sequence[GolEffect],
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        """Returns a positional mask only while the live read scope is held."""
+        async with self._protected_batch(
+            request, selected, admission, effects=effects, select_readable=True
+        ) as (_, allowed):
+            if allowed is None:
+                raise GolDenied("GOL read selection unavailable")
+            yield allowed
+
+    @asynccontextmanager
+    async def _protected_batch(
+        self,
+        request: GolRequest,
+        selected: GolLease,
+        admission: str,
+        *,
+        effects: Sequence[GolEffect | Mapping[str, object]],
+        select_readable: bool,
+    ) -> AsyncIterator[tuple[tuple[str | None, ...], tuple[bool, ...] | None]]:
+
         if not effects or len(effects) > 256:
             raise GolDenied("GOL effect batch unavailable")
         try:
@@ -202,6 +238,8 @@ class GatewayGolClient:
                     for effect in checked
                 ],
             }
+            if select_readable:
+                body["selectReadable"] = True
             if len(orjson.dumps(body)) > 160 * 1024:
                 raise GolDenied("GOL effect batch exceeds limit")
         except (ValidationError, TypeError, ValueError):
@@ -237,9 +275,24 @@ class GatewayGolClient:
             raise GolDenied("GOL effect permit unavailable")
         succeeded = False
         try:
-            yield tuple(
-                receipt if isinstance(receipt, str) else None
-                for receipt in receipts
+            allowed_reads = result.get("allowedReads")
+            mask = None
+            if select_readable:
+                if (
+                    not isinstance(allowed_reads, list)
+                    or len(allowed_reads) != len(checked)
+                    or any(
+                        type(allowed) is not bool for allowed in allowed_reads
+                    )
+                ):
+                    raise GolDenied("GOL read selection unavailable")
+                mask = tuple(allowed is True for allowed in allowed_reads)
+            yield (
+                tuple(
+                    receipt if isinstance(receipt, str) else None
+                    for receipt in receipts
+                ),
+                mask,
             )
             succeeded = True
         finally:

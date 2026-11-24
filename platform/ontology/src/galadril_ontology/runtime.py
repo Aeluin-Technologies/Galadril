@@ -43,6 +43,14 @@ class RuntimeGateway(Protocol):
         *,
         effects: Sequence[GolEffect],
     ) -> AbstractAsyncContextManager[tuple[str | None, ...]]: ...
+    def authorized_reads(
+        self,
+        request: GolRequest,
+        selected: GolLease,
+        admission: str,
+        *,
+        effects: Sequence[GolEffect],
+    ) -> AbstractAsyncContextManager[tuple[bool, ...]]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +150,21 @@ async def protected_gol_effects(
         raise GolDenied("GOL effect unavailable")
     async with bound.manager.protected(effects) as receipts:
         yield receipts
+
+
+@asynccontextmanager
+async def authorized_gol_reads(
+    effects: Sequence[GolEffect], *, tenant_id: str
+) -> AsyncIterator[tuple[bool, ...]]:
+    """Selects signed reads under one host-owned effect boundary."""
+    bound = _ACTIVE.get()
+    if (
+        bound is None
+        or normalize_tenant_id(tenant_id) != bound.request.tenant_id
+    ):
+        raise GolDenied("GOL read selection unavailable")
+    async with bound.manager.authorized_reads(effects) as allowed:
+        yield allowed
 
 
 @asynccontextmanager
@@ -264,6 +287,40 @@ class GolRuntimeManager:
             yield lease
         finally:
             _ACTIVE.reset(token)
+
+    @asynccontextmanager
+    async def authorized_reads(
+        self, effects: Sequence[GolEffect]
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        """A selective read scope cannot admit another effect during consumption."""
+        bound = _ACTIVE.get()
+        if (
+            bound is None
+            or bound.manager is not self
+            or _EFFECT_ACTIVE.get() is not None
+            or not 1 <= len(effects) <= 64
+            or any(
+                effect.operation != "read"
+                or not effect.instance_id
+                or effect.proposal is None
+                or not effect.receipt
+                or bound.lease.symbol(effect.target) is None
+                for effect in effects
+            )
+        ):
+            raise GolDenied("GOL read selection unavailable")
+        async with self._gateway.authorized_reads(
+            bound.request, bound.lease, bound.admission, effects=effects
+        ) as allowed:
+            if len(allowed) != len(effects):
+                raise GolDenied("GOL read selection unavailable")
+            held = _HeldBatch(self, (), (), asyncio.current_task())
+            token = _EFFECT_ACTIVE.set(held)
+            try:
+                yield allowed
+            finally:
+                held.active = False
+                _EFFECT_ACTIVE.reset(token)
 
     @asynccontextmanager
     async def protected(

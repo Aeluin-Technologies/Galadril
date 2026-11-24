@@ -29,9 +29,11 @@ use super::receipts::{
     Dependency, LineageOrigin, MAX_DEPENDENCIES, ReceiptScope,
 };
 use super::runtime::{
-    BeginEffects, EffectRequest, EffectResponse, ResumeRequest,
-    ResumeResponse, RuntimeError, RuntimeLease, RuntimeRequest, RuntimeSymbol,
+    BeginEffects, EffectRequest, EffectResponse, RequestedEffect,
+    ResumeRequest, ResumeResponse, RuntimeError, RuntimeLease, RuntimeRequest,
+    RuntimeSymbol,
 };
+use super::spicedb::DecisionProvider;
 use super::{GolService, owner, resolve, snapshot, symbol};
 use crate::application::usecases::authorization::{Permission, QueryContext};
 
@@ -44,6 +46,15 @@ struct Lease {
     source_revision: String,
     archive: Arc<RemoteArchive>,
     targets: BTreeSet<String>,
+}
+
+struct EffectBatch<'a> {
+    worker: &'a Worker,
+    lease: &'a Lease,
+    actor: &'a Actor,
+    current: RemoteArchive,
+    archives: BTreeMap<String, RemoteArchive>,
+    rechecked: BTreeSet<Dependency>,
 }
 
 struct Worker {
@@ -535,7 +546,7 @@ impl GolService {
             (id, lease)
         };
         *phase = "dependencies";
-        self.recheck_dependencies(&worker, &mut BTreeMap::new())
+        self.recheck_dependencies(&worker, &mut BTreeMap::new(), None)
             .await?;
         *phase = "metadata";
         let backend = self.backend()?;
@@ -862,6 +873,7 @@ impl GolService {
         &self,
         worker: &Worker,
         archives: &mut BTreeMap<String, RemoteArchive>,
+        snapshot: Option<&DecisionProvider<'_>>,
     ) -> Result<BTreeSet<Dependency>> {
         let dependencies = worker
             .dependencies
@@ -874,6 +886,21 @@ impl GolService {
                 &worker.admission.actor.subject_id,
             )
             .await?;
+        let local;
+        let relationships = if let Some(snapshot) = snapshot {
+            snapshot
+        } else {
+            let authority = &self.backend()?.provider;
+            local = if dependencies.len() > 1 {
+                authority
+                    .read_snapshot(&actor.subject_id)
+                    .await
+                    .ok_or(RuntimeError::Unavailable)?
+            } else {
+                authority.live()
+            };
+            &local
+        };
         for dependency in &dependencies {
             self.recheck_dependency(
                 &actor,
@@ -881,6 +908,7 @@ impl GolService {
                 &worker.facts,
                 dependency,
                 archives,
+                relationships,
             )
             .await?;
         }
@@ -925,6 +953,11 @@ impl GolService {
             receipt.flow.join(&backend.profile.context_floor),
         )?);
         let mut archives = BTreeMap::new();
+        let relationships = backend
+            .provider
+            .read_snapshot(&actor.subject_id)
+            .await
+            .ok_or(RuntimeError::Unavailable)?;
         for dependency in &receipt.dependencies {
             self.recheck_dependency(
                 &actor,
@@ -932,6 +965,7 @@ impl GolService {
                 facts,
                 dependency,
                 &mut archives,
+                &relationships,
             )
             .await?;
         }
@@ -948,6 +982,7 @@ impl GolService {
             facts,
             &dependency,
             &mut archives,
+            &relationships,
         )
         .await?;
         for field in fields {
@@ -968,6 +1003,7 @@ impl GolService {
                 facts,
                 &dependency,
                 &mut archives,
+                &relationships,
             )
             .await?;
         }
@@ -981,6 +1017,7 @@ impl GolService {
         facts: &QueryContext,
         dependency: &Dependency,
         archives: &mut BTreeMap<String, RemoteArchive>,
+        relationships: &DecisionProvider<'_>,
     ) -> Result<()> {
         let backend = self.backend()?;
         if dependency.ontology.is_empty() && dependency.target.is_empty() {
@@ -1002,20 +1039,21 @@ impl GolService {
                 .map_err(|_| {
                     anyhow::anyhow!("GOL source provenance unavailable")
                 })?;
-            ensure!(
-                head.e_tag() == Some(dependency.revision.as_str()) &&
-                    self.auth
-                        .is_authorized(
-                            &actor.subject_id,
-                            &actor.tenant,
-                            Permission::View,
-                            "raw",
-                            key,
-                            Some(facts)
-                        )
-                        .await?,
-                "GOL source provenance unavailable"
-            );
+            if head.e_tag() != Some(dependency.revision.as_str()) ||
+                !self
+                    .auth
+                    .is_authorized(
+                        &actor.subject_id,
+                        &actor.tenant,
+                        Permission::View,
+                        "raw",
+                        key,
+                        Some(facts),
+                    )
+                    .await?
+            {
+                return Err(RuntimeError::Denied.into());
+            }
             return Ok(());
         }
         // All dependency checks in this request share a bounded active
@@ -1032,7 +1070,12 @@ impl GolService {
         };
         match self
             .recheck_archive_dependency(
-                actor, state, facts, dependency, archive,
+                actor,
+                state,
+                facts,
+                dependency,
+                archive,
+                relationships,
             )
             .await
         {
@@ -1057,7 +1100,12 @@ impl GolService {
                     event.name = "gol.worker.dependency.reader_refreshed"
                 );
                 self.recheck_archive_dependency(
-                    actor, state, facts, dependency, archive,
+                    actor,
+                    state,
+                    facts,
+                    dependency,
+                    archive,
+                    relationships,
                 )
                 .await
             },
@@ -1072,6 +1120,7 @@ impl GolService {
         facts: &QueryContext,
         dependency: &Dependency,
         archive: &RemoteArchive,
+        relationships: &DecisionProvider<'_>,
     ) -> Result<()> {
         let backend = self.backend()?;
         let target = resolve(archive, &dependency.target)?;
@@ -1110,8 +1159,9 @@ impl GolService {
             )
             .await?
         };
+        let prepared = prepared.at_consistency(&relationships.consistency);
         let decision = archive
-            .authorize_checked(&access, &prepared, &backend.provider)
+            .authorize_checked(&access, &prepared, relationships)
             .await?;
         if let Decision::Deny(reason) = decision {
             tracing::warn!(
@@ -1171,6 +1221,7 @@ impl GolService {
                     allowed: true,
                     permit: None,
                     receipts: Vec::new(),
+                    allowed_reads: None,
                 })
             },
             EffectRequest::Begin(request) => {
@@ -1199,6 +1250,7 @@ impl GolService {
             !request.effects.is_empty() && request.effects.len() <= 64,
             "GOL effect budget exceeded"
         );
+        request.validate_read_selection()?;
         let worker = self.worker(
             &request.admission,
             &request.tenant_id,
@@ -1225,17 +1277,169 @@ impl GolService {
             self.verify_pipeline_execute(&worker, &lease.binding_pipeline)
                 .await?;
         }
-        *phase = "dependencies";
-        let mut archives = BTreeMap::new();
-        let mut rechecked =
-            self.recheck_dependencies(&worker, &mut archives).await?;
         let backend = self.backend()?;
         let actor = self
             .actor(&request.tenant_id, &worker.admission.actor.subject_id)
             .await?;
+        let relationships = if request.select_readable {
+            *phase = "relationship_revision";
+            backend
+                .provider
+                .read_snapshot(&actor.subject_id)
+                .await
+                .ok_or(RuntimeError::Unavailable)?
+        } else {
+            backend.provider.live()
+        };
+        *phase = "dependencies";
+        let mut archives = BTreeMap::new();
+        let rechecked = self
+            .recheck_dependencies(
+                &worker,
+                &mut archives,
+                request.select_readable.then_some(&relationships),
+            )
+            .await?;
         let current = backend
             .open(&request.tenant_id, &lease.ontology, None)
             .await?;
+        let mut batch = EffectBatch {
+            worker: &worker,
+            lease: &lease,
+            actor: &actor,
+            current,
+            archives,
+            rechecked,
+        };
+        let (receipts, allowed_reads) = if request.select_readable {
+            let selected = self
+                .select_readable(
+                    &request.effects,
+                    &mut batch,
+                    phase,
+                    &relationships,
+                )
+                .await?;
+            (vec![None; selected.len()], Some(selected))
+        } else {
+            (
+                self.authorize_effects(
+                    &request.effects,
+                    &mut batch,
+                    phase,
+                    &relationships,
+                )
+                .await?,
+                None,
+            )
+        };
+        *phase = "release";
+        let permit = self.workers.permits.begin(
+            &request.tenant_id,
+            &request.context_id,
+            Arc::clone(&worker.invalid),
+            boundary,
+            Instant::now(),
+        )?;
+        Ok(EffectResponse {
+            allowed: true,
+            permit: Some(permit),
+            receipts,
+            allowed_reads,
+        })
+    }
+
+    /// A denial can remove one read, but its control flow still belongs to
+    /// the calculation. All released reads must pass at the resulting label.
+    async fn select_readable(
+        &self,
+        effects: &[RequestedEffect],
+        batch: &mut EffectBatch<'_>,
+        phase: &mut &'static str,
+        relationships: &DecisionProvider<'_>,
+    ) -> Result<Vec<bool>> {
+        let context = &batch.worker.admission.context;
+        let initial_label = context.current_label()?;
+        let mut epoch = initial_label.clone();
+        let mut selected = Vec::with_capacity(effects.len());
+        for effect in effects {
+            let allowed = match self
+                .authorize_effects(
+                    std::slice::from_ref(effect),
+                    batch,
+                    phase,
+                    relationships,
+                )
+                .await
+            {
+                Ok(_) => true,
+                Err(error)
+                    if error.downcast_ref::<RuntimeError>() ==
+                        Some(&RuntimeError::Denied) &&
+                        matches!(
+                            *phase,
+                            "pinned_policy" |
+                                "active_policy" |
+                                "receipt_dependencies"
+                        ) =>
+                {
+                    false
+                },
+                Err(error) => return Err(error),
+            };
+            selected.push(allowed);
+            let current = context.current_label()?;
+            if current != epoch {
+                batch.rechecked = self
+                    .recheck_dependencies(
+                        batch.worker,
+                        &mut batch.archives,
+                        Some(relationships),
+                    )
+                    .await?;
+                epoch = context.current_label()?;
+            }
+        }
+        if epoch != initial_label {
+            for (effect, allowed) in effects.iter().zip(&selected) {
+                if *allowed {
+                    self.authorize_effects(
+                        std::slice::from_ref(effect),
+                        batch,
+                        phase,
+                        relationships,
+                    )
+                    .await?;
+                }
+            }
+            ensure!(
+                context.current_label()? == epoch,
+                "GOL selected reads changed their release label"
+            );
+        }
+        tracing::debug!(
+            event.name = "gol.worker.read_selection",
+            candidates = effects.len(),
+            approved = selected.iter().filter(|allowed| **allowed).count()
+        );
+        Ok(selected)
+    }
+
+    async fn authorize_effects(
+        &self,
+        effects: &[RequestedEffect],
+        batch: &mut EffectBatch<'_>,
+        phase: &mut &'static str,
+        relationships: &DecisionProvider<'_>,
+    ) -> Result<Vec<Option<String>>> {
+        let backend = self.backend()?;
+        let EffectBatch {
+            worker,
+            lease,
+            actor,
+            ..
+        } = *batch;
+        let current = &batch.current;
         *phase = "effect_reader";
         let same_generation =
             current.generation() == lease.archive.generation();
@@ -1247,15 +1451,15 @@ impl GolService {
                 }),
                 "GOL source binding changed"
             );
-            &current
+            current
         } else {
             ensure!(lease.archive.is_live(), RemoteError::Expired);
             lease.archive.as_ref()
         };
-        let mut checked = Vec::with_capacity(request.effects.len());
-        let mut roots = Vec::with_capacity(request.effects.len());
+        let mut checked = Vec::with_capacity(effects.len());
+        let mut roots = Vec::with_capacity(effects.len());
         let mut outcome = worker.admission.context.current_label()?;
-        for effect in &request.effects {
+        for effect in effects {
             *phase = "provenance";
             ensure!(
                 lease.targets.contains(&effect.target),
@@ -1331,7 +1535,7 @@ impl GolService {
                         .signer
                         .as_ref()
                         .context("GOL provenance unavailable")?
-                        .verify(receipt, &request.tenant_id, id, value)?,
+                        .verify(receipt, &actor.tenant, id, value)?,
                 ),
                 (None, _)
                     if operation == Operation::Write ||
@@ -1350,20 +1554,36 @@ impl GolService {
                 let before = worker.admission.context.current_label()?;
                 worker.admission.context.include_input(&receipt.flow)?;
                 if worker.admission.context.current_label()? != before {
-                    rechecked = self
-                        .recheck_dependencies(&worker, &mut archives)
+                    *phase = "retained_dependencies";
+                    batch.rechecked = self
+                        .recheck_dependencies(
+                            worker,
+                            &mut batch.archives,
+                            relationships.is_pinned().then_some(relationships),
+                        )
                         .await?;
                 }
+                *phase = "receipt_dependencies";
                 for dependency in &receipt.dependencies {
-                    if rechecked.insert(dependency.clone()) {
+                    if !batch.rechecked.contains(dependency) {
+                        let dependency_label =
+                            worker.admission.context.current_label()?;
                         self.recheck_dependency(
-                            &actor,
+                            actor,
                             &worker.admission.context,
                             &worker.facts,
                             dependency,
-                            &mut archives,
+                            &mut batch.archives,
+                            relationships,
                         )
                         .await?;
+                        if worker.admission.context.current_label()? !=
+                            dependency_label
+                        {
+                            batch.rechecked.clear();
+                        } else {
+                            batch.rechecked.insert(dependency.clone());
+                        }
                     }
                 }
                 worker
@@ -1371,6 +1591,7 @@ impl GolService {
                     .lock()
                     .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
                     .extend(receipt.dependencies.iter().cloned());
+                *phase = "provenance";
             }
             if operation == Operation::Transfer && effect.instance_id.is_none()
             {
@@ -1410,7 +1631,7 @@ impl GolService {
             let mut prepared = snapshot::Snapshot::prepare_data(
                 pinned,
                 &access,
-                &actor,
+                actor,
                 Arc::clone(&worker.admission.context),
                 &worker.facts,
                 &backend.authority,
@@ -1425,7 +1646,7 @@ impl GolService {
                     .join(descriptor.control_flow())
                     .join(descriptor.flow());
             }
-            let current_target = resolve(&current, &effect.target)?;
+            let current_target = resolve(current, &effect.target)?;
             for descriptor in current
                 .requirements(&Route::new(current_target, operation))
                 .await?
@@ -1453,7 +1674,7 @@ impl GolService {
                             name.parse()?,
                         )
                         .into();
-                    for archive in [pinned, &current] {
+                    for archive in [pinned, current] {
                         let field = resolve(
                             archive,
                             &reference_key(&field_access.route.target),
@@ -1504,12 +1725,12 @@ impl GolService {
                 prepared
                     .proposed_fields(pinned, &fields, owner(&target)?)
                     .await?;
-                let metadata_access = backend
-                    .metadata_access(&request.tenant_id, target.clone())?;
+                let metadata_access =
+                    backend.metadata_access(&actor.tenant, target.clone())?;
                 let metadata = snapshot::Snapshot::prepare(
                     pinned,
                     &metadata_access,
-                    &actor,
+                    actor,
                     Arc::clone(&worker.admission.context),
                     &worker.facts,
                     &backend.authority,
@@ -1565,7 +1786,7 @@ impl GolService {
                             .join(descriptor.control_flow());
                     }
                     let active_field = resolve(
-                        &current,
+                        current,
                         &reference_key(&field_access.route.target),
                     )?;
                     for descriptor in current
@@ -1604,7 +1825,7 @@ impl GolService {
                     .join(descriptor.control_flow());
             }
             let target =
-                resolve(&current, &reference_key(&access.route.target))?;
+                resolve(current, &reference_key(&access.route.target))?;
             for descriptor in current
                 .requirements(&Route::new(target, Operation::Read))
                 .await?
@@ -1625,7 +1846,7 @@ impl GolService {
             let prepared = snapshot::Snapshot::prepare_data(
                 pinned,
                 access,
-                &actor,
+                actor,
                 Arc::clone(&worker.admission.context),
                 &worker.facts,
                 &backend.authority,
@@ -1634,9 +1855,10 @@ impl GolService {
                 None,
             )
             .await?;
+            let prepared = prepared.at_consistency(&relationships.consistency);
             *phase = "pinned_policy";
             if let Decision::Deny(reason) = pinned
-                .authorize_checked(access, &prepared, &backend.provider)
+                .authorize_checked(access, &prepared, relationships)
                 .await?
             {
                 tracing::warn!(
@@ -1655,15 +1877,15 @@ impl GolService {
             // type reader.
             *phase = "active_snapshot";
             let current_target =
-                resolve(&current, &reference_key(&access.route.target))?;
+                resolve(current, &reference_key(&access.route.target))?;
             let mut current_access =
                 access_clone(access, access.route.operation);
             current_access.route.target = current_target.clone();
             current_access.instance.owner = owner(&current_target)?.clone();
             let current_snapshot = snapshot::Snapshot::prepare_data(
-                &current,
+                current,
                 &current_access,
-                &actor,
+                actor,
                 Arc::clone(&worker.admission.context),
                 &worker.facts,
                 &backend.authority,
@@ -1672,12 +1894,14 @@ impl GolService {
                 None,
             )
             .await?;
+            let current_snapshot =
+                current_snapshot.at_consistency(&relationships.consistency);
             *phase = "active_policy";
             if let Decision::Deny(reason) = current
                 .authorize_checked(
                     &current_access,
                     &current_snapshot,
-                    &backend.provider,
+                    relationships,
                 )
                 .await?
             {
@@ -1731,41 +1955,34 @@ impl GolService {
             anyhow::bail!("GOL provenance budget exceeded");
         }
         *phase = "sign_receipts";
-        let lineage =
-            if request.effects.iter().zip(&roots).any(|(effect, access)| {
-                access.route.operation == Operation::Write ||
-                    effect.handoff.is_some()
-            }) {
-                Some(LineageOrigin {
-                    issuer: actor.issuer.to_string(),
-                    subject_id: actor.subject_id.to_string(),
-                    source_object_id: worker
-                        .admission
-                        .input
-                        .source_object_id
-                        .to_string(),
-                    source_revision: worker
-                        .admission
-                        .input
-                        .revision
-                        .to_string(),
-                    source_marker: worker.source_marker,
-                    pipeline_id: request.pipeline_id.clone(),
-                    pipeline_revision_id: request.pipeline_revision_id.clone(),
-                    pins: worker
-                        .pins
-                        .lock()
-                        .map_err(|_| {
-                            anyhow::anyhow!("GOL runtime unavailable")
-                        })?
-                        .clone(),
-                    handoff: None,
-                })
-            } else {
-                None
-            };
-        let receipts = request
-            .effects
+        let lineage = if effects.iter().zip(&roots).any(|(effect, access)| {
+            access.route.operation == Operation::Write ||
+                effect.handoff.is_some()
+        }) {
+            Some(LineageOrigin {
+                issuer: actor.issuer.to_string(),
+                subject_id: actor.subject_id.to_string(),
+                source_object_id: worker
+                    .admission
+                    .input
+                    .source_object_id
+                    .to_string(),
+                source_revision: worker.admission.input.revision.to_string(),
+                source_marker: worker.source_marker,
+                pipeline_id: lease.pipeline.clone(),
+                pipeline_revision_id: lease.revision.clone(),
+                pins: worker
+                    .pins
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("GOL runtime unavailable"))?
+                    .clone(),
+                handoff: None,
+            })
+        } else {
+            None
+        };
+        let generation = pinned.generation().to_string();
+        effects
             .iter()
             .zip(&roots)
             .map(|(effect, access)| {
@@ -1792,10 +2009,10 @@ impl GolService {
                     .context("GOL signing unavailable")?
                     .issue(
                         &ReceiptScope {
-                            tenant: &request.tenant_id,
+                            tenant: &actor.tenant,
                             target: &access.route.target,
                             instance_id: &access.instance.id,
-                            generation: &request.generation_id,
+                            generation: &generation,
                             source_revision: &lease.source_revision,
                             dependencies: &dependencies,
                             lineage,
@@ -1805,21 +2022,7 @@ impl GolService {
                     )
                     .map(Some)
             })
-            .collect::<Result<Vec<_>>>()?;
-        drop(dependencies);
-        *phase = "release";
-        let permit = self.workers.permits.begin(
-            &request.tenant_id,
-            &request.context_id,
-            Arc::clone(&worker.invalid),
-            boundary,
-            Instant::now(),
-        )?;
-        Ok(EffectResponse {
-            allowed: true,
-            permit: Some(permit),
-            receipts,
-        })
+            .collect()
     }
 
     async fn worker_boundary(

@@ -23,6 +23,7 @@ pub(super) struct Snapshot<'a> {
     actor: &'a Actor,
     state: Arc<ExecutionContext>,
     versions: Versions,
+    consistency: Consistency,
     requirements: BTreeMap<Route, Descriptor>,
     revision: String,
     context: Context,
@@ -177,6 +178,7 @@ impl<'a> Snapshot<'a> {
             versions: archive.versions().clone(),
             requirements,
             revision: revision.to_owned(),
+            consistency: Consistency::FullyConsistent,
             context: Context::from_json_value(
                 serde_json::Value::Object(context),
                 None,
@@ -188,6 +190,13 @@ impl<'a> Snapshot<'a> {
             instance_id: access.instance.id.clone(),
             instance_flow: flow.cloned(),
         })
+    }
+
+    /// Applies a revision acquired by the relationship authority for this
+    /// decision.
+    pub fn at_consistency(mut self, consistency: &Consistency) -> Self {
+        self.consistency = consistency.clone();
+        self
     }
 
     /// Adds only explicitly proposed same-instance fields to a data snapshot.
@@ -341,7 +350,7 @@ impl TrustedRuntime for Snapshot<'_> {
             primary: self.resource(owner),
             dependencies,
             versions: self.versions.clone(),
-            consistency: Consistency::FullyConsistent,
+            consistency: self.consistency.clone(),
             context: self.context.clone(),
             context_flow: self.context_flow.clone(),
             entities: self.entities.clone(),

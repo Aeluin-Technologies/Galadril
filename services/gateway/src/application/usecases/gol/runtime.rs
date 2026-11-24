@@ -113,6 +113,26 @@ pub(crate) struct BeginEffects {
     pub context_id: String,
     pub generation_id: String,
     pub effects: Vec<RequestedEffect>,
+    #[serde(default)]
+    pub select_readable: bool,
+}
+
+impl BeginEffects {
+    /// Selective admission is defined only for signed, concrete reads.
+    pub(super) fn validate_read_selection(&self) -> Result<()> {
+        ensure!(
+            !self.select_readable ||
+                self.effects.iter().all(|effect| {
+                    effect.operation == "read" &&
+                        effect.instance_id.is_some() &&
+                        effect.proposal.is_some() &&
+                        effect.receipt.is_some() &&
+                        effect.handoff.is_none()
+                }),
+            "GOL read selection requires signed values"
+        );
+        Ok(())
+    }
 }
 
 /// Completion can only release the boundary of its original calculation.
@@ -171,6 +191,8 @@ pub(crate) struct EffectResponse {
     pub allowed: bool,
     pub permit: Option<String>,
     pub receipts: Vec<Option<String>>,
+    #[serde(rename = "allowedReads", skip_serializing_if = "Option::is_none")]
+    pub allowed_reads: Option<Vec<bool>>,
 }
 
 #[cfg(test)]
@@ -178,6 +200,34 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn read_selection_requires_only_concrete_signed_reads() -> Result<()> {
+        let wire = json!({
+            "tenantId": "tenant", "pipelineId": "pipeline",
+            "pipelineRevisionId": "revision", "blockId": "block",
+            "sourceObjectId": "raw:tenant/key", "admission": "admission",
+            "contextId": "context", "generationId": "generation",
+            "selectReadable": true,
+            "effects": [{
+                "operation": "read", "target": "example::Prototype",
+                "destination": "identity_state", "purpose": "identity_resolution",
+                "instanceId": "entity", "proposal": {"embedding": [1.0]},
+                "receipt": "signed-prototype"
+            }]
+        });
+        let mut batch: BeginEffects = serde_json::from_value(wire)?;
+        assert!(batch.select_readable);
+        batch.validate_read_selection()?;
+        let effect = batch.effects.first_mut().context("missing effect")?;
+        effect.operation = "write".into();
+        assert!(batch.validate_read_selection().is_err());
+        let effect = batch.effects.first_mut().context("missing effect")?;
+        effect.operation = "read".into();
+        effect.receipt = None;
+        assert!(batch.validate_read_selection().is_err());
+        Ok(())
+    }
 
     #[test]
     fn signed_projection_selects_only_existing_fields_of_a_read()
