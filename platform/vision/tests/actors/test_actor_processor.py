@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 import structlog
 from galadril_ontology import (
+    GolDenied,
     GolLease,
     GolRequest,
     GolRuntimeManager,
@@ -387,16 +388,35 @@ def test_processor_injects_route_handlers_after_admission() -> None:
     handler.execute.assert_awaited_once()
 
 
-def test_processor_records_gol_handler_failure_without_error_text(
+@pytest.mark.parametrize(
+    ("failure_type", "phase", "category"),
+    [
+        (GolDenied, "runtime_open", "gol_runtime_open"),
+        (GolDenied, "handler", "gol_handler"),
+        (GolUnavailable, "runtime_open", "gol_runtime_unavailable"),
+        (GolUnavailable, "handler", "gol_handler_unavailable"),
+    ],
+)
+def test_processor_records_gol_failure_without_error_text(
     caplog: pytest.LogCaptureFixture,
+    failure_type: type[GolDenied] | type[GolUnavailable],
+    phase: str,
+    category: str,
 ) -> None:
     """Reports a stable failure category without publishing protected details."""
     handler = MagicMock()
-    handler.execute = AsyncMock(side_effect=GolUnavailable("protected detail"))
+    handler.execute = AsyncMock()
+    gateway = MagicMock()
+    gateway.open = AsyncMock(wraps=_Gateway().open)
+    fault = failure_type("protected detail")
+    if phase == "runtime_open":
+        gateway.open.side_effect = fault
+    else:
+        handler.execute.side_effect = fault
     processor = VisionCommandProcessor(
         _config(),
         handler_factory=MagicMock(return_value={"transform": handler}),
-        ontology_runtime=_admitted_runtime(),
+        ontology_runtime=GolRuntimeManager(gateway),
     )
     command = PipelineCommand(
         payload={"record": {"storage_path": "s3://lake/default/source/object"}},
@@ -409,7 +429,9 @@ def test_processor_records_gol_handler_failure_without_error_text(
     )
     with (
         caplog.at_level(logging.WARNING),
-        pytest.raises(CommandProcessingError, match="GOL authorization"),
+        pytest.raises(
+            CommandProcessingError, match="GOL authorization"
+        ) as rejected,
     ):
         asyncio.run(processor.process(command))
 
@@ -418,8 +440,10 @@ def test_processor_records_gol_handler_failure_without_error_text(
         for record in caplog.records
         if record.__dict__.get("event.name") == "pipeline.gol.failed"
     )
-    assert failure.__dict__["phase"] == "handler"
-    assert failure.__dict__["error_type"] == "GolUnavailable"
+    assert failure.__dict__["phase"] == phase
+    assert failure.__dict__["reason"] == category
+    assert failure.__dict__["error_type"] == failure_type.__name__
+    assert rejected.value.reason == category
     assert "protected detail" not in caplog.text
 
 

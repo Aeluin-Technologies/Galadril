@@ -96,7 +96,7 @@ async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
                     "private traceback",
                     CommandProcessingError(
                         "private worker details",
-                        reason=CommandFailureReason.GOL_HANDLER,
+                        reason=CommandFailureReason.GOL_HANDLER_UNAVAILABLE,
                     ),
                 )
 
@@ -107,7 +107,11 @@ async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
     )
     with pytest.raises(CommandProcessingError) as failure:
         await dispatcher.dispatch(_command())
-    assert failure.value.reason is CommandFailureReason.GOL_HANDLER
+    assert failure.value.reason is CommandFailureReason.GOL_HANDLER_UNAVAILABLE
+    assert (
+        str(failure.value)
+        == "Pipeline execution unavailable (gol_handler_unavailable)"
+    )
 
 
 @pytest.mark.anyio

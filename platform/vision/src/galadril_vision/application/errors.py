@@ -9,6 +9,8 @@ class CommandFailureReason(StrEnum):
     RUNNING_LINEAGE = "running_lineage"
     GOL_RUNTIME_OPEN = "gol_runtime_open"
     GOL_HANDLER = "gol_handler"
+    GOL_RUNTIME_UNAVAILABLE = "gol_runtime_unavailable"
+    GOL_HANDLER_UNAVAILABLE = "gol_handler_unavailable"
     WORKER_EXECUTION = "worker_execution"
     WORKER_RESULT = "worker_result"
     LEDGER_COMPLETION = "ledger_completion"

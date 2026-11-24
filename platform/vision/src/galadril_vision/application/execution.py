@@ -11,6 +11,7 @@ from galadril_ontology import (
     GolError,
     GolRequest,
     GolRuntimeManager,
+    GolUnavailable,
     source_object_id,
 )
 from galadril_pipeline.config import PipelineStep
@@ -146,20 +147,29 @@ class PipelineExecutor:
                 phase = "handler"
                 return await binding.handler.execute(command, binding.step)
         except GolError as error:
+            if isinstance(error, GolUnavailable):
+                reason = (
+                    CommandFailureReason.GOL_RUNTIME_UNAVAILABLE
+                    if phase == "runtime_open"
+                    else CommandFailureReason.GOL_HANDLER_UNAVAILABLE
+                )
+            else:
+                reason = (
+                    CommandFailureReason.GOL_RUNTIME_OPEN
+                    if phase == "runtime_open"
+                    else CommandFailureReason.GOL_HANDLER
+                )
             logger.warning(
                 "GOL authorization unavailable for pipeline command",
                 extra={
                     "event.name": "pipeline.gol.failed",
                     "phase": phase,
+                    "reason": reason.value,
                     "error_type": type(error).__name__,
                     "step": command.step,
                 },
             )
             raise CommandProcessingError(
                 "Block GOL authorization is unavailable",
-                reason=(
-                    CommandFailureReason.GOL_RUNTIME_OPEN
-                    if phase == "runtime_open"
-                    else CommandFailureReason.GOL_HANDLER
-                ),
+                reason=reason,
             ) from None
