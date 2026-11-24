@@ -1117,6 +1117,12 @@ otel-collector-1  | LogRecord #6
 otel-collector-1  | EventName: pipeline.gol.rpc.failed
 otel-collector-1  |      -> phase: Str(begin)
 otel-collector-1  |      -> reason: Str(ReadTimeout)
+otel-collector-1  | LogRecord #7
+otel-collector-1  | EventName: pipeline.publication.failed
+otel-collector-1  |      -> phase: Str(authorize)
+otel-collector-1  |      -> topic: Str(pipeline.lineage.v1)
+otel-collector-1  |      -> status: Str(completed)
+otel-collector-1  |      -> error_type: Str(GolUnavailable)
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
@@ -1125,6 +1131,7 @@ otel-collector-1  |      -> reason: Str(ReadTimeout)
         "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
         "gol.worker.resume.denied phase=principal_and_input",
         "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
+        "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
     ]
 
 

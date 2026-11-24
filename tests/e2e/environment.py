@@ -64,10 +64,12 @@ def _pipeline_failure_events(logs: str) -> str:
         "pipeline.command.failed",
         "pipeline.gol.failed",
         "pipeline.gol.rpc.failed",
+        "pipeline.publication.failed",
         "ray.actor.task.failed",
     }
     details = re.compile(
-        r"-> (phase|reason|error_type|step): Str\(([\w.()-]{1,64})\)", re.ASCII
+        r"-> (phase|reason|error_type|step|topic|status): Str\(([\w.()-]{1,64})\)",
+        re.ASCII,
     )
     names = re.compile(
         r"(?:EventName: ([\w.]+)|-> event\.name: Str\(([\w.]+)\))", re.ASCII

@@ -9,7 +9,13 @@ from unittest.mock import Mock
 from uuid import UUID, uuid4, uuid5
 
 import pytest
-from galadril_ontology import GolDenied, GolLease, GolRequest, GolRuntimeManager
+from galadril_ontology import (
+    GolDenied,
+    GolLease,
+    GolRequest,
+    GolRuntimeManager,
+    GolUnavailable,
+)
 from galadril_pipeline.config import (
     PipelineConfig,
     PipelineStep,
@@ -614,6 +620,79 @@ class _PublicationGate:
         if not self.allowed:
             raise GolDenied("GOL publication unavailable")
         yield f"lineage:{handoff.step}:{handoff.event_id}" if handoff else None
+
+
+@pytest.mark.anyio
+async def test_completed_lineage_preflight_failure_replays_durable_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temporary admission failure leaves the completed actor result replayable."""
+
+    class InterruptedGate(_PublicationGate):
+        interrupted = False
+
+        @asynccontextmanager
+        async def protect(
+            self,
+            command: PipelineCommand,
+            *,
+            handoff: PipelineCommand | None = None,
+        ) -> AsyncIterator[str | None]:
+            if self.calls == 2 and not self.interrupted:
+                self.interrupted = True
+                raise GolUnavailable("private transport detail")
+            async with super().protect(command, handoff=handoff) as receipt:
+                yield receipt
+
+    publisher = _Publisher()
+    dispatcher = _Dispatcher()
+    log = Mock()
+    monkeypatch.setattr("galadril_vision.streaming.handlers.logger", log)
+    topics = TopicLayout()
+    handler = CommandHandler(
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=publisher,
+        dispatcher=dispatcher,
+        ledger=MemoryExecutionLedger(),
+        topics=topics,
+        metrics=PipelineMetrics(),
+        publication_gate=InterruptedGate(),
+    )
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="infer",
+        step_type=StepType.INFERENCE,
+        resource_class=ResourceClass.GPU,
+        admission="opaque-server-handle",
+    )
+    with pytest.raises(GolUnavailable):
+        await handler.handle(command)
+    assert [item.topic for item in publisher.items] == [
+        topics.lineage,
+        topics.results,
+    ]
+    log.warning.assert_called_once_with(
+        "pipeline_publication_failed",
+        phase="authorize",
+        topic=topics.lineage,
+        status="completed",
+        error_type="GolUnavailable",
+    )
+
+    await handler.handle(command)
+    assert dispatcher.calls == 1
+    result_keys = [
+        item.key for item in publisher.items if item.topic == topics.results
+    ]
+    assert len(result_keys) == 2 and result_keys[0] == result_keys[1]
+    lineage = [
+        item.message for item in publisher.items if item.topic == topics.lineage
+    ]
+    assert [item["status"] for item in lineage if isinstance(item, dict)] == [
+        "running",
+        "completed",
+    ]
 
 
 @pytest.mark.anyio

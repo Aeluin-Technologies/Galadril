@@ -393,18 +393,32 @@ class CommandHandler:
         key: bytes | str | None = None,
         correlation_id: str | None = None,
         no_confirm: bool = False,
+        status: EventStatus | None = None,
     ) -> None:
         """Keeps broker dispatch adjacent to its noncached release decision."""
-        if self._publication_gate is None:
-            raise GolDenied("GOL publication unavailable")
-        async with self._publication_gate.protect(command):
-            await self._publisher.publish(
-                message,
-                topic,
-                key=key,
-                correlation_id=correlation_id,
-                no_confirm=no_confirm,
+        phase = "authorize"
+        try:
+            if self._publication_gate is None:
+                raise GolDenied("GOL publication unavailable")
+            async with self._publication_gate.protect(command):
+                phase = "broker"
+                await self._publisher.publish(
+                    message,
+                    topic,
+                    key=key,
+                    correlation_id=correlation_id,
+                    no_confirm=no_confirm,
+                )
+                phase = "complete_effect"
+        except Exception as error:
+            logger.warning(
+                "pipeline_publication_failed",
+                phase=phase,
+                topic=topic,
+                status=status.value if status is not None else None,
+                error_type=type(error).__name__,
             )
+            raise
 
     async def _handle(self, command: PipelineCommand) -> StepResult | None:
         """Completes one at-least-once command and publishes its durable successors."""
@@ -520,6 +534,7 @@ class CommandHandler:
             key=str(result.event_id),
             correlation_id=str(command.correlation_id),
             no_confirm=False,
+            status=result.status,
         )
         await self._publish_lineage(
             command, EventStatus.COMPLETED, result=result
@@ -616,6 +631,7 @@ class CommandHandler:
             key=str(lineage.event_id),
             correlation_id=str(command.correlation_id),
             no_confirm=False,
+            status=status,
         )
 
 
