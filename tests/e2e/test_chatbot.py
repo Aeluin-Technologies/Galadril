@@ -123,8 +123,12 @@ def test_pengolo_follows_backend_events_with_the_initiating_actor(
         ) -> dict[str, object]:
             assert token == "token:shared-project-member"
             assert "pengoloEvents" in query
-            assert variables == {"id": "member-generation", "temporary": False}
-            return {"pengoloEvents": {"status": "completed"}}
+            assert variables == {
+                "id": "member-generation",
+                "after": 0,
+                "temporary": False,
+            }
+            return {"pengoloEvents": {"status": "completed", "events": []}}
 
     monkeypatch.setattr(
         pengolo, "authenticated_token", lambda actor: f"token:{actor}"
@@ -133,7 +137,52 @@ def test_pengolo_follows_backend_events_with_the_initiating_actor(
         pengolo._completed(
             EventsGateway(), "member-generation", actor="shared-project-member"
         )
-    ) == {"status": "completed"}
+    ) == {"status": "completed", "events": []}
+
+
+def test_pengolo_reads_past_a_full_page_to_the_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PagedGateway(GatewayClient):
+        def __init__(self) -> None:
+            self.cursors: list[object] = []
+
+        async def execute(
+            self,
+            token: str,
+            query: str,
+            variables: Mapping[str, object] | None = None,
+            *,
+            trace_id: str | None = None,
+        ) -> dict[str, object]:
+            assert token == "member-token"
+            assert variables is not None
+            after = variables.get("after", 0)
+            assert isinstance(after, int)
+            self.cursors.append(after)
+            upper = min(after + 64, 130)
+            return {
+                "pengoloEvents": {
+                    "status": "completed" if upper == 130 else "running",
+                    "events": [
+                        {"sequence": sequence}
+                        for sequence in range(after + 1, upper + 1)
+                    ],
+                },
+            }
+
+    monkeypatch.setattr(
+        pengolo, "authenticated_token", lambda actor: "member-token"
+    )
+    gateway = PagedGateway()
+    page = asyncio.run(
+        pengolo._completed(gateway, "generation", actor="member")
+    )
+    assert page is not None
+    assert page["events"] == [
+        {"sequence": sequence} for sequence in range(1, 131)
+    ]
+    assert gateway.cursors == [0, 64, 128]
 
 
 @pytest.mark.parametrize("status", ["failed", "cancelled"])

@@ -150,12 +150,35 @@ async def _events(
     actor: str = UPLOADER_ID,
     temporary: bool = False,
 ) -> dict[str, object]:
-    result = await gateway.execute(
-        authenticated_token(actor),
-        "query Events($id:String!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:0, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
-        {"id": identifier, "temporary": temporary},
+    token = authenticated_token(actor)
+    events: list[object] = []
+    after = 0
+    for _ in range(64):
+        result = await gateway.execute(
+            token,
+            "query Events($id:String!, $after:Int!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:$after, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
+            {"id": identifier, "after": after, "temporary": temporary},
+        )
+        page = _object(result.get("pengoloEvents"))
+        batch = require_sequence(page.get("events"), "Pengolo events")
+        events.extend(batch)
+        if len(batch) < 64 or page.get("status") in {
+            "completed",
+            "failed",
+            "cancelled",
+        }:
+            page["events"] = events
+            return page
+        sequence = require_mapping(batch[-1], "last Pengolo event").get(
+            "sequence"
+        )
+        assert type(sequence) is int and sequence > after, (
+            "Pengolo cursor did not advance"
+        )
+        after = sequence
+    raise AssertionError(
+        "Pengolo event history exceeds the bounded replay limit"
     )
-    return _object(result.get("pengoloEvents"))
 
 
 class GenerationFailure(RuntimeError):
@@ -679,14 +702,12 @@ async def exercise_pengolo(
         actor=OUTSIDER_ID,
     )
 
+    restricted_id = _text(_object(restricted.get("generation")), "id")
+
     async def graph_denied() -> bool | None:
-        result = await gateway.execute(
-            authenticated_token(OUTSIDER_ID),
-            "query Events($id:String!) { pengoloEvents(generationId:$id,after:0) { status events { sequence kind content } } }",
-            {"id": _text(_object(restricted.get("generation")), "id")},
+        return _graph_unavailable(
+            await _events(gateway, restricted_id, actor=OUTSIDER_ID)
         )
-        page = _object(result.get("pengoloEvents"))
-        return _graph_unavailable(page)
 
     await eventually(
         graph_denied,
