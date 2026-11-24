@@ -200,6 +200,57 @@ async fn invariant_contracts_are_explicit_even_without_predicates()
 }
 
 #[tokio::test]
+async fn trusted_invariant_lookup_preserves_policy_denial_and_outage()
+-> fixture::TestResult {
+    use galadril_ontology::archive::InvariantContractError;
+    use galadril_ontology::authorization::Denial;
+
+    struct Offline;
+    impl PermissionProvider for Offline {
+        async fn check(
+            &self,
+            _request: PermissionCheck<'_>,
+        ) -> PermissionOutcome {
+            PermissionOutcome::Unavailable
+        }
+    }
+
+    let project = fixture::project(0, false)?;
+    let environment = fixture::environment(&project)?;
+    let compilation = compile(&project, &environment);
+    let security = compilation.publishable().ok_or("security contract")?;
+    let archive = compile_archive(&project, &environment)?;
+    let reader = ArchiveReader::open(archive.bytes(), archive.pin())?;
+    let request = fixture::access(
+        &project,
+        "Document",
+        None,
+        "document",
+        Operation::Read,
+    )?;
+    let runtime = fixture::runtime(security);
+    assert!(matches!(
+        reader
+            .invariant_contract_checked(&request, &runtime, &Refuse)
+            .await,
+        Err(InvariantContractError::Denied(Denial::Relationship))
+    ));
+    assert!(matches!(
+        reader
+            .invariant_contract_checked(&request, &runtime, &Offline)
+            .await,
+        Err(InvariantContractError::Denied(Denial::Unavailable))
+    ));
+    assert!(
+        reader
+            .invariant_contract(&request, &runtime, &Offline)
+            .await
+            .is_none()
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn invariant_contracts_normalize_aliases_and_reject_tampered_blocks()
 -> fixture::TestResult {
     use galadril_ontology::validation::{Bindings, Error, Limits, Scalar};

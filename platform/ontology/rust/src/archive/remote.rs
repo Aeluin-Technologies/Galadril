@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use super::{ArchivePin, ArchiveReader, Direction, Symbol};
+use super::{
+    ArchivePin, ArchiveReader, Direction, InvariantContractError, Symbol,
+};
 use crate::authorization::{Access, PermissionProvider, TrustedRuntime};
 use crate::{ModuleVersion, Name, OntologyId, QualifiedName, SymbolRef};
 
@@ -640,11 +642,43 @@ impl RemoteArchive {
         runtime: &impl TrustedRuntime,
         provider: &impl PermissionProvider,
     ) -> Option<crate::validation::Contract> {
-        if !self.owns(access) {
-            return None;
-        }
-        self.run(self.reader.invariant_contract(access, runtime, provider))
+        self.invariant_contract_checked(access, runtime, provider)
             .await
+            .ok()
+    }
+
+    /// Loads invariant metadata while retaining the exact policy or storage
+    /// failure.
+    ///
+    /// Denial and archive categories are private to the trusted host.
+    pub async fn invariant_contract_checked(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Result<crate::validation::Contract, InvariantContractError<RemoteError>>
+    {
+        if !self.owns(access) {
+            return Err(InvariantContractError::Denied(
+                crate::authorization::Denial::Runtime,
+            ));
+        }
+        within(self.lifetime, async {
+            Ok(self
+                .reader
+                .invariant_contract_checked(access, runtime, provider)
+                .await)
+        })
+        .await
+        .map_err(InvariantContractError::Archive)?
+        .map_err(|error| match error {
+            InvariantContractError::Denied(reason) => {
+                InvariantContractError::Denied(reason)
+            },
+            InvariantContractError::Archive(error) => {
+                InvariantContractError::Archive(map_archive(error))
+            },
+        })
     }
 
     /// Returns the exact record after current authorization.

@@ -14,7 +14,9 @@ use super::container::{
     AUTHORITY, DECLARATIONS, HEADER_LEN, MAX_LEVEL, PAGE_SIZE, Pointer,
     SCALARS, block, digest, header, link_key, route_key, target_key,
 };
-use super::{ArchiveError, ArchivePin, Direction, Symbol};
+use super::{
+    ArchiveError, ArchivePin, Direction, InvariantContractError, Symbol,
+};
 use crate::authorization::{
     Access, Decision, Denial, Descriptor, EffectError, EffectReceipt,
     Operation, PermissionProvider, Route, TrustedRuntime, archive as auth,
@@ -149,57 +151,77 @@ impl<R: RangeReader> ArchiveReader<R> {
         runtime: &impl TrustedRuntime,
         provider: &impl PermissionProvider,
     ) -> Option<crate::validation::Contract> {
-        let result = async {
-            if !matches!(
-                access.route.operation,
-                Operation::Read | Operation::Write
-            ) || !self.permitted(access, runtime, provider).await?
-            {
-                return Ok(None);
-            }
-            let owner = match &access.route.target {
-                crate::Reference::Symbol(owner) => owner,
-                crate::Reference::Field(field) => &field.owner,
-            };
-            if owner != &access.instance.owner {
-                return Err(ArchiveError::Invalid);
-            }
-            let key = format!(
-                "v/{}",
-                target_key(&crate::Reference::Symbol(owner.clone()))
-            );
-            let Some(pointer) = self.index.locate(&key).await? else {
-                return Err(ArchiveError::Invalid);
-            };
-            let limits = crate::validation::Limits::default();
-            // Bound the range before fetching a FlatBuffer. Payload validation
-            // alone would still permit an attacker to request an 8 MiB block.
-            let max_record = limits
-                .max_bytes
-                .checked_add(key.len())
-                .and_then(|length| length.checked_add(1024))
-                .ok_or(ArchiveError::Invalid)?;
-            if key.len() > limits.max_bytes || pointer.length > max_record {
-                return Err(ArchiveError::Invalid);
-            }
-            let bytes = self.index.bytes(pointer).await?;
-            let record = checked_record(&bytes, &key, Kind::Definition)?;
-            let contract =
-                crate::validation::Contract::decode(payload(record)?, limits)
-                    .map_err(|_| ArchiveError::Invalid)?;
-            if contract.owner() != owner {
-                return Err(ArchiveError::Invalid);
-            }
-            Ok(Some(contract))
-        }
-        .await;
-        match result {
-            Ok(Some(contract)) => Some(contract),
-            Ok(None) | Err(_) => {
+        match self
+            .invariant_contract_checked(access, runtime, provider)
+            .await
+        {
+            Ok(contract) => Some(contract),
+            Err(_) => {
                 unavailable();
                 None
             },
         }
+    }
+
+    /// Preserves the decision and storage error for trusted host diagnostics.
+    pub async fn invariant_contract_checked(
+        &self,
+        access: &Access,
+        runtime: &impl TrustedRuntime,
+        provider: &impl PermissionProvider,
+    ) -> Result<
+        crate::validation::Contract,
+        InvariantContractError<ArchiveError>,
+    > {
+        if !matches!(
+            access.route.operation,
+            Operation::Read | Operation::Write
+        ) {
+            return Err(InvariantContractError::Denied(Denial::Route));
+        }
+        match self
+            .authorization_decision(access, runtime, provider)
+            .await?
+        {
+            Decision::Allow => {},
+            Decision::Deny(reason) => {
+                return Err(InvariantContractError::Denied(reason));
+            },
+        }
+        let owner = match &access.route.target {
+            crate::Reference::Symbol(owner) => owner,
+            crate::Reference::Field(field) => &field.owner,
+        };
+        if owner != &access.instance.owner {
+            return Err(ArchiveError::Invalid.into());
+        }
+        let key = format!(
+            "v/{}",
+            target_key(&crate::Reference::Symbol(owner.clone()))
+        );
+        let Some(pointer) = self.index.locate(&key).await? else {
+            return Err(ArchiveError::Invalid.into());
+        };
+        let limits = crate::validation::Limits::default();
+        // Bound the range before fetching a FlatBuffer. Payload validation
+        // alone would still permit an attacker to request an 8 MiB block.
+        let max_record = limits
+            .max_bytes
+            .checked_add(key.len())
+            .and_then(|length| length.checked_add(1024))
+            .ok_or(ArchiveError::Invalid)?;
+        if key.len() > limits.max_bytes || pointer.length > max_record {
+            return Err(ArchiveError::Invalid.into());
+        }
+        let bytes = self.index.bytes(pointer).await?;
+        let record = checked_record(&bytes, &key, Kind::Definition)?;
+        let contract =
+            crate::validation::Contract::decode(payload(record)?, limits)
+                .map_err(|_| ArchiveError::Invalid)?;
+        if contract.owner() != owner {
+            return Err(ArchiveError::Invalid.into());
+        }
+        Ok(contract)
     }
 
     /// Borrows archive pins for comparison with independently approved inputs.

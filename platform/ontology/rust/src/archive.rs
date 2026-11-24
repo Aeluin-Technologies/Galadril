@@ -72,6 +72,21 @@ impl From<io::Error> for ArchiveError {
     }
 }
 
+/// Private failure of an invariant lookup by a trusted runtime.
+#[derive(Debug)]
+pub enum InvariantContractError<E> {
+    /// The security decision withheld the contract.
+    Denied(crate::authorization::Denial),
+    /// The reader could not verify or load the contract.
+    Archive(E),
+}
+
+impl From<ArchiveError> for InvariantContractError<ArchiveError> {
+    fn from(error: ArchiveError) -> Self {
+        Self::Archive(error)
+    }
+}
+
 /// A disclosure of the exact symbol or member authorized by the reader.
 ///
 /// Properties are separate records so checking a symbol never exposes its

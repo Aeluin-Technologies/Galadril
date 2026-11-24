@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use chrono::Timelike as _;
+use galadril_ontology::archive::InvariantContractError;
 use galadril_ontology::archive::remote::{RemoteArchive, RemoteError};
 use galadril_ontology::authorization::{
     Access, Decision, Denial, ExecutionContext, Flow, Instance, Operation,
@@ -103,6 +104,13 @@ fn worker_runtime_failure(error: &anyhow::Error) -> RuntimeError {
     ) || matches!(
         error.downcast_ref::<RuntimeError>(),
         Some(RuntimeError::Unavailable)
+    ) || matches!(
+        error.downcast_ref::<RemoteError>(),
+        Some(
+            RemoteError::Expired |
+                RemoteError::Timeout |
+                RemoteError::Unavailable
+        )
     ) {
         RuntimeError::Unavailable
     } else {
@@ -1711,11 +1719,25 @@ impl GolService {
                         &lease.ontology,
                     )
                     .await?;
-                *phase = "write_contract";
+                *phase = "write_invariant";
                 let contract = pinned
-                    .invariant_contract(&access, &prepared, &backend.provider)
+                    .invariant_contract_checked(
+                        &access,
+                        &prepared,
+                        &backend.provider,
+                    )
                     .await
-                    .context("GOL invariant contract unavailable")?;
+                    .map_err(|error| match error {
+                        InvariantContractError::Denied(reason) => {
+                            tracing::warn!(
+                                event.name = "gol.worker.invariant.denied",
+                                reason = ?reason,
+                            );
+                            anyhow::Error::from(policy_failure(reason))
+                        },
+                        InvariantContractError::Archive(error) => error.into(),
+                    })?;
+                *phase = "write_proposal_fields";
                 let fields = proposal
                     .as_object()
                     .context("GOL record proposal required")?
@@ -1725,6 +1747,7 @@ impl GolService {
                 prepared
                     .proposed_fields(pinned, &fields, owner(&target)?)
                     .await?;
+                *phase = "write_proposal_projection";
                 let metadata_access =
                     backend.metadata_access(&actor.tenant, target.clone())?;
                 let metadata = snapshot::Snapshot::prepare(
@@ -1746,6 +1769,7 @@ impl GolService {
                 let options = worker_json_options();
                 let mappings =
                     galadril_registry::gol::registered_json_mappings()?;
+                *phase = "write_proposal_validation";
                 pinned
                     .validate_proposal_for(
                         &ExportRequest {

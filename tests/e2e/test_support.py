@@ -1126,6 +1126,13 @@ otel-collector-1  |      -> phase: Str(authorize)
 otel-collector-1  |      -> topic: Str(pipeline.lineage.v1)
 otel-collector-1  |      -> status: Str(completed)
 otel-collector-1  |      -> error_type: Str(GolUnavailable)
+otel-collector-1  | LogRecord #8
+otel-collector-1  | EventName: gol.worker.invariant.denied
+otel-collector-1  |      -> reason: Str(Relationship)
+otel-collector-1  | LogRecord #9
+otel-collector-1  | EventName: gol.worker.effect.denied
+otel-collector-1  |      -> phase: Str(write_invariant)
+otel-collector-1  |      -> archive_error: Str(Some(Expired))
 """
     assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
         "gol.worker.effect.denied phase=write_contract",
@@ -1135,6 +1142,8 @@ otel-collector-1  |      -> error_type: Str(GolUnavailable)
         "gol.worker.resume.denied phase=principal_and_input",
         "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
         "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
+        "gol.worker.invariant.denied reason=Relationship",
+        "gol.worker.effect.denied phase=write_invariant archive_error=Some(Expired)",
     ]
 
 
