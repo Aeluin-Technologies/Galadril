@@ -19,7 +19,7 @@ from clients import (
 from hotpot_benchmark import evaluate_hotpot, load_hotpot
 from official_memory import compare_memory, load_memory
 from pengolo import _mutation, _upload
-from retrieval_benchmark import Benchmark, load_benchmark, recall_at
+from retrieval_benchmark import Benchmark, recall_at
 from upstream_retrieval import compare_upstream
 
 
@@ -94,13 +94,16 @@ async def _bind_document_evidence(
     return bindings
 
 
-async def exercise_retrieval(gateway: GatewayClient) -> None:
-    data = load_benchmark()
+async def exercise_retrieval(gateway: GatewayClient, data: Benchmark) -> None:
     identities, before = await _eskg_snapshot()
-    assert all(
-        (document.customer_id, document.source_row) in identities
+    required_sources = {
+        (document.customer_id, document.source_row)
         for document in data.documents
-    ), "Document corpus contradicts the ingested ESKG source"
+    }
+    missing_sources = required_sources - identities.keys()
+    assert not missing_sources, (
+        f"Missing ingested ESKG sources: {sorted(missing_sources)}"
+    )
     sources = {}
     for document in data.documents:
         file = await _upload(

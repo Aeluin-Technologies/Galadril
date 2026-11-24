@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 from empirical_data import load_retail_rows, load_trial_rows
+from retrieval_benchmark import load_benchmark
 from scenario import (
     ADMIN,
     RETURNS_STEWARDS,
@@ -145,7 +146,7 @@ def test_trial_payload_preserves_all_anonymous_randomized_rows() -> None:
 def test_retail_smoke_preserves_actor_scopes_and_repeated_observations() -> (
     None
 ):
-    rows = retail_smoke_rows(load_retail_rows())
+    rows = retail_smoke_rows(load_retail_rows(), set())
     uploads = build_retail_uploads(rows, full=False)
     assert len(rows) == 24
     assert {
@@ -159,11 +160,53 @@ def test_retail_smoke_preserves_actor_scopes_and_repeated_observations() -> (
     assert access["e2e-analyst"] == {
         "returns-00.csv",
         "returns-02.csv",
-        "sales-01.csv",
-        "sales-03.csv",
-        "sales-05.csv",
+        "sales-00.csv",
+        "sales-02.csv",
+        "sales-04.csv",
+        "sales-06.csv",
     }
     assert sum(len(upload.rows) for upload in uploads) == len(rows)
+
+
+def test_retail_ci_ingests_every_retrieval_source() -> None:
+    """Each retrieval citation must bind to evidence ingested by the CI profile."""
+    benchmark = load_benchmark()
+    sources = {
+        (document.customer_id, document.source_row)
+        for document in benchmark.documents
+    }
+    cohort = retail_smoke_rows(load_retail_rows(), sources)
+    uploads = build_retail_uploads(cohort, full=False)
+    ingested = {
+        (row.customer_id, row.source_row)
+        for upload in uploads
+        for row in upload.rows
+    }
+    assert len(ingested) == len(cohort) == 24
+    assert sources <= ingested, sources - ingested
+
+
+def test_retail_ci_reserves_sales_slots_for_late_citations() -> None:
+    rows = load_retail_rows()
+    customer = min(row.customer_id for row in rows)
+    purchases = tuple(
+        row for row in rows if row.customer_id == customer and not row.cancelled
+    )
+    required = {(customer, row.source_row) for row in purchases[-2:]}
+    cohort = retail_smoke_rows(rows, required)
+    assert (
+        tuple(
+            row
+            for row in cohort
+            if row.customer_id == customer and not row.cancelled
+        )
+        == purchases[-2:]
+    )
+
+
+def test_retail_ci_reports_an_unknown_retrieval_source() -> None:
+    with pytest.raises(ValueError, match="Unknown retail retrieval sources"):
+        retail_smoke_rows(load_retail_rows(), {(-1, -1)})
 
 
 if __name__ == "__main__":

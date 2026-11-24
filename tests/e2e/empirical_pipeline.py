@@ -410,12 +410,16 @@ async def _assert_gateway_projection(
 
 
 async def exercise_empirical_pipeline(
-    gateway: GatewayClient, spicedb: SpiceDBProbe, *, full: bool
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    *,
+    full: bool,
+    required_sources: set[tuple[int, int]],
 ) -> None:
     """Runs real multi-principal retail ingestion and permission projection."""
     rows = load_retail_rows()
     if not full:
-        rows = retail_smoke_rows(rows)
+        rows = retail_smoke_rows(rows, required_sources)
     uploads = build_retail_uploads(rows, full=full)
     print("E2E stage: preparing empirical principals", flush=True)
     await _create_principals(gateway, uploads)

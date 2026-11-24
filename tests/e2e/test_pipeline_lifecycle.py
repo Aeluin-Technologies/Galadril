@@ -55,6 +55,7 @@ from gol_authoring import gol_access, publish_gol_source
 from pengolo import exercise_pengolo
 from pipeline_authoring import exercise_pipeline_authoring
 from pipeline_definition import pipeline_fixture
+from retrieval_benchmark import load_benchmark
 from retrieval_lifecycle import exercise_retrieval
 from scenario import ADMIN
 
@@ -1465,8 +1466,15 @@ async def _run_gateway_upload_lifecycle() -> None:
                 flush=True,
             )
             full_empirical = os.getenv("GALADRIL_E2E_FULL_EMPIRICAL") == "1"
+            retrieval = load_benchmark()
             await exercise_empirical_pipeline(
-                gateway, spicedb, full=full_empirical
+                gateway,
+                spicedb,
+                full=full_empirical,
+                required_sources={
+                    (document.customer_id, document.source_row)
+                    for document in retrieval.documents
+                },
             )
             await exercise_empirical_causal(
                 gateway, spicedb, full=full_empirical
@@ -1478,7 +1486,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 "E2E stage: measuring shared ESKG and HippoRAG retrieval",
                 flush=True,
             )
-            await exercise_retrieval(gateway)
+            await exercise_retrieval(gateway, retrieval)
 
             administrator = RelationshipSpec(
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID

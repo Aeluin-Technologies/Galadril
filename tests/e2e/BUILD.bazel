@@ -450,6 +450,7 @@ py_test(
     deps = [
         ":empirical_data_support",
         ":empirical_scenario_support",
+        ":retrieval_benchmark",
         "@pip//pytest",
     ],
 )
@@ -526,6 +527,7 @@ py_test(
         ":empirical_lifecycle_support",
         ":chatbot_support",
         ":pipeline_definition",
+        ":retrieval_benchmark",
         "@pip//pytest",
     ],
 )
@@ -551,6 +553,7 @@ py_test(
         ":empirical_lifecycle_support",
         ":chatbot_support",
         ":pipeline_definition",
+        ":retrieval_benchmark",
         "@pip//pytest",
     ],
 )
