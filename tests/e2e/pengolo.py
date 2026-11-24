@@ -23,6 +23,8 @@ from clients import (
 )
 from pengolo_browser import exercise_pengolo_browser
 
+# Shared requests still need detached Scribe execution after the send acknowledgement.
+_SHARED_GENERATION_TIMEOUT_SECONDS = 180.0
 _METADATA = "id ownerId projectId expiresAt revision updatedAt"
 _CHAT = f"{{ {_METADATA} data {{ title pinned activeGeneration }} }}"
 _PROJECT = f"{{ {_METADATA} data {{ name icon color shared roles contextMode instructions }} }}"
@@ -660,7 +662,7 @@ async def exercise_pengolo(
     accessible_id = _text(_object(accessible.get("generation")), "id")
     await eventually(
         lambda: _completed(gateway, accessible_id, actor=OUTSIDER_ID),
-        timeout_seconds=30,
+        timeout_seconds=_SHARED_GENERATION_TIMEOUT_SECONDS,
         description="shared project without private graph context",
         abort_on=(GenerationFailure, GraphQLOperationError),
     )
@@ -688,7 +690,7 @@ async def exercise_pengolo(
 
     await eventually(
         graph_denied,
-        timeout_seconds=30,
+        timeout_seconds=_SHARED_GENERATION_TIMEOUT_SECONDS,
         description="independent private graph authorization",
         abort_on=(AssertionError,),
     )
