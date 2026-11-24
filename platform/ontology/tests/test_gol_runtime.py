@@ -131,7 +131,9 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
             body = json.loads(outgoing.content)
             if outgoing.url.path.endswith("/runtime"):
                 return httpx.Response(
-                    200, json=lease().model_dump(by_alias=True)
+                    200,
+                    json=lease().model_dump(mode="json", by_alias=True)
+                    | {"contextId": "admitted-context"},
                 )
             if "completion" in body:
                 self.assertEqual(body["completion"], "read-permit")
