@@ -43,6 +43,8 @@ build:ci --build_metadata=ROLE=CI
 build:ci --bes_results_url=https://app.buildbuddy.io/invocation/
 build:ci --bes_backend=grpcs://remote.buildbuddy.io
 
+# Use the release compiler settings without varying test inputs by Git commit.
+build:ci-test --nostamp
 # Tests run on the x86_64 host, where Licorne can fetch Cargo dependencies locally.
 build:ci-test --strategy_regexp=Native\ source\ compiling\ 99571d2924f2a53bea10c78b09edab238535ff10\.tar\.gz\ to\ a\ whl=local
 # Image publishing also builds ARM64 wheels, which require native remote execution.
@@ -57,6 +59,13 @@ test:ci --test_summary=detailed
 test:ci --flaky_test_attempts=1
 # Let the lifecycle finish its empirical cohorts and tear down before Bazel stops it.
 test:ci --test_timeout=-1,-1,-1,18900
+
+# Schedule by Bazel test tags; action keys still decide reuse within each lane.
+test:ci-presubmit --test_tag_filters=-periodic,-benchmark,-image-layout
+test:ci-validation --test_tag_filters=integration,-benchmark
+test:ci-validation --nocache_test_results
+test:ci-benchmark --nocache_test_results
+coverage:ci-coverage --test_tag_filters=-integration,-requires-docker,-benchmark,-image-layout
 
 # Only matters for tests that actually execute locally.
 test:ci --local_test_jobs=HOST_CPUS*0.75

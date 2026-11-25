@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -18,7 +19,10 @@ ROOT = Path(__file__).absolute().parents[3]
 
 
 def model(
-    path: str, *, profiles: tuple[str, ...] = ()
+    path: str,
+    *,
+    profiles: tuple[str, ...] = (),
+    environment: Mapping[str, str] | None = None,
 ) -> dict[str, dict[str, object]]:
     result = subprocess.run(
         [
@@ -37,6 +41,7 @@ def model(
         env=os.environ
         | {
             "E2E_CONFIG_VOLUME": "galadril-model-test",
+            "E2E_SCRIBE_ENABLED": "",
             "SCRIBE_ENABLED": "false",
             "SEARXNG_SECRET": "model-search-only-01234567890123456789",
             "GALADRIL_AUTH_PASSWORD": "model-test-only",
@@ -50,7 +55,8 @@ def model(
             "AUTH_SESSION_SECRET": "model-test-only-01234567890123456789",
             "AUTH_GATEWAY_KEY": "model-private-gateway-key-01234567890123456789",
             "SSO_PROVISIONING_KEY": "model-provisioning-only-01234567890123456789",
-        },
+        }
+        | dict(environment or ()),
         capture_output=True,
         check=False,
         text=True,
@@ -178,10 +184,19 @@ class ComposeModelTest(unittest.TestCase):
         )
         self.assertGreaterEqual(len(gateway["SSO_PROVISIONING_KEY"]), 32)
 
-    def test_e2e_uses_the_shipped_tempo_image_and_restart_policy(self) -> None:
+    def test_e2e_pins_the_shipped_tempo_version_and_keeps_its_restart_policy(
+        self,
+    ) -> None:
         shipped = model("infrastructure/docker/docker-compose.yaml")["tempo"]
         fixture = model("tests/e2e/environment/compose.yaml")["tempo"]
-        self.assertEqual(fixture["image"], shipped["image"])
+        reference, _, digest = str(fixture["image"]).partition("@")
+        shipped_reference, _, shipped_digest = str(shipped["image"]).partition(
+            "@"
+        )
+        self.assertEqual(reference, shipped_reference)
+        self.assertRegex(digest, r"^sha256:[0-9a-f]{64}$")
+        if shipped_digest:
+            self.assertEqual(digest, shipped_digest)
         self.assertEqual(fixture.get("restart"), shipped["restart"])
 
     def test_production_topology_has_explicit_names_and_one_local_ray(
@@ -214,11 +229,27 @@ class ComposeModelTest(unittest.TestCase):
                     str(fixture[name].get("volumes", [])),
                 )
 
-    def test_e2e_gateway_enables_the_chatbot_runtime(self) -> None:
-        """Prevents inherited production defaults from masking fixture YAML."""
-        fixture = model("tests/e2e/environment/compose.yaml")
-        environment = cast(dict[str, str], fixture["gateway"]["environment"])
-        self.assertEqual(environment["SCRIBE__ENABLED"], "true")
+    def test_e2e_gateway_enables_scribe_only_when_the_scenario_requests_it(
+        self,
+    ) -> None:
+        """Keeps control-plane scenarios independent of the assistant services."""
+        for requested, shipped_default, expected in (
+            ("", "true", "false"),
+            ("true", "false", "true"),
+        ):
+            with self.subTest(scribe=expected):
+                fixture = model(
+                    "tests/e2e/environment/compose.yaml",
+                    environment={
+                        "E2E_SCRIBE_ENABLED": requested,
+                        "SCRIBE_ENABLED": shipped_default,
+                    },
+                )
+                gateway = fixture["gateway"]
+                environment = cast(dict[str, str], gateway["environment"])
+                self.assertEqual(environment["SCRIBE__ENABLED"], expected)
+                self.assertNotIn("scribe", gateway["depends_on"])
+                self.assertIn("mcp", fixture["scribe"]["depends_on"])
 
     def test_vision_uses_shared_loopback_for_private_gol_requests(self) -> None:
         """Keeps the GOL worker channel on Envoy's loopback-only listener."""

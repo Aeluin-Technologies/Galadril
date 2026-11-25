@@ -21,7 +21,10 @@ def database_build(name, dockerfile, srcs):
             name = name + "_" + suffix,
             dockerfile = dockerfile,
             srcs = srcs,
-            buildx_flags = ["--provenance=mode=max", "--sbom=true"],
+            buildx_flags = [
+                "--provenance=mode=max",
+                "--attest=type=sbom,generator=docker/buildkit-syft-scanner@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315",
+            ],
             execution_requirements = {"no-sandbox": "1", "requires-network": "1"},
             exec_compatible_with = constraints,
             exec_properties = {

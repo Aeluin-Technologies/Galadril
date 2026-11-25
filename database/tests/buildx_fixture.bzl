@@ -1,12 +1,12 @@
 """Exposes the upstream Buildx action script without building an image."""
 
-_BuildxScript = provider(fields = ["command"])
+_BuildxScript = provider(fields = ["command", "args"])
 
 def _capture_impl(target, _ctx):
     actions = [action for action in target.actions if action.mnemonic == "BuildX"]
     if len(actions) != 1:
         fail("Expected exactly one Buildx action")
-    return [_BuildxScript(command = actions[0].argv[2])]
+    return [_BuildxScript(command = actions[0].argv[2], args = actions[0].argv[3:])]
 
 _capture = aspect(implementation = _capture_impl)
 
@@ -27,8 +27,11 @@ _platform = transition(
 
 def _fixture_impl(ctx):
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
-    ctx.actions.write(script, ctx.attr.srcs[0][_BuildxScript].command)
-    return [DefaultInfo(files = depset([script]))]
+    args = ctx.actions.declare_file(ctx.label.name + ".args")
+    action = ctx.attr.srcs[0][_BuildxScript]
+    ctx.actions.write(script, action.command)
+    ctx.actions.write(args, "\n".join(action.args))
+    return [DefaultInfo(files = depset([script, args]))]
 
 buildx_fixture = rule(
     implementation = _fixture_impl,

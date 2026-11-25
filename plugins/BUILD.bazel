@@ -81,3 +81,9 @@ filegroup(
     ]),
     visibility = ["//plugins/tests:__pkg__"],
 )
+
+filegroup(
+    name = "mail_ontology_source",
+    srcs = ["src/galadril_plugins/utils/mail.gol"],
+    visibility = ["//tests/e2e:__pkg__"],
+)

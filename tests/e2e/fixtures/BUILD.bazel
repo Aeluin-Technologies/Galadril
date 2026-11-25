@@ -4,7 +4,34 @@ load("@rules_python//python:defs.bzl", "py_library")
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
 load("@rules_oci//oci:defs.bzl", "oci_image")
 
-filegroup(name = "retrieval_data", srcs = ["retrieval.json", "retrieval_phrases.json", "retrieval_chunking.json", "retrieval_official.json", "hotpotqa.json", "retail.csv"], visibility = ["//tests/e2e:__pkg__"])
+exports_files([
+    "e2e_inference_model.py",
+    "hotpotqa.json",
+    "retrieval_official.json",
+], visibility = ["//tests/e2e:__pkg__"])
+
+filegroup(
+    name = "retrieval_data",
+    srcs = ["retail.csv", "retrieval.json", "retrieval_phrases.json"],
+    visibility = ["//tests/e2e:__pkg__"],
+)
+
+filegroup(
+    name = "chunking_data",
+    srcs = ["retail.csv", "retrieval_chunking.json"],
+    visibility = ["//tests/e2e:__pkg__"],
+)
+
+filegroup(
+    name = "runtime_configuration",
+    srcs = [
+        "connectors.yaml",
+        "gol-authorities.json",
+        "gol-runtime.json",
+        "otel-collector.yaml",
+    ],
+    visibility = ["//tests/e2e:__pkg__"],
+)
 
 py_binary(
     name = "scribe_server",

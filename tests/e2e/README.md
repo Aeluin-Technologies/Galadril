@@ -1,9 +1,9 @@
 # E2E contracts and failure isolation
 
-Use Bazel with the authenticated BuildBuddy configuration. A cached result and a
-new execution are different evidence; neither substitutes for the live lifecycle.
-The lifecycle uses deterministic local model-computation fixtures; HTTP, parsing,
-authorization, persistence, graph ranking and pipeline orchestration stay live.
+Use the authenticated BuildBuddy configuration. The lifecycle uses deterministic
+local model fixtures and live HTTP, authorization, persistence, graph ranking
+and pipeline orchestration. See [CI workloads and measurements](CI.md) for lane
+membership, cache policy and reproduction commands.
 
 Browser actors authenticate again before cookies are captured, so pipeline
 duration and earlier browser renewals cannot invalidate a reused snapshot.
@@ -16,13 +16,15 @@ Production expiration and authentication limits are unchanged.
 | `test_authentication.py` | Real Kratos/Hydra sessions, passkey assurance, tenant claims, signed expiration; an unauthenticated fixture actor cannot invent a JWT. |
 | `test_proxy_startup.py` | Shipped read-only Compose configuration mounts, trusted TLS and private proxy endpoints, without loading application models. |
 | `test_s3_notifications.py` | A real conditional S3 copy reaches Kafka through the shipped relay; independent of Vision startup. |
-| `test_pipeline_lifecycle.py` security/inventory | Missing, malformed, expired and tampered credentials fail closed; upload scope/path attacks are denied; newly exposed GraphQL fields require an explicit disposition. Introspection is an inventory, not behavioral coverage. |
-| Lifecycle Registry/publication | Real ontology and pipeline revisions, publication bindings and retirement; Vision waits for publication without a restart. |
-| Lifecycle ingestion | Gateway upload through S3/Kafka/Intake/Vision to durable state, successful execution statuses, idempotent replay, lineage and caller-linked OTLP traces. |
-| `empirical_pipeline.py` | The pinned 240 source rows and 24 customer identities retain the six upload principals and exact independent access oracle, including same-label decoys and disjoint readers. |
+| `pipeline_authorization_test` | Missing, malformed, expired and tampered credentials fail closed. GraphQL inventory requires an explicit disposition for new fields. IAM and conversation CRUD use the real Gateway, and revoked administrators lose access. |
+| `pipeline_publication_test` | Real ontology and pipeline revisions, review, denied publication, runtime bindings and retirement. |
+| `gol_lifecycle_test` | Real Registry/Gateway with Chromium for GOL authoring and authorized published projections. |
+| `pipeline_lifecycle_test` | Vision waits for publication without restarting. One Gateway upload goes through S3, Kafka, Intake, resolution and persistence. Verifies upload scope/path denials, derived access and isolation, lineage and caller-linked OTLP traces. |
+| `pipeline_empirical_test` | Retail identity, access oracles, randomized-trial causality and retrieval over the live identities. The dedicated benchmark runs all 240 retail and 205 trial rows. |
 | `empirical_causal.py` | The pinned randomized trial and independently computed uncertainty/effect are compared with live Amarth results, under per-principal access. |
 | `retrieval_lifecycle.py` | Documents bind to live ESKG customer/source-row identities; public search exercises BM25, dense, hybrid and associative modes; outsider results stay empty and document indexing leaves ESKG state/vector counts unchanged. |
-| `chatbot.py` | Real WebSocket disconnect followed by complete ordered durable replay, independently scoped search/graph/causal evidence, and persisted response provenance. |
+| `pipeline_assistant_test` | A fresh causal cohort drives both assistants. Chatbot verifies WebSocket disconnect and ordered replay, scoped search/graph/causal evidence, and persisted provenance. |
+| `pengolo_execution_test` | Native checkpoint and real MCP transport on an empty retrieval schema. |
 | `pengolo.py` | Draft/idempotency boundaries, project hierarchy and role changes, immutable upload/download and revocation, optional private-graph warning without model evidence, temporary storage/expiry and cancellation. Role revocation precedes browser isolation checks. |
 | `dashboard/live.spec.ts` | Real authenticated cookies and catalog response, compatible default selected in the DOM, upload and graph selection, detached inference across reload, terminal completion, mobile layout, shared project/file access, live role grant/revoke and closing a now-forbidden preview. |
 

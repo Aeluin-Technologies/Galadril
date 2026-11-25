@@ -65,7 +65,7 @@ services:
       file: ../../../infrastructure/docker/database.yaml
       service: postgres
     container_name: !reset null
-    image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
+    image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database@sha256:b695275e4ae7fa776b2253d5ab58e83e2f306c10983ae06ecff3d452253d73a9}
     init: true
     environment:
       POSTGRES_USER: postgres
@@ -96,7 +96,7 @@ services:
       file: ../../../infrastructure/docker/database.yaml
       service: spicedb-migrate
     container_name: !reset null
-    image: authzed/spicedb:v1.56.2
+    image: authzed/spicedb:v1.56.2@sha256:aa96009a0477f8a759149823407d47ad16d1a74390bae3102b3b0b7143502764
     environment:
       SPICEDB_DATASTORE_ENGINE: postgres
       SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
@@ -122,7 +122,7 @@ services:
       file: ../../../infrastructure/docker/database.yaml
       service: spicedb
     container_name: !reset null
-    image: authzed/spicedb:v1.56.2
+    image: authzed/spicedb:v1.56.2@sha256:aa96009a0477f8a759149823407d47ad16d1a74390bae3102b3b0b7143502764
     environment:
       SPICEDB_GRPC_PRESHARED_KEY: secret_key
       SPICEDB_GRPC_NO_TLS: "true"
@@ -145,7 +145,7 @@ services:
       file: ../../../infrastructure/docker/broker.yaml
       service: redpanda
     container_name: !reset null
-    image: redpandadata/redpanda:v26.2.2
+    image: redpandadata/redpanda:v26.2.2@sha256:468bd13a9f2bd24794cb7fddc867c767fb1008b9a07b297b89fde48c564d7d96
     command:
       - redpanda
       - start
@@ -237,7 +237,7 @@ services:
       file: ../../../infrastructure/docker/s3.yaml
       service: lakefs
     container_name: !reset null
-    image: treeverse/lakefs:1.88.0
+    image: treeverse/lakefs:1.88.0@sha256:237a17c6b2d85ba71912aaf82ac61f17dcb4c1884301ff4638bd3d55fa4cb4d0
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
@@ -264,6 +264,7 @@ services:
     extends:
       file: ../../../infrastructure/docker/observability.yaml
       service: tempo
+    image: grafana/tempo:3.1.0@sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd
     container_name: !reset null
     command: ["-config.file=/e2e/tempo.yaml"]
     ports: !override
@@ -276,7 +277,7 @@ services:
       - tempo-data:/var/tempo
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.162.0
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/e2e/otel-collector.yaml"]
     volumes:
       - type: volume
@@ -334,6 +335,7 @@ services:
     extends:
       file: ../../../infrastructure/docker/mcp.yaml
       service: mcp
+    container_name: !reset null
     image: local/galadril-mcp:e2e
     pull_policy: never
     volumes: !reset []
@@ -389,7 +391,7 @@ services:
       GOL_RUNTIME_CONFIG_PATH: /e2e/gol-runtime.json
       GOL_EFFECT_KEY_PATH: /run/secrets/gol-effect-key
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
-      SCRIBE__ENABLED: "true"
+      SCRIBE__ENABLED: ${E2E_SCRIBE_ENABLED:-false}
       PENGOLO_DOCUMENT_VAULT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
       SPICEDB_SCHEMA_PATH: /e2e/spicedb/schema.zed
@@ -422,8 +424,6 @@ services:
         restart: true
       spicedb-schema:
         condition: service_completed_successfully
-      scribe:
-        condition: service_started
       registry:
         condition: service_started
       rustfs-init:

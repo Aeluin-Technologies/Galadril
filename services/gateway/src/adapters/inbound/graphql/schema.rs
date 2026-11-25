@@ -4423,18 +4423,23 @@ mod tests {
     fn e2e_administration_documents_validate_against_native_schema()
     -> anyhow::Result<()> {
         let schema = create_schema();
-        let sources: [(&str, &[&str]); 2] = [
+        let sources: [(&str, &[&str]); 3] = [
             (
                 include_str!(
-                    "../../../../../../tests/e2e/test_pipeline_lifecycle.py"
+                    "../../../../../../tests/e2e/pipeline_authorization.py"
                 ),
                 &[
                     "TenantAdmin",
                     "Directory",
                     "MemberDirectory",
                     "RevokedAdmin",
-                    "PublicQueries",
                 ],
+            ),
+            (
+                include_str!(
+                    "../../../../../../tests/e2e/pipeline_search.py"
+                ),
+                &["PublicQueries"],
             ),
             (
                 include_str!(
