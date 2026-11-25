@@ -54,7 +54,7 @@ onDeactivated(() => {
       ><template #actions
         ><NuxtLink to="/ontology" class="mr-2"
           ><UiButton variant="secondary">{{
-            $t("ontologyManager.ontologies")
+            $t("gol.catalog")
           }}</UiButton></NuxtLink
         ><NuxtLink to="/pipeline/new"
           ><UiButton>{{ $t("pipeline.library.create") }}</UiButton></NuxtLink

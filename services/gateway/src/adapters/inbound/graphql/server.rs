@@ -55,6 +55,7 @@ static HTTP_METRICS: OnceLock<HttpMetrics> = OnceLock::new();
 
 /// Immutable service graph shared by every GraphQL request.
 pub struct GatewayServices {
+    pub gol: Arc<crate::application::usecases::gol::GolService>,
     pub authorization:
         Arc<dyn crate::application::usecases::authorization::Authorization>,
     pub utils: Option<Arc<dyn crate::application::ports::email::EmailService>>,
@@ -102,6 +103,14 @@ pub fn create_router(
     let schema = Arc::new(create_schema());
 
     Router::new()
+        .route(
+            "/internal/gol/runtime",
+            post(crate::adapters::inbound::gol::open),
+        )
+        .route(
+            "/internal/gol/effect",
+            post(crate::adapters::inbound::gol::effect),
+        )
         .route(
             "/internal/chat/tools",
             post(crate::adapters::inbound::chat_tools::invoke),
@@ -185,25 +194,14 @@ fn request_body_limit(
 /// Rejects declared oversized bodies before allocating a JSON buffer.
 async fn enforce_content_length(
     Extension(limits): Extension<GraphqlLimits>,
-    mut request: Request<axum::body::Body>,
+    request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     let maximum = request_body_limit(limits, &request);
-    let oversized = request
-        .headers()
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-        .is_some_and(|length| length > maximum);
-    if oversized {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "GraphQL request body exceeds the configured limit",
-        )
-            .into_response();
-    }
-    DefaultBodyLimit::max(maximum).apply(&mut request);
-    next.run(request).await
+    crate::adapters::inbound::gol::enforce_content_length(
+        request, next, maximum,
+    )
+    .await
 }
 
 struct HeaderExtractor<'a>(&'a HeaderMap);
@@ -282,6 +280,7 @@ async fn graphql_handler(
         policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
+        gol: Arc::clone(&services.gol),
         authorization: Arc::clone(&services.authorization),
         utils: services.utils.clone(),
         user_id: claims.sub,
@@ -691,6 +690,7 @@ async fn graphql_ws(
         policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
+        gol: Arc::clone(&services.gol),
         authorization: Arc::clone(&services.authorization),
         utils: services.utils.clone(),
         user_id: claims.sub,

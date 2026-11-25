@@ -6,7 +6,7 @@ import gc
 from collections.abc import Callable, Mapping, Sequence
 
 import structlog
-from galadril_ontology import OntologyRuntimeManager
+from galadril_ontology import GolRuntimeManager
 from galadril_pipeline.events import PipelineCommand
 from galadril_plugins import PluginRegistry, PluginScope
 from pydantic import JsonValue
@@ -36,7 +36,7 @@ class VisionCommandProcessor:
         self,
         config: VisionConfig | Sequence[VisionConfig],
         *,
-        ontology_runtime: OntologyRuntimeManager | None = None,
+        ontology_runtime: GolRuntimeManager | None = None,
         handler_factory: HandlerFactory | None = None,
         plugins: PluginRegistry | None = None,
     ) -> None:

@@ -1,41 +1,51 @@
-"""Ontology wire models and Vision runtime compatibility contracts."""
+"""Transport-only GOL projections and admitted Gateway runtime operations."""
 
-from galadril_ontology.errors import (
-    OntologyCompatibilityError,
-    OntologyError,
-    OntologyNotFoundError,
+from .client import GatewayGolClient
+from .contracts import (
+    AuthorizedSymbol,
+    GolBlockContract,
+    GolEffect,
+    GolHandoff,
+    GolLease,
+    GolProjection,
+    GolRequest,
+    GolSymbolKind,
 )
-from galadril_ontology.identity import (
-    normalize_tenant_id,
-    require_same_tenant,
-)
-from galadril_ontology.model import (
-    Ontology,
-    OntologyResource,
-    ResourceKind,
-)
-from galadril_ontology.runtime import (
-    BlockOntologyContract,
-    OntologyRuntimeManager,
-    OntologySlice,
-    OntologySliceMetadata,
-    OntologySliceRequest,
-    active_ontology_slice,
+from .errors import GolDenied, GolError, GolUnavailable
+from .identity import normalize_tenant_id, require_same_tenant, source_object_id
+from .runtime import (
+    GolRuntimeManager,
+    active_gol_lease,
+    authorized_gol_reads,
+    make_gol_state_effect,
+    protected_gol_effect,
+    protected_gol_effects,
+    protected_gol_state_effect,
+    scoped_instance_id,
 )
 
 __all__ = [
-    "BlockOntologyContract",
-    "Ontology",
-    "OntologyCompatibilityError",
-    "OntologyError",
-    "OntologyNotFoundError",
-    "OntologyRuntimeManager",
-    "OntologySlice",
-    "OntologySliceMetadata",
-    "OntologySliceRequest",
-    "OntologyResource",
-    "ResourceKind",
-    "active_ontology_slice",
+    "AuthorizedSymbol",
+    "GatewayGolClient",
+    "GolBlockContract",
+    "GolEffect",
+    "GolHandoff",
+    "GolDenied",
+    "GolError",
+    "GolLease",
+    "GolProjection",
+    "GolRequest",
+    "GolRuntimeManager",
+    "GolSymbolKind",
+    "GolUnavailable",
+    "active_gol_lease",
+    "authorized_gol_reads",
     "normalize_tenant_id",
+    "protected_gol_effect",
+    "protected_gol_effects",
+    "protected_gol_state_effect",
+    "make_gol_state_effect",
+    "scoped_instance_id",
     "require_same_tenant",
+    "source_object_id",
 ]

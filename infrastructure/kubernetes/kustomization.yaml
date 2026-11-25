@@ -19,6 +19,7 @@ resources:
   - utils-email.yaml
   - ../../schemas/avro
   - ../../schemas/spicedb
+  - ../gol
 patches:
   - path: utils-gateway.yaml
   - path: utils-scribe.yaml

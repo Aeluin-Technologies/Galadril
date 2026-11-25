@@ -6,18 +6,62 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Request, Response, Status};
 
-use crate::domain::{
-    OntologyView, PipelineView, PutOntology, PutPipeline, Registry, TenantView,
+use crate::domain::{PipelineView, PutPipeline, Registry, TenantView};
+use crate::gol::{GolDiagnostic, GolFile};
+use crate::gol_service::{
+    GolCompileApproval, GolDependency, GolSummary, GolWorkspace,
+    SaveGolOntology,
 };
 use crate::proto;
-use crate::state::{OntologyBindingRecord, OntologyPublicationRecord};
+use crate::state::GolBindingRecord;
 use crate::storage::RevisionStore;
 
 /// Cloneable generated client used by trusted internal services.
-pub type RegistryClient = proto::registry_client::RegistryClient<Channel>;
+pub type RegistryClient = proto::registry_client::RegistryClient<
+    tonic::service::interceptor::InterceptedService<
+        Channel,
+        GatewayCredential,
+    >,
+>;
+
+/// Adds an operator-provisioned credential without trusting forwarded actor
+/// headers.
+#[derive(Clone, Default)]
+pub struct GatewayCredential(
+    Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>,
+);
+
+impl tonic::service::Interceptor for GatewayCredential {
+    fn call(
+        &mut self,
+        mut request: Request<()>,
+    ) -> std::result::Result<Request<()>, Status> {
+        if let Some(value) = &self.0 {
+            request
+                .metadata_mut()
+                .insert("x-galadril-registry-key", value.clone());
+        }
+        Ok(request)
+    }
+}
+
+fn encode_gateway_key(key: &[u8]) -> Result<String> {
+    use std::fmt::Write;
+    ensure!(
+        key.len() == 32,
+        "Registry Gateway credential must contain 32 bytes"
+    );
+    let mut value = String::with_capacity(64);
+    for byte in key {
+        write!(&mut value, "{byte:02x}")?;
+    }
+    Ok(value)
+}
 
 impl RegistryClient {
     /// Discovers initialized tenants without accepting event-supplied
@@ -61,16 +105,29 @@ impl RegistryClient {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// Internal caller configuration containing only the Registry endpoint.
+/// Internal endpoint and optional Gateway-only channel credential.
 pub struct RegistryClientConfig {
     /// Registry gRPC endpoint; storage coordinates are intentionally absent.
     pub endpoint: String,
+    /// Operator-owned Gateway credential; workload-only clients omit it.
+    #[serde(default)]
+    pub gateway_key_file: Option<std::path::PathBuf>,
 }
 
 impl RegistryClientConfig {
     /// Creates a typed Registry client from the validated endpoint.
     pub fn connect_lazy(&self) -> Result<RegistryClient> {
-        registry_client(&self.endpoint)
+        let mut client = registry_client(&self.endpoint)?;
+        let path = self.gateway_key_file.clone().or_else(|| {
+            std::env::var_os("REGISTRY_GATEWAY_KEY_PATH")
+                .map(std::path::PathBuf::from)
+        });
+        if let Some(path) = path {
+            let key = crate::deployment_file::DeploymentFile::RegistryKey
+                .read_key(&path)?;
+            client = registry_client_with_key(&self.endpoint, &key)?;
+        }
+        Ok(client)
     }
 }
 
@@ -79,19 +136,73 @@ pub fn registry_client(endpoint: &str) -> Result<RegistryClient> {
     let endpoint = Endpoint::from_shared(endpoint.to_owned())?
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(30));
-    Ok(RegistryClient::new(endpoint.connect_lazy()))
+    Ok(proto::registry_client::RegistryClient::with_interceptor(
+        endpoint.connect_lazy(),
+        GatewayCredential::default(),
+    ))
+}
+
+/// Creates a Gateway-authenticated client; pipeline workloads use
+/// `registry_client`.
+pub fn registry_client_with_key(
+    endpoint: &str,
+    key: &[u8],
+) -> Result<RegistryClient> {
+    let endpoint = Endpoint::from_shared(endpoint.to_owned())?
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30));
+    let value = encode_gateway_key(key)?.parse()?;
+    Ok(proto::registry_client::RegistryClient::with_interceptor(
+        endpoint.connect_lazy(),
+        GatewayCredential(Some(value)),
+    ))
 }
 
 /// gRPC implementation delegating every mutation to canonical domain
 /// semantics.
 pub struct RegistryGrpc<S> {
     registry: Arc<Registry<S>>,
+    gateway_key: Option<[u8; 32]>,
 }
 
 impl<S> RegistryGrpc<S> {
     /// Shares one Registry domain instance across concurrent gRPC requests.
     pub fn new(registry: Arc<Registry<S>>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            gateway_key: None,
+        }
+    }
+
+    /// Enables source RPCs only for the dedicated Gateway channel credential.
+    pub fn with_gateway_key(mut self, key: &[u8]) -> Result<Self> {
+        self.gateway_key =
+            Some(Sha256::digest(encode_gateway_key(key)?.as_bytes()).into());
+        Ok(self)
+    }
+
+    fn checked_gateway_request<T>(
+        &self,
+        request: Request<T>,
+    ) -> Result<T, Status> {
+        let denied =
+            || Status::permission_denied("Gateway source channel required");
+        let expected = self.gateway_key.as_ref().ok_or_else(denied)?;
+        let mut values =
+            request.metadata().get_all("x-galadril-registry-key").iter();
+        let value = values
+            .next()
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() == 64)
+            .ok_or_else(denied)?;
+        if values.next().is_some() {
+            return Err(denied());
+        }
+        let digest = Sha256::digest(value.as_bytes());
+        if !bool::from(expected.as_slice().ct_eq(digest.as_slice())) {
+            return Err(denied());
+        }
+        Ok(request.into_inner())
     }
 }
 
@@ -324,221 +435,247 @@ where
         })?))
     }
 
-    async fn put_ontology(
+    async fn save_gol_ontology(
         &self,
-        request: Request<proto::PutOntologyRequest>,
-    ) -> Result<Response<proto::OntologyRevision>, Status> {
-        let request = request.into_inner();
-        let ontology = json_from_bytes(&request.ontology_json)?;
-        let input = PutOntology {
-            tenant_id: &request.tenant_id,
-            ontology_id: &request.ontology_id,
-            display_name: &request.display_name,
-            ontology,
-            author: &request.author,
-            message: &request.message,
-            expected_revision_id: request.expected_revision_id.as_deref(),
-            create_only: request.create_only,
-        };
-        let view = if let Some(command) = request.authoring_command_json {
-            let command = serde_json::from_value(json_from_bytes(&command)?)
-                .map_err(|_| {
-                Status::invalid_argument("invalid ontology command")
-            })?;
-            self.registry.author_ontology(input, command).await
-        } else {
-            self.registry.put_ontology(input).await
-        }
-        .map_err(domain_status)?;
-        Ok(Response::new(ontology_message(view)?))
-    }
-
-    async fn list_ontology_history(
-        &self,
-        request: Request<proto::ListOntologyHistoryRequest>,
-    ) -> Result<Response<proto::ListOntologyHistoryResponse>, Status> {
-        let request = request.into_inner();
-        let page = self
+        request: Request<proto::SaveGolOntologyRequest>,
+    ) -> Result<Response<proto::GolWorkspace>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let workspace = self
             .registry
-            .ontology_history(
-                &request.tenant_id,
-                &request.ontology_id,
-                request.after_revision_id.as_deref(),
-                usize::try_from(request.limit).map_err(|_| {
-                    Status::invalid_argument("invalid history limit")
-                })?,
-            )
-            .await
-            .map_err(domain_status)?;
-        Ok(Response::new(proto::ListOntologyHistoryResponse {
-            items: page
-                .items
-                .into_iter()
-                .map(|item| proto::OntologyHistoryEntry {
-                    revision_id: item.revision_id,
-                    author: item.author,
-                    message: item.message,
-                    branch: item.branch,
-                    operation: item.operation,
-                    created_at_ms: item.created_at_ms,
-                })
-                .collect(),
-            next_revision_id: page.next_revision_id,
-        }))
-    }
-
-    async fn get_ontology(
-        &self,
-        request: Request<proto::GetOntologyRequest>,
-    ) -> Result<Response<proto::OntologyRevision>, Status> {
-        let request = request.into_inner();
-        let view = if request.revision_id.is_empty() {
-            self.registry
-                .current_ontology(&request.tenant_id, &request.ontology_id)
-                .await
-                .map_err(domain_status)?
-        } else {
-            self.registry
-                .ontology_at(
-                    &request.tenant_id,
-                    &request.ontology_id,
-                    &request.revision_id,
-                )
-                .await
-                .map_err(domain_status)?
-        };
-        Ok(Response::new(ontology_message(view)?))
-    }
-
-    async fn publish_ontology(
-        &self,
-        request: Request<proto::PublishOntologyRequest>,
-    ) -> Result<Response<proto::OntologyPublication>, Status> {
-        let request = request.into_inner();
-        let metadata = json_from_bytes(&request.metadata_json)?;
-        let publication = self
-            .registry
-            .publish_ontology(
-                &request.tenant_id,
-                &request.ontology_id,
-                &request.display_name,
-                &request.publication_id,
-                &request.revision_id,
-                metadata,
-                request.create_only,
-            )
-            .await
-            .map_err(domain_status)?;
-        Ok(Response::new(publication_message(
-            request.ontology_id,
-            request.display_name,
-            publication,
-        )?))
-    }
-
-    async fn retire_ontology(
-        &self,
-        request: Request<proto::RetireOntologyRequest>,
-    ) -> Result<Response<proto::RetireOntologyResponse>, Status> {
-        let request = request.into_inner();
-        let head_revision_id = self
-            .registry
-            .retire_ontology(
-                &request.tenant_id,
-                &request.ontology_id,
-                &request.publication_id,
-                &request.revision_id,
-            )
-            .await
-            .map_err(domain_status)?;
-        Ok(Response::new(proto::RetireOntologyResponse {
-            head_revision_id,
-        }))
-    }
-
-    async fn list_ontologies(
-        &self,
-        request: Request<proto::ListOntologiesRequest>,
-    ) -> Result<Response<proto::ListOntologiesResponse>, Status> {
-        let request = request.into_inner();
-        let ontologies = self
-            .registry
-            .list_ontologies(&request.tenant_id, request.limit as usize)
-            .await
-            .map_err(domain_status)?
-            .into_iter()
-            .map(|ontology| {
-                let production_publication = ontology
-                    .production_publication
-                    .map(|publication| {
-                        publication_message(
-                            ontology.ontology_id.clone(),
-                            ontology.display_name.clone(),
-                            publication,
-                        )
+            .save_gol_ontology(SaveGolOntology {
+                tenant_id: &request.tenant_id,
+                ontology_id: &request.ontology_id,
+                display_name: &request.display_name,
+                files: request
+                    .files
+                    .into_iter()
+                    .map(|file| GolFile {
+                        path: file.path,
+                        text: file.text,
                     })
-                    .transpose()?;
-                Ok(proto::OntologyCatalogEntry {
-                    ontology_id: ontology.ontology_id,
-                    display_name: ontology.display_name,
-                    production_publication,
-                })
+                    .collect(),
+                author: &request.author,
+                expected_revision: request.expected_revision.as_deref(),
             })
-            .collect::<Result<Vec<_>, Status>>()?;
-        Ok(Response::new(proto::ListOntologiesResponse { ontologies }))
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(workspace_message(workspace)))
+    }
+
+    async fn get_gol_workspace(
+        &self,
+        request: Request<proto::GetGolWorkspaceRequest>,
+    ) -> Result<Response<proto::GolWorkspace>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let workspace = self
+            .registry
+            .gol_workspace(
+                &request.tenant_id,
+                &request.ontology_id,
+                request.source_revision.as_deref(),
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(workspace_message(workspace)))
+    }
+
+    async fn preview_gol_dependencies(
+        &self,
+        request: Request<proto::PreviewGolDependenciesRequest>,
+    ) -> Result<Response<proto::GolDependencyPreview>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let preview = self
+            .registry
+            .preview_gol_dependencies(
+                &request.tenant_id,
+                &request.ontology_id,
+                &request.source_revision,
+                &request.approved_owners,
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::GolDependencyPreview {
+            required_owners: preview.required_owners,
+            plan_pin: preview.plan_pin,
+            dependencies: preview
+                .dependencies
+                .into_iter()
+                .map(dependency_message)
+                .collect(),
+        }))
+    }
+
+    async fn validate_gol_ontology(
+        &self,
+        request: Request<proto::ValidateGolOntologyRequest>,
+    ) -> Result<Response<proto::GolValidation>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let result = self
+            .registry
+            .validate_gol_ontology(
+                &request.tenant_id,
+                &request.ontology_id,
+                &request.source_revision,
+                &GolCompileApproval {
+                    plan_pin: request.plan_pin,
+                    approved_owners: request.approved_owners,
+                },
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::GolValidation {
+            ontology_id: result.ontology_id,
+            source_revision: result.source_revision,
+            status: result.status,
+            diagnostics: result
+                .diagnostics
+                .into_iter()
+                .map(diagnostic_message)
+                .collect(),
+            dependencies: result
+                .dependencies
+                .into_iter()
+                .map(dependency_message)
+                .collect(),
+        }))
+    }
+
+    async fn publish_gol_ontology(
+        &self,
+        request: Request<proto::PublishGolOntologyRequest>,
+    ) -> Result<Response<proto::GolPublication>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let result = self
+            .registry
+            .publish_gol_ontology(
+                &request.tenant_id,
+                &request.ontology_id,
+                &request.source_revision,
+                request.expected_generation.as_deref(),
+                &request.author_id,
+                &GolCompileApproval {
+                    plan_pin: request.plan_pin,
+                    approved_owners: request.approved_owners,
+                },
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::GolPublication {
+            ontology_id: result.ontology_id,
+            source_revision: result.source_revision,
+            generation: result.generation,
+        }))
+    }
+
+    async fn delete_gol_ontology(
+        &self,
+        request: Request<proto::DeleteGolOntologyRequest>,
+    ) -> Result<Response<proto::DeleteGolOntologyResponse>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let revision = self
+            .registry
+            .delete_gol_ontology(
+                &request.tenant_id,
+                &request.ontology_id,
+                &request.expected_revision,
+                &request.author,
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::DeleteGolOntologyResponse { revision }))
+    }
+
+    async fn list_gol_ontologies(
+        &self,
+        request: Request<proto::ListGolOntologiesRequest>,
+    ) -> Result<Response<proto::ListGolOntologiesResponse>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let result = self
+            .registry
+            .list_gol_ontologies(
+                &request.tenant_id,
+                if request.limit == 0 {
+                    100
+                } else {
+                    request.limit as usize
+                },
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::ListGolOntologiesResponse {
+            ontologies: result.into_iter().map(summary_message).collect(),
+        }))
     }
 
     async fn put_binding(
         &self,
         request: Request<proto::PutBindingRequest>,
-    ) -> Result<Response<proto::OntologyBinding>, Status> {
-        let request = request.into_inner();
-        let binding = request
-            .binding
-            .context("ontology binding is required")
-            .map_err(invalid_status)?;
-        let record = binding_record(binding)?;
-        let (record, head_revision_id) = self
+    ) -> Result<Response<proto::GolBinding>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let binding = request.binding.ok_or_else(|| {
+            Status::invalid_argument("GOL binding is required")
+        })?;
+        let input = GolBindingRecord {
+            pipeline_id: binding.pipeline_id,
+            block_id: binding.block_id,
+            ontology_id: binding.ontology_id,
+            generation: String::new(),
+            source_revision: String::new(),
+            symbols: binding.symbols,
+            updated_at_ms: 0,
+        };
+        let (binding, revision) = self
             .registry
             .put_binding(
                 &request.tenant_id,
                 &request.expected_revision_id,
-                record,
+                input,
             )
             .await
             .map_err(domain_status)?;
-        Ok(Response::new(binding_message(record, head_revision_id)?))
+        Ok(Response::new(binding_message(binding, &revision)))
     }
 
     async fn list_bindings(
         &self,
         request: Request<proto::ListBindingsRequest>,
     ) -> Result<Response<proto::ListBindingsResponse>, Status> {
-        let request = request.into_inner();
+        let request = self.checked_gateway_request(request)?;
         let bindings = self
             .registry
             .list_bindings(
                 &request.tenant_id,
                 request.pipeline_id.as_deref(),
                 request.revision_id.as_deref(),
-                request.limit as usize,
+                if request.limit == 0 {
+                    100
+                } else {
+                    request.limit as usize
+                },
             )
             .await
-            .map_err(domain_status)?
-            .into_iter()
-            .map(|binding| binding_message(binding, String::new()))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Response::new(proto::ListBindingsResponse { bindings }))
+            .map_err(domain_status)?;
+        Ok(Response::new(proto::ListBindingsResponse {
+            bindings: bindings
+                .into_iter()
+                .map(|binding| {
+                    binding_message(
+                        binding,
+                        request.revision_id.as_deref().unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        }))
     }
 
-    async fn get_ontology_slice(
+    async fn get_gol_binding(
         &self,
-        request: Request<proto::GetOntologySliceRequest>,
-    ) -> Result<Response<proto::OntologySlice>, Status> {
-        let request = request.into_inner();
-        let slice = self
+        request: Request<proto::GetGolBindingRequest>,
+    ) -> Result<Response<proto::GolBinding>, Status> {
+        let request = self.checked_gateway_request(request)?;
+        let binding = self
             .registry
-            .ontology_slice(
+            .gol_binding(
                 &request.tenant_id,
                 &request.pipeline_id,
                 &request.pipeline_revision_id,
@@ -546,90 +683,80 @@ where
             )
             .await
             .map_err(domain_status)?;
-        let ontology_json = json_bytes(&slice.ontology)?;
-        let publication_metadata_json =
-            json_bytes(&slice.publication.metadata)?;
-        let binding_metadata_json = json_bytes(&slice.binding.metadata)?;
-        Ok(Response::new(proto::OntologySlice {
-            ontology_id: slice.binding.ontology_id,
-            publication_id: slice.publication.publication_id,
-            revision_id: slice.publication.revision_id,
-            ontology_json,
-            publication_metadata_json,
-            binding_metadata_json,
-            published_at_ms: slice.publication.published_at_ms,
-            base_version: slice.publication.base_version,
-            base_hash: slice.publication.base_hash,
-            effective_hash: slice.publication.effective_hash,
-        }))
+        Ok(Response::new(binding_message(
+            binding,
+            &request.pipeline_revision_id,
+        )))
     }
+}
 
-    async fn diff_ontology(
-        &self,
-        request: Request<proto::DiffOntologyRequest>,
-    ) -> Result<Response<proto::SemanticDiff>, Status> {
-        let request = request.into_inner();
-        let changes = self
-            .registry
-            .diff_ontology(
-                &request.tenant_id,
-                &request.ontology_id,
-                &request.base_revision_id,
-                &request.target_revision_id,
-            )
-            .await
-            .map_err(domain_status)?
-            .into_iter()
-            .map(|change| {
-                Ok(proto::SemanticChange {
-                    resource_id: change.resource_id,
-                    operation: change.operation,
-                    path: change.path,
-                    before_json: optional_json_bytes(change.before.as_ref())?,
-                    after_json: optional_json_bytes(change.after.as_ref())?,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
-        Ok(Response::new(proto::SemanticDiff { changes }))
+fn summary_message(summary: GolSummary) -> proto::GolSummary {
+    proto::GolSummary {
+        ontology_id: summary.ontology_id,
+        display_name: summary.display_name,
+        source_revision: summary.source_revision,
+        active_generation: summary.active_generation,
+        active_source_revision: summary.active_source_revision,
+        status: summary.status,
     }
+}
 
-    async fn merge_ontology(
-        &self,
-        request: Request<proto::MergeOntologyRequest>,
-    ) -> Result<Response<proto::OntologyMerge>, Status> {
-        let request = request.into_inner();
-        let (result, revision) = self
-            .registry
-            .merge_ontology(
-                &request.tenant_id,
-                &request.ontology_id,
-                &request.base_revision_id,
-                &request.left_revision_id,
-                &request.right_revision_id,
-                &request.expected_revision_id,
-                &request.author,
-                &request.message,
-            )
-            .await
-            .map_err(domain_status)?;
-        let revision = revision.map(ontology_message).transpose()?;
-        let conflicts = result
-            .conflicts
+fn diagnostic_message(item: GolDiagnostic) -> proto::GolDiagnostic {
+    proto::GolDiagnostic {
+        code: item.code,
+        message: item.message,
+        path: item.path,
+        start: item.start as u64,
+        end: item.end as u64,
+        severity: item.severity,
+    }
+}
+
+fn dependency_message(item: GolDependency) -> proto::GolDependency {
+    proto::GolDependency {
+        ontology_id: item.ontology_id,
+        generation: item.generation,
+        source_revision: item.source_revision,
+    }
+}
+
+fn workspace_message(workspace: GolWorkspace) -> proto::GolWorkspace {
+    proto::GolWorkspace {
+        summary: Some(summary_message(workspace.summary)),
+        files: workspace
+            .files
             .into_iter()
-            .map(|conflict| {
-                Ok(proto::MergeConflict {
-                    resource_id: conflict.resource_id,
-                    path: conflict.path,
-                    base_json: optional_json_bytes(conflict.base.as_ref())?,
-                    left_json: optional_json_bytes(conflict.left.as_ref())?,
-                    right_json: optional_json_bytes(conflict.right.as_ref())?,
-                })
+            .map(|file| proto::GolFile {
+                path: file.path,
+                text: file.text,
             })
-            .collect::<Result<Vec<_>, Status>>()?;
-        Ok(Response::new(proto::OntologyMerge {
-            revision,
-            conflicts,
-        }))
+            .collect(),
+        diagnostics: workspace
+            .diagnostics
+            .into_iter()
+            .map(diagnostic_message)
+            .collect(),
+        dependencies: workspace
+            .dependencies
+            .into_iter()
+            .map(dependency_message)
+            .collect(),
+    }
+}
+
+fn binding_message(
+    binding: GolBindingRecord,
+    revision: &str,
+) -> proto::GolBinding {
+    proto::GolBinding {
+        pipeline_id: binding.pipeline_id,
+        block_id: binding.block_id,
+        ontology_id: binding.ontology_id,
+        generation: binding.generation,
+        source_revision: binding.source_revision,
+        symbols: binding.symbols,
+        updated_at_ms: binding.updated_at_ms,
+        head_revision_id: revision.into(),
     }
 }
 
@@ -659,79 +786,6 @@ fn pipeline_message(view: PipelineView) -> Result<proto::Pipeline, Status> {
     })
 }
 
-fn ontology_message(
-    view: OntologyView,
-) -> Result<proto::OntologyRevision, Status> {
-    Ok(proto::OntologyRevision {
-        authoring_json: json_bytes(
-            &serde_json::to_value(&view.record.authoring).map_err(|_| {
-                Status::internal("ontology authoring serialization failed")
-            })?,
-        )?,
-        ontology_id: view.record.ontology_id,
-        display_name: view.record.display_name,
-        revision_id: view.revision_id,
-        ontology_json: json_bytes(&view.record.ontology)?,
-        author: view.record.author,
-        message: view.record.message,
-        created_at_ms: view.record.created_at_ms,
-    })
-}
-
-fn publication_message(
-    ontology_id: String,
-    display_name: String,
-    publication: OntologyPublicationRecord,
-) -> Result<proto::OntologyPublication, Status> {
-    Ok(proto::OntologyPublication {
-        ontology_id,
-        display_name,
-        publication_id: publication.publication_id,
-        revision_id: publication.revision_id,
-        lifecycle: publication.lifecycle,
-        metadata_json: json_bytes(&publication.metadata)?,
-        base_version: publication.base_version,
-        base_hash: publication.base_hash,
-        effective_hash: publication.effective_hash,
-        author: publication.author,
-        message: publication.message,
-        published_at_ms: publication.published_at_ms,
-        retired_at_ms: publication.retired_at_ms,
-    })
-}
-
-fn binding_record(
-    binding: proto::OntologyBinding,
-) -> Result<OntologyBindingRecord, Status> {
-    Ok(OntologyBindingRecord {
-        pipeline_id: binding.pipeline_id,
-        block_id: binding.block_id,
-        ontology_id: binding.ontology_id,
-        resource_ids: binding.resource_ids,
-        resource_kinds: binding.resource_kinds,
-        include_dependencies: binding.include_dependencies,
-        metadata: json_from_bytes(&binding.metadata_json)?,
-        updated_at_ms: binding.updated_at_ms,
-    })
-}
-
-fn binding_message(
-    binding: OntologyBindingRecord,
-    head_revision_id: String,
-) -> Result<proto::OntologyBinding, Status> {
-    Ok(proto::OntologyBinding {
-        pipeline_id: binding.pipeline_id,
-        block_id: binding.block_id,
-        ontology_id: binding.ontology_id,
-        resource_ids: binding.resource_ids,
-        resource_kinds: binding.resource_kinds,
-        include_dependencies: binding.include_dependencies,
-        metadata_json: json_bytes(&binding.metadata)?,
-        updated_at_ms: binding.updated_at_ms,
-        head_revision_id,
-    })
-}
-
 fn json_from_bytes(payload: &[u8]) -> Result<Value, Status> {
     if payload.len() > 16 * 1024 * 1024 {
         return Err(Status::invalid_argument(
@@ -745,11 +799,44 @@ fn json_bytes(value: &Value) -> Result<Vec<u8>, Status> {
     serde_json::to_vec(value).map_err(internal_status)
 }
 
-fn optional_json_bytes(value: Option<&Value>) -> Result<Vec<u8>, Status> {
-    value.map_or_else(|| Ok(Vec::new()), json_bytes)
-}
-
 fn domain_status(error: anyhow::Error) -> Status {
+    if error.is::<crate::gol_service::PublicationCycle>() {
+        return Status::failed_precondition(error.to_string());
+    }
+    if let Some(remote) =
+        error.downcast_ref::<galadril_ontology::archive::remote::RemoteError>()
+    {
+        use galadril_ontology::archive::remote::RemoteError;
+        return match remote {
+            RemoteError::Conflict => {
+                Status::aborted("Registry publication changed")
+            },
+            RemoteError::Integrity => {
+                Status::data_loss("Registry persisted state failed validation")
+            },
+            RemoteError::Missing => {
+                Status::not_found("Registry artifact unavailable")
+            },
+            RemoteError::Capacity => Status::resource_exhausted(
+                "Registry publication capacity exceeded",
+            ),
+            RemoteError::Expired | RemoteError::Retained => {
+                Status::failed_precondition(
+                    "Registry generation is unavailable",
+                )
+            },
+            RemoteError::Configuration | RemoteError::UnsupportedStorage => {
+                Status::failed_precondition(
+                    "Registry artifact storage is incompatible",
+                )
+            },
+            _ => Status::unavailable("Registry storage is unavailable"),
+        };
+    }
+    if error.is::<reqwest::Error>() || error.is::<tonic::Status>() {
+        tracing::error!(event.name = "registry.backend_transport_failed");
+        return Status::unavailable("Registry storage is unavailable");
+    }
     let message = error.to_string();
     if message.contains("integrity check failed") ||
         message.contains("invalid Registry state artifact")
@@ -761,6 +848,7 @@ fn domain_status(error: anyhow::Error) -> Status {
     }
     if message.contains("S3") ||
         message.contains("lakeFS") ||
+        message.contains("://") ||
         message.contains("lock poisoned")
     {
         tracing::error!("registry_storage_operation_failed");
@@ -786,785 +874,5 @@ fn internal_status(error: impl std::fmt::Display) -> Status {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    use anyhow::{Context, ensure};
-    use async_trait::async_trait;
-
-    use super::*;
-    use crate::proto::registry_server::Registry as RegistryService;
-    use crate::state::TenantState;
-    use crate::storage::{Snapshot, TenantSnapshot};
-
-    #[derive(Default)]
-    struct MemoryStore {
-        tenants: Mutex<BTreeMap<String, Vec<StoredSnapshot>>>,
-    }
-
-    struct StoredSnapshot {
-        revision_id: String,
-        state_json: Vec<u8>,
-    }
-
-    #[async_trait]
-    impl RevisionStore for MemoryStore {
-        async fn list_tenants(
-            &self,
-            limit: u32,
-            page_token: Option<&str>,
-        ) -> anyhow::Result<crate::storage::TenantPage> {
-            let tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            let mut ids = tenants
-                .keys()
-                .filter(|key| {
-                    page_token.is_none_or(|token| key.as_str() > token)
-                })
-                .take(usize::try_from(limit)? + 1)
-                .cloned()
-                .collect::<Vec<_>>();
-            let next_page_token = if ids.len() > usize::try_from(limit)? {
-                ids.pop();
-                ids.last().cloned()
-            } else {
-                None
-            };
-            Ok(crate::storage::TenantPage {
-                tenant_ids: ids,
-                next_page_token,
-            })
-        }
-
-        async fn tenant_exists(
-            &self,
-            tenant_id: &str,
-        ) -> anyhow::Result<bool> {
-            let tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            Ok(tenants.contains_key(tenant_id))
-        }
-
-        async fn ensure_tenant(
-            &self,
-            tenant_id: &str,
-        ) -> anyhow::Result<TenantSnapshot> {
-            let mut tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            let snapshots = tenants.entry(tenant_id.to_owned()).or_default();
-            Ok(TenantSnapshot {
-                revision_id: snapshots.last().map_or_else(
-                    || "00000000000000000000".to_owned(),
-                    |snapshot| snapshot.revision_id.clone(),
-                ),
-            })
-        }
-
-        async fn delete_tenant(&self, tenant_id: &str) -> anyhow::Result<()> {
-            let mut tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            tenants.remove(tenant_id).context("tenant unavailable")?;
-            Ok(())
-        }
-
-        async fn load(
-            &self,
-            tenant_id: &str,
-            revision_id: Option<&str>,
-        ) -> anyhow::Result<Snapshot> {
-            let tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            let snapshots =
-                tenants.get(tenant_id).context("tenant unavailable")?;
-            let stored = if let Some(revision_id) = revision_id {
-                Some(
-                    snapshots
-                        .iter()
-                        .find(|item| item.revision_id == revision_id)
-                        .context("revision unavailable")?,
-                )
-            } else {
-                snapshots.last()
-            };
-            let Some(stored) = stored else {
-                return Ok(Snapshot {
-                    revision_id: "00000000000000000000".to_owned(),
-                    state: TenantState::default(),
-                });
-            };
-            Ok(Snapshot {
-                revision_id: stored.revision_id.clone(),
-                state: serde_json::from_slice(&stored.state_json)?,
-            })
-        }
-
-        async fn commit(
-            &self,
-            tenant_id: &str,
-            expected_revision_id: &str,
-            state: &TenantState,
-            _author: &str,
-            _message: &str,
-        ) -> anyhow::Result<String> {
-            let mut tenants = self
-                .tenants
-                .lock()
-                .map_err(|_| anyhow::anyhow!("memory store lock poisoned"))?;
-            let snapshots = tenants.entry(tenant_id.to_owned()).or_default();
-            let current =
-                snapshots.last().map_or("00000000000000000000", |snapshot| {
-                    snapshot.revision_id.as_str()
-                });
-            ensure!(
-                current == expected_revision_id,
-                "registry revision changed"
-            );
-            let revision_id = format!("{:020}", snapshots.len() + 1);
-            snapshots.push(StoredSnapshot {
-                revision_id: revision_id.clone(),
-                state_json: serde_json::to_vec(state)?,
-            });
-            Ok(revision_id)
-        }
-    }
-
-    fn ontology(description: &str) -> Vec<u8> {
-        serde_json::json!({
-            "version": "1",
-            "resources": [{
-                "resource_id": "object.person",
-                "kind": "object_type",
-                "display_name": "Person",
-                "description": description,
-                "references": [],
-                "attributes": {}
-            }]
-        })
-        .to_string()
-        .into_bytes()
-    }
-
-    fn pipeline() -> Vec<u8> {
-        serde_json::json!({
-            "name": "daily",
-            "sources": [{"id": "source"}],
-            "pipeline": [{
-                "step": "sink",
-                "type": "sink",
-                "input_from": ["source"],
-                "params": {"ontology_id": "people"}
-            }]
-        })
-        .to_string()
-        .into_bytes()
-    }
-
-    fn put_ontology_request(
-        description: &str,
-        expected_revision_id: Option<String>,
-        create_only: bool,
-    ) -> proto::PutOntologyRequest {
-        proto::PutOntologyRequest {
-            authoring_command_json: None,
-            tenant_id: "tenant_a".to_owned(),
-            ontology_id: "people".to_owned(),
-            display_name: "People".to_owned(),
-            ontology_json: ontology(description),
-            author: "author".to_owned(),
-            message: format!("ontology {description}"),
-            expected_revision_id,
-            create_only,
-        }
-    }
-
-    #[tokio::test]
-    async fn pinned_authoring_reads_preserve_references_without_runtime_admission()
-    -> anyhow::Result<()> {
-        let service =
-            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
-        let child = serde_json::json!({"name":"child","sources":[{"id":"input"}],"pipeline":[{"step":"sink","type":"sink","input_from":["input"]}]});
-        let child = service
-            .put_pipeline(Request::new(proto::PutPipelineRequest {
-                authoring_command_json: None,
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "child".to_owned(),
-                name: "child".to_owned(),
-                owner_id: "owner".to_owned(),
-                author_id: "author".to_owned(),
-                message: "draft".to_owned(),
-                expected_revision_id: None,
-                create_only: true,
-                definition_json: serde_json::to_vec(&child)?,
-            }))
-            .await?
-            .into_inner();
-        let definition = serde_json::json!({"name":"parent","sources":[{"id":"input"}],"pipeline":[{"step":"send","type":"pipeline","input_from":["input"],"pipeline_ref":{"pipeline_id":"child","revision_id":child.head_revision_id,"input_source":"input"}}]});
-        let parent = service
-            .put_pipeline(Request::new(proto::PutPipelineRequest {
-                authoring_command_json: None,
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "parent".to_owned(),
-                name: "parent".to_owned(),
-                owner_id: "owner".to_owned(),
-                author_id: "author".to_owned(),
-                message: "linked".to_owned(),
-                expected_revision_id: None,
-                create_only: true,
-                definition_json: serde_json::to_vec(&definition)?,
-            }))
-            .await?
-            .into_inner();
-        let authored = service
-            .get_pipeline(Request::new(proto::GetPipelineRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "parent".to_owned(),
-                revision_id: Some(parent.head_revision_id.clone()),
-            }))
-            .await?
-            .into_inner();
-        let authored: serde_json::Value =
-            serde_json::from_slice(&authored.definition_json)?;
-        assert_eq!(authored, definition);
-        assert_eq!(crate::composition::references(&authored)?.len(), 1);
-        let runtime = service
-            .get_runtime_pipeline(Request::new(
-                proto::GetRuntimePipelineRequest {
-                    tenant_id: "tenant_a".to_owned(),
-                    pipeline_id: "parent".to_owned(),
-                    revision_id: parent.head_revision_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        let runtime: serde_json::Value =
-            serde_json::from_slice(&runtime.definition_json)?;
-        assert_eq!(
-            runtime.pointer("/pipeline/0/type"),
-            Some(&serde_json::json!("forward"))
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn shared_discovery_client_paginates_new_tenants()
-    -> anyhow::Result<()> {
-        use proto::registry_server::RegistryServer;
-        use tonic::transport::Server;
-        use tonic::transport::server::TcpIncoming;
-
-        let registry = Arc::new(Registry::new(MemoryStore::default()));
-        for index in 0..101 {
-            registry.put_tenant(&format!("tenant_{index:03}")).await?;
-        }
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        let server = tokio::spawn(
-            Server::builder()
-                .add_service(RegistryServer::new(RegistryGrpc::new(
-                    Arc::clone(&registry),
-                )))
-                .serve_with_incoming(TcpIncoming::from(listener)),
-        );
-        let mut client = registry_client(&format!("http://{address}"))?;
-        let tenants = client.discover_tenants().await?;
-        assert_eq!(tenants.len(), 101);
-        assert_eq!(tenants.first().map(String::as_str), Some("tenant_000"));
-        registry.put_tenant("tenant_new").await?;
-        assert_eq!(client.discover_tenants().await?.len(), 102);
-        server.abort();
-        match server.await {
-            Err(error) if error.is_cancelled() => {},
-            result => {
-                result??;
-            },
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn discovery_pages_initialized_tenants_and_reflects_deletion()
-    -> anyhow::Result<()> {
-        let service =
-            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
-        for tenant in ["tenant_a", "tenant_b"] {
-            service
-                .put_tenant(Request::new(proto::PutTenantRequest {
-                    tenant_id: tenant.to_owned(),
-                }))
-                .await?;
-        }
-        let first = service
-            .list_tenants(Request::new(proto::ListTenantsRequest {
-                limit: 1,
-                page_token: None,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(first.tenant_ids, ["tenant_a"]);
-        let second = service
-            .list_tenants(Request::new(proto::ListTenantsRequest {
-                limit: 1,
-                page_token: first.next_page_token,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(second.tenant_ids, ["tenant_b"]);
-        assert!(second.next_page_token.is_none());
-        service
-            .delete_tenant(Request::new(proto::DeleteTenantRequest {
-                tenant_id: "tenant_a".to_owned(),
-                confirmation_tenant_id: "tenant_a".to_owned(),
-            }))
-            .await?;
-        let all = service
-            .list_tenants(Request::new(proto::ListTenantsRequest {
-                limit: 0,
-                page_token: None,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(all.tenant_ids, ["tenant_b"]);
-        assert!(
-            service
-                .list_tenants(Request::new(proto::ListTenantsRequest {
-                    limit: 101,
-                    page_token: None
-                }))
-                .await
-                .is_err()
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn tenant_contract_validates_initializes_reads_and_purges()
-    -> anyhow::Result<()> {
-        let service =
-            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
-
-        let validation = service
-            .validate_tenants(Request::new(proto::ValidateTenantsRequest {
-                tenant_ids: vec!["tenant_a".to_owned()],
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(validation.tenants.len(), 1);
-        assert!(!validation.tenants.first().context("tenant result")?.exists);
-
-        let Err(empty) = service
-            .validate_tenants(Request::new(proto::ValidateTenantsRequest {
-                tenant_ids: Vec::new(),
-            }))
-            .await
-        else {
-            anyhow::bail!("empty tenant validation exposed tenant discovery");
-        };
-        assert_eq!(empty.code(), Code::InvalidArgument);
-
-        let Err(missing) = service
-            .get_tenant(Request::new(proto::GetTenantRequest {
-                tenant_id: "tenant_a".to_owned(),
-            }))
-            .await
-        else {
-            anyhow::bail!("missing tenant accepted");
-        };
-        assert_eq!(missing.code(), Code::NotFound);
-
-        let tenant = service
-            .put_tenant(Request::new(proto::PutTenantRequest {
-                tenant_id: "tenant_a".to_owned(),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(tenant.tenant_id, "tenant_a");
-        assert!(crate::storage::valid_revision(&tenant.head_revision_id));
-        let Err(mismatch) = service
-            .delete_tenant(Request::new(proto::DeleteTenantRequest {
-                tenant_id: "tenant_a".to_owned(),
-                confirmation_tenant_id: "tenant_b".to_owned(),
-            }))
-            .await
-        else {
-            anyhow::bail!("mismatched purge confirmation accepted");
-        };
-        assert_eq!(mismatch.code(), Code::InvalidArgument);
-
-        service
-            .delete_tenant(Request::new(proto::DeleteTenantRequest {
-                tenant_id: "tenant_a".to_owned(),
-                confirmation_tenant_id: "tenant_a".to_owned(),
-            }))
-            .await?;
-        let validation = service
-            .validate_tenants(Request::new(proto::ValidateTenantsRequest {
-                tenant_ids: vec!["tenant_a".to_owned()],
-            }))
-            .await?
-            .into_inner();
-        assert!(!validation.tenants.first().context("tenant result")?.exists);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn grpc_round_trip_covers_the_complete_registry_contract()
-    -> anyhow::Result<()> {
-        let service =
-            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
-
-        let base = service
-            .put_ontology(Request::new(put_ontology_request(
-                "base", None, true,
-            )))
-            .await?
-            .into_inner();
-        let left = service
-            .put_ontology(Request::new(put_ontology_request(
-                "left",
-                Some(base.revision_id.clone()),
-                false,
-            )))
-            .await?
-            .into_inner();
-        let right = service
-            .put_ontology(Request::new(put_ontology_request(
-                "right",
-                Some(left.revision_id.clone()),
-                false,
-            )))
-            .await?
-            .into_inner();
-
-        let current = service
-            .get_ontology(Request::new(proto::GetOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                revision_id: String::new(),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(current.revision_id, right.revision_id);
-        let pinned = service
-            .get_ontology(Request::new(proto::GetOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                revision_id: base.revision_id.clone(),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(pinned.ontology_json, ontology("base"));
-
-        let diff = service
-            .diff_ontology(Request::new(proto::DiffOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                base_revision_id: base.revision_id.clone(),
-                target_revision_id: left.revision_id.clone(),
-                ontology_id: "people".to_owned(),
-            }))
-            .await?
-            .into_inner();
-        assert!(!diff.changes.is_empty());
-
-        let conflict = service
-            .merge_ontology(Request::new(proto::MergeOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                base_revision_id: base.revision_id.clone(),
-                left_revision_id: left.revision_id.clone(),
-                right_revision_id: right.revision_id.clone(),
-                author: "author".to_owned(),
-                message: "conflict".to_owned(),
-                expected_revision_id: right.revision_id.clone(),
-            }))
-            .await?
-            .into_inner();
-        assert!(conflict.revision.is_none());
-        assert!(!conflict.conflicts.is_empty());
-
-        let merged = service
-            .merge_ontology(Request::new(proto::MergeOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                base_revision_id: base.revision_id.clone(),
-                left_revision_id: left.revision_id,
-                right_revision_id: base.revision_id,
-                author: "author".to_owned(),
-                message: "merge".to_owned(),
-                expected_revision_id: right.revision_id,
-            }))
-            .await?
-            .into_inner()
-            .revision
-            .context("merged ontology revision missing")?;
-
-        let publication = service
-            .publish_ontology(Request::new(proto::PublishOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                display_name: "People".to_owned(),
-                publication_id: "publication-1".to_owned(),
-                revision_id: merged.revision_id.clone(),
-                metadata_json: br#"{"channel":"stable"}"#.to_vec(),
-                create_only: false,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(publication.lifecycle, "production");
-        let ontologies = service
-            .list_ontologies(Request::new(proto::ListOntologiesRequest {
-                tenant_id: "tenant_a".to_owned(),
-                limit: 10,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(ontologies.ontologies.len(), 1);
-
-        let created = service
-            .put_pipeline(Request::new(proto::PutPipelineRequest {
-                authoring_command_json: None,
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                name: "Daily".to_owned(),
-                owner_id: "owner".to_owned(),
-                definition_json: pipeline(),
-                author_id: "author".to_owned(),
-                message: "create pipeline".to_owned(),
-                expected_revision_id: None,
-                create_only: true,
-            }))
-            .await?
-            .into_inner();
-        let binding = service
-            .put_binding(Request::new(proto::PutBindingRequest {
-                tenant_id: "tenant_a".to_owned(),
-                binding: Some(proto::OntologyBinding {
-                    pipeline_id: "daily".to_owned(),
-                    block_id: "sink".to_owned(),
-                    ontology_id: "people".to_owned(),
-                    resource_ids: vec!["object.person".to_owned()],
-                    resource_kinds: Vec::new(),
-                    include_dependencies: true,
-                    metadata_json: br#"{"purpose":"runtime"}"#.to_vec(),
-                    updated_at_ms: 42,
-                    head_revision_id: String::new(),
-                }),
-                expected_revision_id: created.head_revision_id,
-            }))
-            .await?
-            .into_inner();
-        let bindings = service
-            .list_bindings(Request::new(proto::ListBindingsRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: Some("daily".to_owned()),
-                limit: 10,
-                revision_id: Some(binding.head_revision_id.clone()),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(bindings.bindings.len(), 1);
-
-        let slice = service
-            .get_ontology_slice(Request::new(proto::GetOntologySliceRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                pipeline_revision_id: binding.head_revision_id.clone(),
-                block_id: "sink".to_owned(),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(slice.ontology_id, "people");
-        assert_eq!(slice.revision_id, merged.revision_id);
-
-        let published = service
-            .publish_pipeline(Request::new(proto::PublishPipelineRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                revision_id: binding.head_revision_id.clone(),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(
-            published.published_revision_id.as_deref(),
-            Some(binding.head_revision_id.as_str())
-        );
-        let current_pipeline = service
-            .get_pipeline(Request::new(proto::GetPipelineRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                revision_id: None,
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(
-            current_pipeline.head_revision_id,
-            published.head_revision_id
-        );
-        let pinned_pipeline = service
-            .get_pipeline(Request::new(proto::GetPipelineRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                revision_id: Some(binding.head_revision_id.clone()),
-            }))
-            .await?
-            .into_inner();
-        assert_eq!(pinned_pipeline.pipeline_id, "daily");
-        let runtime = service
-            .get_runtime_pipeline(Request::new(
-                proto::GetRuntimePipelineRequest {
-                    tenant_id: "tenant_a".to_owned(),
-                    pipeline_id: "daily".to_owned(),
-                    revision_id: binding.head_revision_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        assert_eq!(runtime.pipeline_id, "daily");
-        assert_eq!(
-            service
-                .list_pipelines(Request::new(proto::ListPipelinesRequest {
-                    tenant_id: "tenant_a".to_owned(),
-                    limit: 10,
-                }))
-                .await?
-                .into_inner()
-                .pipelines
-                .len(),
-            1
-        );
-        assert_eq!(
-            service
-                .list_published_pipelines(Request::new(
-                    proto::ListPublishedPipelinesRequest {
-                        tenant_id: "tenant_a".to_owned(),
-                        limit: 10,
-                    },
-                ))
-                .await?
-                .into_inner()
-                .pipelines
-                .len(),
-            1
-        );
-
-        let deleted = service
-            .delete_pipeline(Request::new(proto::DeletePipelineRequest {
-                tenant_id: "tenant_a".to_owned(),
-                pipeline_id: "daily".to_owned(),
-                expected_revision_id: published.head_revision_id,
-            }))
-            .await?
-            .into_inner();
-        assert!(!deleted.revision_id.is_empty());
-        let retired = service
-            .retire_ontology(Request::new(proto::RetireOntologyRequest {
-                tenant_id: "tenant_a".to_owned(),
-                ontology_id: "people".to_owned(),
-                publication_id: "publication-1".to_owned(),
-                revision_id: merged.revision_id,
-            }))
-            .await?
-            .into_inner();
-        assert!(!retired.head_revision_id.is_empty());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn boundary_helpers_reject_invalid_endpoints_and_json() {
-        assert!(registry_client("not a URI").is_err());
-        assert!(registry_client("http://registry:50051").is_ok());
-        assert!(json_from_bytes(b"not-json").is_err());
-        assert!(json_from_bytes(br#"{"valid":true}"#).is_ok());
-        assert!(json_from_bytes(&vec![b' '; 16 * 1024 * 1024 + 1]).is_err());
-    }
-
-    #[test]
-    fn status_mapping_does_not_expose_serialization_errors() {
-        assert_eq!(
-            domain_status(anyhow::anyhow!("registry revision changed")).code(),
-            Code::Aborted
-        );
-        assert_eq!(
-            domain_status(anyhow::anyhow!("ontology unavailable")).code(),
-            Code::NotFound
-        );
-        assert_eq!(
-            domain_status(anyhow::anyhow!("invalid tenant")).code(),
-            Code::InvalidArgument
-        );
-        let storage = domain_status(anyhow::anyhow!(
-            "S3 tenant marker read failed: secret endpoint detail"
-        ));
-        assert_eq!(storage.code(), Code::Unavailable);
-        assert!(!storage.message().contains("secret"));
-        assert_eq!(invalid_status("invalid").code(), Code::InvalidArgument);
-        let internal = internal_status("secret serialization detail");
-        assert_eq!(internal.code(), Code::Internal);
-        assert!(!internal.message().contains("secret"));
-        assert!(optional_json_bytes(None).is_ok_and(|value| value.is_empty()));
-    }
-    #[tokio::test]
-    async fn ontology_authoring_metadata_and_history_round_trip_without_changing_the_model()
-    -> anyhow::Result<()> {
-        let service =
-            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
-        let first = service
-            .put_ontology(Request::new(put_ontology_request(
-                "base", None, true,
-            )))
-            .await?
-            .into_inner();
-        let mut request = put_ontology_request(
-            "ignored",
-            Some(first.revision_id.clone()),
-            false,
-        );
-        request.authoring_command_json = Some(serde_json::to_vec(
-            &serde_json::json!({"operation":"create_branch","branch":"experiment","from_branch":"main"}),
-        )?);
-        let branch = service
-            .put_ontology(Request::new(request))
-            .await?
-            .into_inner();
-        assert_eq!(branch.ontology_json, first.ontology_json);
-        let authoring: Value = serde_json::from_slice(&branch.authoring_json)?;
-        assert!(authoring.pointer("/branches/experiment").is_some());
-        let page = service
-            .list_ontology_history(Request::new(
-                proto::ListOntologyHistoryRequest {
-                    tenant_id: "tenant_a".into(),
-                    ontology_id: "people".into(),
-                    limit: 1,
-                    after_revision_id: None,
-                },
-            ))
-            .await?
-            .into_inner();
-        assert_eq!(page.items.len(), 1);
-        assert!(page.next_revision_id.is_some());
-        assert!(
-            service
-                .list_ontology_history(Request::new(
-                    proto::ListOntologyHistoryRequest {
-                        tenant_id: "tenant_b".into(),
-                        ontology_id: "people".into(),
-                        limit: 1,
-                        after_revision_id: None,
-                    }
-                ))
-                .await
-                .is_err()
-        );
-        Ok(())
-    }
-}
+#[path = "../tests/grpc_status.rs"]
+mod status_tests;

@@ -323,6 +323,8 @@ class IdentityPrototype(Base):
     modality: Mapped[str] = mapped_column(String, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
     observation_key: Mapped[str] = mapped_column(String, nullable=False)
+    gol_value: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    gol_receipt: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()")
     )

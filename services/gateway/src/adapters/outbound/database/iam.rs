@@ -12,6 +12,10 @@ use crate::application::ports::iam_store::{
     CedarPolicy, IamRole, IamStore, IamUser, RoleAssignment,
 };
 
+#[cfg(test)]
+#[path = "../../../../tests/gol_clearance.rs"]
+mod gol_clearance_tests;
+
 const HARD_LIMIT: usize = 100;
 const TENANT_ROLE_LIMIT: i64 = 256;
 const TENANT_POLICY_LIMIT: usize = 128;
@@ -303,6 +307,50 @@ impl PgIamStore {
 
 #[async_trait::async_trait]
 impl IamStore for PgIamStore {
+    /// Avoids caches so revocation and user deactivation apply at admission.
+    async fn gol_clearance(
+        &self,
+        tenant: &str,
+        user: &str,
+    ) -> Result<Option<galadril_ontology::authorization::Clearance>> {
+        use galadril_ontology::Classification;
+        use galadril_ontology::authorization::Clearance;
+
+        let mut transaction = self.database.tenant(tenant).await?;
+        let row=sqlx::query("SELECT c.classification,c.compartments FROM iam_ifc_clearances c JOIN iam_users u USING(tenant_id,user_id) WHERE c.tenant_id=$1 AND c.user_id=$2 AND u.is_active AND u.deleted_at IS NULL")
+            .bind(tenant).bind(user).fetch_optional(&mut *transaction).await.context("IFC clearance authority unavailable")?;
+        transaction
+            .commit()
+            .await
+            .context("IFC clearance transaction failed")?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let classification = match row.try_get::<i16, _>("classification")? {
+            0 => Classification::Public,
+            1 => Classification::Internal,
+            2 => Classification::Confidential,
+            3 => Classification::Restricted,
+            _ => bail!("invalid authoritative IFC classification"),
+        };
+        let compartments = row.try_get::<Vec<String>, _>("compartments")?;
+        anyhow::ensure!(
+            compartments.len() <= 128,
+            "authoritative IFC compartments exceed budget"
+        );
+        let mut clearance = Clearance::new(classification);
+        for compartment in compartments {
+            anyhow::ensure!(
+                compartment.len() <= 256,
+                "invalid authoritative IFC compartment"
+            );
+            clearance.compartments.insert(compartment.parse().map_err(
+                |_| anyhow::anyhow!("invalid authoritative IFC compartment"),
+            )?);
+        }
+        Ok(Some(clearance))
+    }
+
     async fn role_exists(&self, tenant: &str, role: &str) -> Result<bool> {
         let mut transaction = self.database.tenant(tenant).await?;
         let exists = sqlx::query_scalar(

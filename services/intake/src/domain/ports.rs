@@ -15,11 +15,11 @@ pub const HEADER_PIPELINE_REVISION: &str = "galadril-pipeline-revision";
 /// Rejects ambiguous tenant identifiers before touching a shared connection.
 pub fn validate_pipeline_tenant(tenant: &str) -> Result<()> {
     ensure!(
-        !tenant.is_empty() &&
-            tenant.len() <= 64 &&
-            tenant.bytes().all(|b| b.is_ascii_alphanumeric() ||
-                b == b'_' ||
-                b == b'-'),
+        !tenant.is_empty()
+            && tenant.len() <= 64
+            && tenant
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
         "Invalid pipeline tenant"
     );
     Ok(())
@@ -27,11 +27,11 @@ pub fn validate_pipeline_tenant(tenant: &str) -> Result<()> {
 
 fn validate_identity_segment(value: &str, label: &str) -> Result<()> {
     ensure!(
-        !value.is_empty() &&
-            value.len() <= 128 &&
-            value.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
-                byte == b'_' ||
-                byte == b'-'),
+        !value.is_empty()
+            && value.len() <= 128
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                || byte == b'_'
+                || byte == b'-'),
         "Invalid {label}"
     );
     Ok(())
@@ -127,7 +127,7 @@ pub trait EventProducer: Send + Sync {
 }
 
 /// Multi-tenant tenancy boundaries.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AuthzHints {
     /// Associated namespace.
     pub tenant: Option<String>,
@@ -145,6 +145,21 @@ pub struct AuthzHints {
     pub authentication_provenance: Option<String>,
     /// Stable scoped delegation identifier for cross-service lineage.
     pub delegation_id: Option<String>,
+    /// Opaque Gateway capability; Intake cannot create an IFC calculation.
+    pub gol_admission: Option<String>,
+}
+
+impl std::fmt::Debug for AuthzHints {
+    fn fmt(
+        &self,
+        formatter: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        formatter
+            .debug_struct("AuthzHints")
+            .field("tenant", &self.tenant)
+            .field("has_gol_admission", &self.gol_admission.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl AuthzHints {
@@ -188,6 +203,7 @@ impl AuthzHints {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         })
     }
 
@@ -225,6 +241,14 @@ impl AuthzHints {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .context("delegation identifier is required")?;
+        if self.gol_admission.as_deref().is_some_and(|handle| {
+            handle.is_empty()
+                || handle.len() > 4096
+                || handle.chars().any(char::is_whitespace)
+                || handle.chars().any(char::is_control)
+        }) {
+            anyhow::bail!("invalid GOL admission handle");
+        }
         let path_tenant = object_key
             .trim_start_matches('/')
             .split('/')
@@ -281,6 +305,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert_eq!(h.viewers_csv(), None);
     }
@@ -296,6 +321,7 @@ mod tests {
             resource: None,
             authentication_provenance: None,
             delegation_id: None,
+            gol_admission: None,
         };
         assert_eq!(h.viewers_csv().as_deref(), Some("user:a,user:b"));
     }
@@ -342,6 +368,7 @@ mod tests {
                 "https://issuer.example".to_owned(),
             ),
             delegation_id: Some("delegation-1".to_owned()),
+            gol_admission: None,
         };
         assert_eq!(
             trusted
@@ -377,6 +404,7 @@ mod tests {
                 "https://issuer.example".to_owned(),
             ),
             delegation_id: Some("delegation-1".to_owned()),
+            gol_admission: None,
         };
         let mut invalid = Vec::with_capacity(8);
 

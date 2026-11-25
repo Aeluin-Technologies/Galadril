@@ -20,7 +20,7 @@ use crate::application::usecases::audit::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
-use crate::application::usecases::causal::CausalService;
+use crate::application::usecases::causal::{CausalService, EVIDENCE_TYPE};
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::identity::IdentityService;
 use crate::application::usecases::search::{
@@ -607,9 +607,9 @@ impl ChatTools {
                 ToolRequest::Causal { entity_id } => {
                     ensure!(!entity_id.trim().is_empty() && entity_id.len() <= 256, "Invalid causal target");
                     let analysis = self.causal.latest(&scope.tenant_id, &scope.user_id, &context, &entity_id).await?;
-                    if analysis.is_some() {
+                    if let Some(analysis) = &analysis {
                         self.record_sources(&scope,
-                            &[source("entity_state", &entity_id, Some(&entity_id), None, None)]).await?;
+                            &[source(EVIDENCE_TYPE, &analysis.evidence_id(), Some(&entity_id), None, None)]).await?;
                     }
                     Ok(json!({"analyses": analysis.into_iter().collect::<Vec<_>>() }))
                 },
@@ -708,20 +708,21 @@ mod tests {
     #[test]
     fn chatbot_graph_excludes_unattributed_properties_for_every_actor() {
         use crate::application::ports::relations_store::{
-            GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
-            OntologyReference,
+            GolReference, GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
         };
 
         let projection = super::graph_evidence(GraphSubgraph {
             nodes: vec![GraphNode {
                 id: "entity_a".into(),
                 kind: GraphNodeKind::Entity,
-                ontology_ref: Some(OntologyReference {
+                ontology_ref: Some(GolReference {
                     tenant_id: "tenant_a".into(),
-                    ontology_id: "operations".into(),
-                    revision_id: "a".repeat(32),
-                    resource_id: "object.customer".into(),
-                    resource_kind: "object_type".into(),
+                    ontology_id: "operations.people".into(),
+                    ontology_version: "1.0.0".into(),
+                    source_revision: "a".repeat(32),
+                    generation_id: "b".repeat(32),
+                    symbol_key: "operations.people::Customer".into(),
+                    symbol_kind: "entity".into(),
                 }),
                 properties: serde_json::json!({"private_neighbor": "entity_b"}),
             }],

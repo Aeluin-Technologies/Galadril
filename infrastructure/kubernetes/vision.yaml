@@ -40,6 +40,10 @@ spec:
           value: grpc
         - name: DEPLOYMENT_ENVIRONMENT
           value: production
+        - name: GOL_WORKER_KEY_PATH
+          value: /run/gol-worker-secrets/worker-key
+        - name: GOL_GATEWAY_ENDPOINT
+          value: http://gateway:8081
         - name: VISION_BOOTSTRAP_PATH
           value: /etc/galadril/connectors.yaml
         - name: GRPC_DNS_RESOLVER
@@ -62,6 +66,9 @@ spec:
           limits:
             memory: 24Gi
         volumeMounts:
+        - name: gol-worker-key
+          mountPath: /run/gol-worker-secrets
+          readOnly: true
         - name: utils-service-key
           mountPath: /run/utils-service
           readOnly: true
@@ -84,6 +91,10 @@ spec:
         - --role
         - all
       volumes:
+      - name: gol-worker-key
+        secret:
+          secretName: gol-worker-key
+          defaultMode: 0440
       - name: utils-service-key
         secret:
           secretName: utils-email-service-key

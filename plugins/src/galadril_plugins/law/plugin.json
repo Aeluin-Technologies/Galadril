@@ -662,13 +662,133 @@
     "recoursadmin.json"
   ],
   "ontologies": [
-    "socle-ontology.json",
-    "ecritures-ontology.json",
-    "moyens-ontology.json",
-    "preuves-ontology.json",
-    "contentieux-ontology.json",
-    "administratif-ontology.json",
-    "judiciaire-ontology.json",
-    "penal-ontology.json"
+    {
+      "id": "law.socle",
+      "name": "Legal case foundations",
+      "version": "0.4.0",
+      "files": [
+        "socle.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    },
+    {
+      "id": "law.ecritures",
+      "name": "Écrits and filings",
+      "version": "0.4.0",
+      "files": [
+        "ecritures.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    },
+    {
+      "id": "law.moyens",
+      "name": "Moyens and legal citations",
+      "version": "0.4.0",
+      "files": [
+        "moyens.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    },
+    {
+      "id": "law.preuves",
+      "name": "Pièces and source documents",
+      "version": "0.4.0",
+      "files": [
+        "preuves.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    },
+    {
+      "id": "law.contentieux",
+      "name": "Shared litigation layers",
+      "version": "0.4.0",
+      "files": [
+        "contentieux.gol"
+      ],
+      "contracts": {
+        "law.algorithm.dossier": {
+          "mode": "required",
+          "targets": [
+            "law.socle::Case",
+            "law.socle::Proceeding",
+            "law.socle::Court",
+            "law.socle::Party",
+            "law.socle::CaseProceedings",
+            "law.socle::ProceedingCourt",
+            "law.socle::ProceedingClaimants",
+            "law.socle::ProceedingDefendants",
+            "law.socle::ProceedingAppeals",
+            "law.socle::ProceedingRelated",
+            "law.ecritures::Filing",
+            "law.preuves::Exhibit",
+            "law.ecritures::FilingProceeding",
+            "law.ecritures::ProceedingFilings",
+            "law.preuves::FilingExhibits",
+            "law.moyens::Plea",
+            "law.moyens::PleaProvisions",
+            "law.moyens::PleaJurisprudence"
+          ]
+        }
+      },
+      "bindings": {}
+    },
+    {
+      "id": "law.administratif",
+      "name": "Administrative litigation",
+      "version": "0.4.0",
+      "files": [
+        "administratif.gol"
+      ],
+      "contracts": {
+        "law.algorithm.dossier": {
+          "mode": "required",
+          "targets": [
+            "law.socle::Case",
+            "law.socle::Proceeding",
+            "law.socle::Court",
+            "law.socle::Party",
+            "law.socle::CaseProceedings",
+            "law.socle::ProceedingCourt",
+            "law.socle::ProceedingClaimants",
+            "law.socle::ProceedingDefendants",
+            "law.socle::ProceedingAppeals",
+            "law.socle::ProceedingRelated",
+            "law.ecritures::Filing",
+            "law.preuves::Exhibit",
+            "law.ecritures::FilingProceeding",
+            "law.ecritures::ProceedingFilings",
+            "law.preuves::FilingExhibits",
+            "law.moyens::Plea",
+            "law.moyens::PleaProvisions",
+            "law.moyens::PleaJurisprudence"
+          ]
+        }
+      },
+      "bindings": {}
+    },
+    {
+      "id": "law.judiciaire",
+      "name": "Civil litigation",
+      "version": "0.4.0",
+      "files": [
+        "judiciaire.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    },
+    {
+      "id": "law.penal",
+      "name": "Criminal proceedings",
+      "version": "0.4.0",
+      "files": [
+        "penal.gol"
+      ],
+      "contracts": {},
+      "bindings": {}
+    }
   ]
 }

@@ -1,0 +1,167 @@
+// Authored GOL contract; security identities remain external.
+
+ontology law.judiciaire version "0.4.0" {
+    import law.contentieux version "0.4.0" as LawContentieux;
+    import law.socle version "0.4.0" as LawSocle;
+    security label LegalData {
+        classification: Restricted;
+        compartments: [Legal];
+    }
+    enum ProceedingDegree { premier_degre, second_degre, hors_degre }
+    enum ProceedingStatus { a_introduire, en_cours, terminee }
+    entity Proceeding {
+        field number: Option<String> @label(LegalData);
+        field procedure: Option<String> @label(LegalData);
+        field degree: Option<ProceedingDegree> @label(LegalData);
+        field status: Option<ProceedingStatus> @label(LegalData);
+    }
+    enum CourtKind { tribunal_judiciaire, tribunal_proximite, conseil_prudhommes, tribunal_commerce, tribunal_paritaire_baux_ruraux, cour_appel, cour_cassation }
+    entity Court {
+        field name: String @label(LegalData);
+        field postal_address: String @label(LegalData);
+        field degree: Option<String> @label(LegalData);
+        field kind: CourtKind @label(LegalData);
+    }
+    relation ProceedingCourt {
+        role source: Proceeding [1..1];
+        role target: Court [0..*];
+    }
+    access Proceeding {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access ProceedingDegree {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access ProceedingStatus {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access Court {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access CourtKind {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+    access ProceedingCourt {
+        resource: "gol_resource";
+        permission read_access {
+            relation: "read";
+            cedar: "Gol::Action::\"read\"";
+        }
+        permission write_access {
+            relation: "write";
+            cedar: "Gol::Action::\"write\"";
+        }
+        permission describe {
+            relation: "describe";
+            cedar: "Gol::Action::\"describe\"";
+        }
+        permission transfer {
+            relation: "transfer";
+            cedar: "Gol::Action::\"transfer\"";
+        }
+        permission execute {
+            relation: "execute";
+            cedar: "Gol::Action::\"execute\"";
+        }
+    }
+}

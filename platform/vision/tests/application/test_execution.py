@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import pytest
 from galadril_ontology import (
-    BlockOntologyContract,
-    OntologyRuntimeManager,
-    OntologySliceRequest,
+    GolBlockContract,
+    GolRequest,
+    GolRuntimeManager,
 )
 from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
@@ -45,17 +45,24 @@ def _step() -> PipelineStep:
 def _command(
     route: str = "tenant-a/daily/rev1", **updates: object
 ) -> PipelineCommand:
-    return PipelineCommand.model_validate(
-        {
-            "correlation_id": uuid4(),
-            "tenant_id": "tenant-a",
-            "pipeline": route,
-            "step": "save",
-            "step_type": "sink",
-            "resource_class": ResourceClass.CPU,
-        }
-        | updates
-    )
+    values = {
+        "correlation_id": uuid4(),
+        "tenant_id": "tenant-a",
+        "pipeline": route,
+        "step": "save",
+        "step_type": "sink",
+        "resource_class": ResourceClass.CPU,
+        "admission": "opaque",
+    } | updates
+    payload = values.get("payload", {})
+    assert isinstance(payload, dict)
+    values["payload"] = {
+        **payload,
+        "record": {
+            "storage_path": f"s3://lake/{values['tenant_id']}/source/object"
+        },
+    }
+    return PipelineCommand.model_validate(values)
 
 
 def _route(name: str, tenant: str, handler: RecordingHandler) -> ExecutionRoute:
@@ -69,6 +76,19 @@ def _route(name: str, tenant: str, handler: RecordingHandler) -> ExecutionRoute:
     )
 
 
+class Admitted:
+    @asynccontextmanager
+    async def bind(
+        self,
+        request: GolRequest,
+        contract: GolBlockContract,
+        *,
+        admission: str | None,
+    ) -> AsyncIterator[None]:
+        assert admission == "opaque"
+        yield
+
+
 def test_selects_backend_by_published_route() -> None:
     first = RecordingHandler("postgres")
     second = RecordingHandler("alternative")
@@ -76,7 +96,8 @@ def test_selects_backend_by_published_route() -> None:
         (
             _route("tenant-a/daily/rev1", "tenant-a", first),
             _route("tenant-b/daily/rev1", "tenant-b", second),
-        )
+        ),
+        ontology_runtime=cast(GolRuntimeManager, Admitted()),
     )
     result = asyncio.run(
         executor.process(_command("tenant-b/daily/rev1", tenant_id="tenant-b"))
@@ -119,7 +140,9 @@ def test_snapshots_step_definitions_and_bindings() -> None:
         steps=(step,),
         handlers=bindings,
     )
-    executor = PipelineExecutor((route,))
+    executor = PipelineExecutor(
+        (route,), ontology_runtime=cast(GolRuntimeManager, Admitted())
+    )
     bindings.clear()
     assert step.params.model_extra is not None
     step.params.model_extra["marker"] = "changed"
@@ -174,15 +197,17 @@ def test_requires_at_least_one_route() -> None:
         PipelineExecutor(())
 
 
-def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> (
-    None
-):
+def test_compiled_child_requests_ontology_through_deployed_root() -> None:
     class Ontologies:
-        requests: list[OntologySliceRequest] = []
+        requests: list[GolRequest] = []
 
         @asynccontextmanager
         async def bind(
-            self, request: OntologySliceRequest, contract: BlockOntologyContract
+            self,
+            request: GolRequest,
+            contract: GolBlockContract,
+            *,
+            admission: str | None,
         ) -> AsyncIterator[None]:
             self.requests.append(request)
             yield
@@ -191,7 +216,7 @@ def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> 
     handler = RecordingHandler("child")
     child = PipelineStep.model_validate(
         {
-            "step": "save",
+            "step": "__linked_1",
             "type": "sink",
             "input_from": ["source"],
             "origin": {
@@ -209,19 +234,21 @@ def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> 
                 "daily",
                 "rev1",
                 (child,),
-                {"save": handler},
+                {"__linked_1": handler},
             ),
         ),
-        ontology_runtime=cast(OntologyRuntimeManager, ontology),
+        ontology_runtime=cast(GolRuntimeManager, ontology),
     )
     asyncio.run(
         executor.process(
-            _command(payload={"origin": {"pipeline_id": "forged"}})
+            _command(
+                step="__linked_1", payload={"origin": {"pipeline_id": "forged"}}
+            )
         )
     )
-    assert ontology.requests[0].pipeline_id == "child"
-    assert ontology.requests[0].pipeline_revision_id == "a" * 32
-    assert ontology.requests[0].block_id == "original"
+    assert ontology.requests[0].pipeline_id == "daily"
+    assert ontology.requests[0].pipeline_revision_id == "rev1"
+    assert ontology.requests[0].block_id == "__linked_1"
 
 
 if __name__ == "__main__":
@@ -247,7 +274,11 @@ def test_email_blocks_preserve_their_ontology_requirements(
 
         @asynccontextmanager
         async def bind(
-            self, request: OntologySliceRequest, contract: BlockOntologyContract
+            self,
+            request: GolRequest,
+            contract: GolBlockContract,
+            *,
+            admission: str | None,
         ) -> AsyncIterator[None]:
             self.calls += 1
             yield
@@ -262,7 +293,7 @@ def test_email_blocks_preserve_their_ontology_requirements(
             "input_from": ["source"],
             "capability_id": capability,
             "capability_version": "1.0.0",
-            "params": {"ontology_required_resources": ["object.mail"]}
+            "params": {"gol_required_symbols": ["communication.mail::Message"]}
             if explicit
             else {},
         }
@@ -279,14 +310,10 @@ def test_email_blocks_preserve_their_ontology_requirements(
                 {"save": handler},
             ),
         ),
-        ontology_runtime=cast(OntologyRuntimeManager, ontology),
+        ontology_runtime=cast(GolRuntimeManager, ontology),
     )
     asyncio.run(executor.process(_command(step_type=step.type)))
-    assert ontology.calls == int(
-        explicit
-        or capability
-        in {"utils.algorithm.email_context", "utils.algorithm.decide_reply"}
-    )
+    assert ontology.calls == 1
     assert len(handler.commands) == 1
 
 
@@ -294,7 +321,11 @@ def test_explicit_mail_ontology_flag_keeps_required_binding() -> None:
     class Ontologies:
         @asynccontextmanager
         async def bind(
-            self, request: OntologySliceRequest, contract: BlockOntologyContract
+            self,
+            request: GolRequest,
+            contract: GolBlockContract,
+            *,
+            admission: str | None,
         ) -> AsyncIterator[None]:
             raise CommandProcessingError("required binding unavailable")
             yield
@@ -321,7 +352,7 @@ def test_explicit_mail_ontology_flag_keeps_required_binding() -> None:
                 {"save": handler},
             ),
         ),
-        ontology_runtime=cast(OntologyRuntimeManager, Ontologies()),
+        ontology_runtime=cast(GolRuntimeManager, Ontologies()),
     )
     with pytest.raises(
         CommandProcessingError, match="required binding unavailable"

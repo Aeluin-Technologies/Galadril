@@ -3,7 +3,7 @@ name: galadril-e2e
 gateway:
   host: "127.0.0.1"
   port: 8081
-  max_body_bytes: 4096
+  max_body_bytes: 65536
   max_graphql_depth: 8
 
 scribe:
@@ -44,6 +44,8 @@ connectors:
     password: "galadril_app"
     maintenance_user: "galadril_maintenance"
     maintenance_password: "galadril_maintenance"
+    # The lookup budget covers both SQL and live authorization of stored candidates.
+    vector_search_timeout_ms: 120000
 
   spicedb:
     endpoint: "spicedb:50051"

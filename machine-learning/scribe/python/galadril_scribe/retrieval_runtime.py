@@ -411,7 +411,7 @@ class DocumentRuntime:
 
     async def extract(self, request: ExtractFacts) -> ExtractedFacts:
         policy = (
-            ExtractionPolicy.from_registry(request.ontology.ontology)
+            ExtractionPolicy.from_gol(request.ontology)
             if request.ontology is not None
             else ExtractionPolicy.active_registry()
         )

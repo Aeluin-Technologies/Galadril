@@ -33,6 +33,12 @@ spec:
           value: http://otel-collector.observability.svc.cluster.local:4317
         - name: OTEL_EXPORTER_OTLP_PROTOCOL
           value: grpc
+        - name: REGISTRY_GATEWAY_KEY_PATH
+          value: /run/registry-secrets/gateway-key
+        - name: GOL_ARTIFACT_BUCKET
+          value: ontology-artifacts
+        - name: GOL_AUTHORITY_CONFIG_PATH
+          value: /etc/gol/gol-authorities.json
         - name: DEPLOYMENT_ENVIRONMENT
           value: production
         - name: REGISTRY_BIND_ADDR
@@ -62,6 +68,12 @@ spec:
         - name: connectors
           mountPath: /etc/galadril
           readOnly: true
+        - name: registry-gateway-key
+          mountPath: /run/registry-secrets
+          readOnly: true
+        - name: gol-authorities
+          mountPath: /etc/gol
+          readOnly: true
         - name: tmp
           mountPath: /tmp
         - name: schemas
@@ -89,6 +101,13 @@ spec:
       - name: connectors
         secret:
           secretName: registry-connectors
+      - name: registry-gateway-key
+        secret:
+          secretName: registry-gateway-key
+          defaultMode: 0440
+      - name: gol-authorities
+        configMap:
+          name: galadril-gol-authorities
       - name: tmp
         emptyDir: {}
       - name: schemas

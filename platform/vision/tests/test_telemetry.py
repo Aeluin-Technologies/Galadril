@@ -124,16 +124,28 @@ def test_otlp_context_processor_injects_valid_trace_context(
 
 
 def test_configure_logging_idempotency() -> None:
-    """Installs exactly one non-console handler on repeated configuration."""
+    """Keeps one primary handler and one dedicated startup handler."""
     root_logger = logging.getLogger()
     configure_logging(default_level="DEBUG", enable_json_format=True)
-    assert len(root_logger.handlers) == 1
+    assert len(root_logger.handlers) == 2
     assert isinstance(root_logger.handlers[0], logging.NullHandler)
 
     mock_provider = MagicMock()
     configure_logging(default_level="INFO", otlp_logger_provider=mock_provider)
-    assert len(root_logger.handlers) == 1
+    assert len(root_logger.handlers) == 2
     assert not isinstance(root_logger.handlers[0], logging.NullHandler)
+
+
+def test_vision_startup_state_survives_without_otlp(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging()
+    startup = structlog.get_logger("vision.startup.test")
+    startup.warning("pipeline_publication_pending")
+    startup.warning("unrelated_event", reason="protected value")
+    assert capsys.readouterr().err.splitlines() == [
+        '{"event.name":"pipeline.publication.pending"}'
+    ]
 
 
 def test_event_schema_normalizes_structlog_and_standard_records() -> None:

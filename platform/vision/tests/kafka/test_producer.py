@@ -1,8 +1,11 @@
 """Unit tests for the FastStream JSON publisher adapter."""
 
-from unittest.mock import AsyncMock, MagicMock
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from galadril_ontology import GolDenied
 from galadril_vision.common.config import KafkaConnectorConfig
 from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
@@ -27,9 +30,17 @@ async def test_json_producer_uses_confirmed_faststream_publish() -> None:
     broker.publish = AsyncMock()
     producer = KafkaJsonProducer(broker)
 
-    await producer.produce_json(
-        topic="authz.dlq", key="tenant:object", payload={"attempt": 3}
-    )
+    @asynccontextmanager
+    async def scope(**kwargs: object) -> AsyncIterator[None]:
+        yield
+
+    with patch(
+        "galadril_vision.connectors.kafka.producer.protected_gol_state_effect",
+        side_effect=scope,
+    ):
+        await producer.produce_json(
+            topic="authz.dlq", key="tenant:object", payload={"attempt": 3}
+        )
 
     broker.publish.assert_awaited_once_with(
         {"attempt": 3},
@@ -43,6 +54,26 @@ async def test_json_producer_uses_confirmed_faststream_publish() -> None:
 def anyio_backend() -> str:
     """Runs async contracts on the production asyncio backend."""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_authz_dead_letter_without_provenance_discloses_no_payload() -> (
+    None
+):
+    """A background maintenance task cannot reset a source's IFC restrictions."""
+    broker = MagicMock()
+    broker.publish = AsyncMock()
+    producer = KafkaJsonProducer(broker)
+    with pytest.raises(GolDenied):
+        await producer.produce_json(
+            topic="authz.dlq",
+            key="tenant:protected-object",
+            payload={
+                "tuples": [{"subject": "private-principal"}],
+                "error": "private-value",
+            },
+        )
+    broker.publish.assert_not_awaited()
 
 
 if __name__ == "__main__":

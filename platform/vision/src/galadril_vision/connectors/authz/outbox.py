@@ -107,8 +107,8 @@ class AuthzOutboxFlusher:
                 for row in rows:
                     await self._flush_one(conn=conn, row=row)
 
-            except Exception as exc:
-                logger.error("authz_outbox_loop_failed", error=str(exc))
+            except Exception:
+                logger.error("authz_outbox_loop_failed", outcome="unavailable")
                 await asyncio.sleep(1.0)
 
     async def _claim_due_rows(
@@ -276,12 +276,12 @@ class AuthzOutboxFlusher:
             zed_token = await self._writer.write_relationships(
                 row.tenant_id, row.tuples
             )
-        except Exception as exc:
+        except Exception:
             logger.warning(
                 "spicedb_write_failed",
                 outbox_id=row.id,
                 attempt=attempt_n,
-                error=str(exc),
+                outcome="unavailable",
             )
 
             if attempt_n >= max_local:
@@ -289,7 +289,7 @@ class AuthzOutboxFlusher:
                     conn=conn,
                     row=row,
                     attempt_n=attempt_n,
-                    error=str(exc),
+                    error="Authorization materialization unavailable",
                 )
                 return
 

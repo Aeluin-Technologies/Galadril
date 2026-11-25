@@ -294,3 +294,34 @@ def anyio_backend() -> str:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+@pytest.mark.anyio
+async def test_outbox_failures_do_not_log_private_backend_details(
+    mock_dependencies: MockDependencies,
+) -> None:
+    spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
+    flusher = AuthzOutboxFlusher(
+        spicedb_cfg=spicedb_cfg,
+        kafka_cfg=kafka_cfg,
+        dlq_producer=dlq_producer,
+        writer=writer,
+    )
+    stop = asyncio.Event()
+
+    async def fail(*, conn: object, limit: int) -> list[OutboxRow]:
+        stop.set()
+        raise RuntimeError("private-principal protected-resource secret-value")
+
+    with (
+        patch.object(flusher, "_claim_due_rows", side_effect=fail),
+        patch("galadril_vision.connectors.authz.outbox.logger") as telemetry,
+        patch(
+            "galadril_vision.connectors.authz.outbox.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        await flusher.run_forever(conn=_mock_connection(), stop_event=stop)
+    assert "private-principal" not in str(telemetry.mock_calls)
+    assert "protected-resource" not in str(telemetry.mock_calls)
+    assert "secret-value" not in str(telemetry.mock_calls)

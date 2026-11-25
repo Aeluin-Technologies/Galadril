@@ -1,11 +1,5 @@
-"""Versioned ontology persistence connectors."""
+"""Trusted, generation-pinned GOL runtime composition."""
 
-from galadril_vision.connectors.version.registry import (
-    VisionRegistryOntologyStore,
-    build_vision_ontology_runtime,
-)
+from .registry import build_vision_gol_runtime
 
-__all__ = [
-    "VisionRegistryOntologyStore",
-    "build_vision_ontology_runtime",
-]
+__all__ = ["build_vision_gol_runtime"]

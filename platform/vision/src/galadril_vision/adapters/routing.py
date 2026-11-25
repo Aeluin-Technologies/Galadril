@@ -9,6 +9,7 @@ from typing import Protocol
 import httpx
 import regex
 import structlog
+from galadril_ontology import GolDenied, protected_gol_effect
 from galadril_pipeline.branching import (
     ModelAlias,
     ReasoningEffort,
@@ -22,6 +23,27 @@ from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from galadril_vision.application.errors import CommandProcessingError
+from galadril_vision.application.ontology import ontology_contract
+
+_GOL_PARAMETERS = frozenset(
+    {
+        "gol_transfer_symbol_key",
+        "gol_state_symbol_key",
+        "gol_derived_symbol_key",
+        "gol_required_symbols",
+        "gol_allowed_kinds",
+    }
+)
+
+
+def _business_params(step: PipelineStep) -> dict[str, JsonValue]:
+    """Security contracts are validated separately from strict algorithm options."""
+    ontology_contract(step)
+    return {
+        key: value
+        for key, value in (step.params.model_extra or {}).items()
+        if key not in _GOL_PARAMETERS
+    }
 
 
 class RegexParams(BaseModel):
@@ -56,7 +78,7 @@ class RegexRouter:
     __slots__ = ("_params", "_pattern")
 
     def __init__(self, step: PipelineStep) -> None:
-        self._params = RegexParams.model_validate(step.params.model_extra or {})
+        self._params = RegexParams.model_validate(_business_params(step))
         if (
             not {self._params.match_branch, self._params.default_branch}
             <= step.branches.keys()
@@ -109,7 +131,7 @@ class SlmRouter:
         *,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._params = SlmParams.model_validate(step.params.model_extra or {})
+        self._params = SlmParams.model_validate(_business_params(step))
         self._request = RoutingRequest(
             text="",
             labels=tuple(step.branches),
@@ -125,52 +147,63 @@ class SlmRouter:
     async def execute(
         self, command: PipelineCommand, step: PipelineStep
     ) -> dict[str, JsonValue]:
-        del step
-        text = _text(
-            command.payload, self._params.field, self._params.max_characters
-        )
-        if self._params.metadata_fields:
-            metadata: dict[str, JsonValue] = {}
-            for field in self._params.metadata_fields:
-                try:
-                    metadata[field] = _value(command.payload, field)
-                except ValueError:
-                    metadata[field] = None
-            text = json.dumps(
-                {"content": text, "metadata": metadata}, ensure_ascii=False
+        target = (step.params.model_extra or {}).get("gol_transfer_symbol_key")
+        if not isinstance(target, str):
+            raise GolDenied("GOL external transfer unavailable")
+        async with protected_gol_effect(
+            operation="transfer",
+            target=target,
+            tenant_id=command.tenant_id,
+            destination="llm",
+            purpose="classification",
+        ):
+            text = _text(
+                command.payload, self._params.field, self._params.max_characters
             )
-            if len(text) > 65536:
-                raise ValueError("Routing content and metadata exceed limit")
-        request = self._request.model_copy(update={"text": text})
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                follow_redirects=False, trust_env=False
-            )
-        headers: dict[str, str] = {"content-type": "application/json"}
-        propagate.inject(headers)
-        async with asyncio.timeout(self._params.timeout_seconds + 2):
-            async with self._client.stream(
-                "POST",
-                self._endpoint,
-                content=request.model_dump_json(),
-                headers=headers,
-                timeout=self._params.timeout_seconds + 2,
-            ) as response:
-                response.raise_for_status()
-                data = bytearray()
-                async for part in response.aiter_bytes():
-                    if len(data) + len(part) > 4096:
-                        raise ValueError("Routing decision exceeds limit")
-                    data.extend(part)
-        decision = RoutingDecision.model_validate_json(data)
-        if decision.branch not in self._request.labels:
-            raise ValueError("Scribe returned an undeclared branch")
-        return {
-            **command.payload,
-            "branch": decision.branch,
-            "routing_model": decision.model_alias,
-            "routing_fallback": decision.fallback,
-        }
+            if self._params.metadata_fields:
+                metadata: dict[str, JsonValue] = {}
+                for field in self._params.metadata_fields:
+                    try:
+                        metadata[field] = _value(command.payload, field)
+                    except ValueError:
+                        metadata[field] = None
+                text = json.dumps(
+                    {"content": text, "metadata": metadata}, ensure_ascii=False
+                )
+                if len(text) > 65536:
+                    raise ValueError(
+                        "Routing content and metadata exceed limit"
+                    )
+            request = self._request.model_copy(update={"text": text})
+            if self._client is None:
+                self._client = httpx.AsyncClient(
+                    follow_redirects=False, trust_env=False
+                )
+            headers: dict[str, str] = {"content-type": "application/json"}
+            propagate.inject(headers)
+            async with asyncio.timeout(self._params.timeout_seconds + 2):
+                async with self._client.stream(
+                    "POST",
+                    self._endpoint,
+                    content=request.model_dump_json(),
+                    headers=headers,
+                    timeout=self._params.timeout_seconds + 2,
+                ) as response:
+                    response.raise_for_status()
+                    data = bytearray()
+                    async for part in response.aiter_bytes():
+                        if len(data) + len(part) > 4096:
+                            raise ValueError("Routing decision exceeds limit")
+                        data.extend(part)
+            decision = RoutingDecision.model_validate_json(data)
+            if decision.branch not in self._request.labels:
+                raise ValueError("Scribe returned an undeclared branch")
+            return {
+                **command.payload,
+                "branch": decision.branch,
+                "routing_model": decision.model_alias,
+                "routing_fallback": decision.fallback,
+            }
 
 
 class _DecisionHandler(Protocol):
@@ -194,9 +227,7 @@ class MetadataRouter:
     __slots__ = ("_params",)
 
     def __init__(self, step: PipelineStep) -> None:
-        self._params = MetadataParams.model_validate(
-            step.params.model_extra or {}
-        )
+        self._params = MetadataParams.model_validate(_business_params(step))
         if (
             not {self._params.match_branch, self._params.default_branch}
             <= step.branches.keys()
@@ -234,9 +265,7 @@ class ConditionRouter:
         from galadril_pipeline.config import StepType
         from galadril_pipeline.config.conditions import ConditionParams
 
-        self._params = ConditionParams.model_validate(
-            step.params.model_extra or {}
-        )
+        self._params = ConditionParams.model_validate(_business_params(step))
         self._filter = step.type is StepType.FILTER
         if (
             not self._filter

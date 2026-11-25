@@ -83,6 +83,7 @@ py_test(
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//anyio",
         "@pip//coverage",
+        "@pip//licorne",  # keep: coverage runs the native identity smoke test
         "@pip//pytest",
     ],
 )

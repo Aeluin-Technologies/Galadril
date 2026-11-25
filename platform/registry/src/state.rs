@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// Complete reconstructible tenant projection stored at one lakeFS commit.
 pub struct TenantState {
@@ -15,13 +15,13 @@ pub struct TenantState {
     pub pipelines: BTreeMap<String, PipelineRecord>,
     #[serde(default)]
     /// Current ontology records keyed by tenant-local ontology ID.
-    pub ontologies: BTreeMap<String, OntologyRecord>,
+    pub ontologies: BTreeMap<String, GolSourceRecord>,
     #[serde(default)]
     /// Pipeline block bindings keyed by an internal composite identity.
-    pub bindings: BTreeMap<String, OntologyBindingRecord>,
+    pub bindings: BTreeMap<String, GolBindingRecord>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// Current pipeline projection embedded in an immutable tenant snapshot.
 pub struct PipelineRecord {
@@ -55,75 +55,55 @@ pub struct PipelineRecord {
     pub deleted_at_ms: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Authored GOL package metadata stored at an immutable lakeFS revision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// Current ontology projection and optional production pointer.
-pub struct OntologyRecord {
-    /// Collaboration metadata never participates in semantic model hashes.
-    #[serde(default)]
-    pub authoring: crate::ontology_authoring::OntologyAuthoringState,
-    /// Tenant-local stable ontology identity.
+pub struct GolSourceRecord {
+    /// Tenant-local logical ontology identity.
     pub ontology_id: String,
-    /// Human-readable ontology name.
+    /// Author-supplied catalog name.
     pub display_name: String,
-    /// Validated canonical ontology document.
-    pub ontology: Value,
-    /// Gateway-authenticated revision author.
+    /// Paths whose exact UTF-8 contents are separate lakeFS `.gol` objects.
+    pub paths: Vec<String>,
+    /// SHA-256 of framed, path-normalized source bytes, independent of
+    /// symbols.
+    pub source_digest: String,
+    /// Syntax-only declared module names, used for operational dependency
+    /// guards.
+    pub declared_modules: std::collections::BTreeSet<String>,
+    /// Syntax-only imports; absence conservatively marks an unfinished draft.
+    pub imports: Option<std::collections::BTreeSet<String>>,
+    /// Changed source bytes; ordinary metadata loads never fetch these
+    /// objects.
+    #[serde(skip)]
+    pub files: Vec<crate::gol::GolFile>,
+    /// Authenticated source author.
     pub author: String,
-    /// Author-supplied revision message.
-    pub message: String,
     /// Creation time in Unix milliseconds.
     pub created_at_ms: i64,
-    /// Sole active or most recently retired production publication.
-    pub production_publication: Option<OntologyPublicationRecord>,
+    /// Last source mutation time in Unix milliseconds.
+    pub updated_at_ms: i64,
+    /// Optimistic source revision fencing a retryable cross-store deletion.
+    pub deletion_base: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// A pipeline-owned immutable source/generation selection, without raw IR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// Production ontology pointer and reproducibility metadata.
-pub struct OntologyPublicationRecord {
-    /// Gateway-generated publication identity.
-    pub publication_id: String,
-    /// Immutable lakeFS commit containing the ontology.
-    pub revision_id: String,
-    /// Production lifecycle value.
-    pub lifecycle: String,
-    /// Caller-owned descriptive metadata.
-    pub metadata: Value,
-    /// Base ontology version represented by the artifact.
-    pub base_version: String,
-    /// Canonical base ontology content hash.
-    pub base_hash: String,
-    /// Canonical effective ontology content hash.
-    pub effective_hash: String,
-    /// Author copied from the immutable ontology revision.
-    pub author: String,
-    /// Message copied from the immutable ontology revision.
-    pub message: String,
-    /// Publication time in Unix milliseconds.
-    pub published_at_ms: i64,
-    /// Retirement time in Unix milliseconds, when retired.
-    pub retired_at_ms: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-/// Validated mapping from one pipeline block to an ontology slice.
-pub struct OntologyBindingRecord {
+pub struct GolBindingRecord {
     /// Tenant-local pipeline identity.
     pub pipeline_id: String,
-    /// Pipeline step receiving the ontology slice.
+    /// Executable block receiving the contract.
     pub block_id: String,
-    /// Tenant-local published ontology identity.
+    /// Logical ontology package identity.
     pub ontology_id: String,
-    /// Explicit ontology resource identities to select.
-    pub resource_ids: Vec<String>,
-    /// Ontology resource kinds to select.
-    pub resource_kinds: Vec<String>,
-    /// Whether semantic dependency closure is included.
-    pub include_dependencies: bool,
-    /// Caller-owned descriptive metadata.
-    pub metadata: Value,
+    /// Exact atomically published generation.
+    pub generation: String,
+    /// Immutable lakeFS source revision behind this generation.
+    pub source_revision: String,
+    /// Selected logical symbols; empty requests capture all approved
+    /// candidates.
+    pub symbols: Vec<String>,
     /// Binding update time in Unix milliseconds.
     pub updated_at_ms: i64,
 }

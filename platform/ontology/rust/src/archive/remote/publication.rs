@@ -10,7 +10,7 @@ use tokio::time::Instant;
 use super::s3::Condition;
 use super::{Artifact, Generation, RemoteError, RemoteOptions, RemoteStore};
 #[cfg(feature = "parser")]
-use super::{Window, within};
+use super::{PublicationProvenance, Window, within};
 
 const MANIFEST: &str = "manifest.json";
 const MANIFEST_BYTES: usize = 64 * 1024;
@@ -26,6 +26,8 @@ pub(super) struct Manifest {
     // Every CAS needs a fresh ETag, including when an interleaving restores
     // the previous semantic state.
     revision: Generation,
+    // Deactivation fences staged writers even when active was already None.
+    fence: Generation,
     pub active: Option<Artifact>,
     pending: BTreeMap<Generation, Status>,
 }
@@ -51,6 +53,7 @@ pub struct Staged {
     store: RemoteStore,
     artifact: Artifact,
     expected: Option<Generation>,
+    fence: Generation,
     lifetime: Window,
 }
 
@@ -67,17 +70,18 @@ pub struct Cleanup {
 impl Manifest {
     fn new(options: &RemoteOptions) -> Self {
         Self {
-            version: 1,
+            version: 2,
             reader_ms: options.reader_window.as_millis() as u64,
             publisher_ms: options.publication_window.as_millis() as u64,
             revision: Generation::new(),
+            fence: Generation::new(),
             active: None,
             pending: BTreeMap::new(),
         }
     }
 
     fn validate(&self, options: &RemoteOptions) -> Result<(), RemoteError> {
-        if self.version != 1 ||
+        if self.version != 2 ||
             u128::from(self.reader_ms) != options.reader_window.as_millis() ||
             u128::from(self.publisher_ms) !=
                 options.publication_window.as_millis()
@@ -89,7 +93,11 @@ impl Manifest {
                 self.pending.contains_key(&artifact.id) ||
                     artifact.etag.is_empty() ||
                     artifact.bytes <
-                        crate::archive::container::HEADER_LEN as u64
+                        crate::archive::container::HEADER_LEN as u64 ||
+                    artifact
+                        .provenance
+                        .as_ref()
+                        .is_some_and(|provenance| !provenance.valid())
             })
         {
             return Err(RemoteError::Integrity);
@@ -141,7 +149,7 @@ impl RemoteStore {
         &self,
         expected: Option<Generation>,
         id: Generation,
-    ) -> Result<(), RemoteError> {
+    ) -> Result<Generation, RemoteError> {
         for _ in 0..CAS_TRIES {
             let mut current = self.load().await?;
             if current.state.active.as_ref().map(|artifact| artifact.id) !=
@@ -154,9 +162,11 @@ impl RemoteStore {
                 return Err(RemoteError::Capacity);
             }
             current.state.pending.insert(id, Status::Staging);
+            let fence = current.state.fence;
             match self.commit(&mut current).await {
                 Err(RemoteError::Conflict) => continue,
-                result => return result,
+                Ok(()) => return Ok(fence),
+                Err(error) => return Err(error),
             }
         }
         Err(RemoteError::Conflict)
@@ -170,11 +180,41 @@ impl RemoteStore {
         archive: &super::super::CompiledArchive,
         expected: Option<Generation>,
     ) -> Result<Staged, RemoteError> {
+        self.stage_inner(archive, expected, None).await
+    }
+
+    /// Reserves, uploads, and verifies an artifact with atomic host
+    /// provenance.
+    ///
+    /// Registry rechecks source existence after staging and before activation
+    /// so a concurrent source deletion cannot revive a removed ontology.
+    #[cfg(feature = "parser")]
+    pub async fn stage_with_provenance(
+        &self,
+        archive: &super::super::CompiledArchive,
+        expected: Option<Generation>,
+        provenance: PublicationProvenance,
+    ) -> Result<Staged, RemoteError> {
+        if !provenance.valid() ||
+            provenance.modules != archive.versions().ontologies
+        {
+            return Err(RemoteError::Configuration);
+        }
+        self.stage_inner(archive, expected, Some(provenance)).await
+    }
+
+    #[cfg(feature = "parser")]
+    async fn stage_inner(
+        &self,
+        archive: &super::super::CompiledArchive,
+        expected: Option<Generation>,
+        provenance: Option<PublicationProvenance>,
+    ) -> Result<Staged, RemoteError> {
         let lifetime = Window::new(self.options.publication_window);
         within(lifetime, async {
             self.storage.ensure_unversioned().await?;
             let id = Generation::new();
-            self.reserve(expected, id).await?;
+            let fence = self.reserve(expected, id).await?;
             let bytes = archive.bytes();
             let key = artifact_key(id);
             let etag = self
@@ -193,8 +233,10 @@ impl RemoteStore {
                     pin: archive.pin().0,
                     bytes: bytes.len() as u64,
                     etag,
+                    provenance,
                 },
                 expected,
+                fence,
                 lifetime,
             })
         })
@@ -209,6 +251,65 @@ impl RemoteStore {
         expected: Option<Generation>,
     ) -> Result<Generation, RemoteError> {
         self.stage(archive, expected).await?.activate().await
+    }
+
+    /// Activates provenance and bytes through the same manifest CAS.
+    #[cfg(feature = "parser")]
+    pub async fn publish_with_provenance(
+        &self,
+        archive: &super::super::CompiledArchive,
+        expected: Option<Generation>,
+        provenance: PublicationProvenance,
+    ) -> Result<Generation, RemoteError> {
+        self.stage_with_provenance(archive, expected, provenance)
+            .await?
+            .activate()
+            .await
+    }
+
+    /// Deactivates the selected generation and fences all earlier staging.
+    ///
+    /// Fencing an empty manifest is intentional: a pending initial publisher
+    /// must not resurrect a source removed before its first activation.
+    pub async fn deactivate(
+        &self,
+        expected: Option<Generation>,
+    ) -> Result<(), RemoteError> {
+        self.storage.ensure_unversioned().await?;
+        for _ in 0..CAS_TRIES {
+            let mut current = self.load().await?;
+            if current.state.active.as_ref().map(|artifact| artifact.id) !=
+                expected
+            {
+                return Err(RemoteError::Conflict);
+            }
+            if current.state.active.is_some() &&
+                current.state.pending.len() == MAX_PENDING
+            {
+                return Err(RemoteError::Capacity);
+            }
+            current.state.fence = Generation::new();
+            if let Some(active) = current.state.active.take() {
+                current.state.pending.insert(active.id, Status::Retired);
+            }
+            match self.commit(&mut current).await {
+                Ok(()) => {
+                    tracing::info!(event.name = "gol.remote.deactivated");
+                    return Ok(());
+                },
+                Err(RemoteError::Conflict) => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(RemoteError::Conflict)
+    }
+
+    /// Retires an exact active generation while preserving existing leases.
+    pub async fn retire(
+        &self,
+        expected: Generation,
+    ) -> Result<(), RemoteError> {
+        self.deactivate(Some(expected)).await
     }
 
     /// Starts observing candidates for deferred cleanup.
@@ -261,6 +362,12 @@ impl RemoteStore {
 
 #[cfg(feature = "parser")]
 impl Staged {
+    /// Borrows the private catalog before trusted preactivation provisioning.
+    #[must_use]
+    pub fn provenance(&self) -> Option<&PublicationProvenance> {
+        self.artifact.provenance.as_ref()
+    }
+
     /// Switches the operational manifest by compare-and-swap.
     pub async fn activate(self) -> Result<Generation, RemoteError> {
         let id = self.artifact.id;
@@ -270,6 +377,7 @@ impl Staged {
                 let mut current = self.store.load().await?;
                 if current.state.active.as_ref().map(|artifact| artifact.id) !=
                     self.expected ||
+                    current.state.fence != self.fence ||
                     current.state.pending.get(&id) != Some(&Status::Staging)
                 {
                     return Err(RemoteError::Conflict);

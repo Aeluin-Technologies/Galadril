@@ -6,13 +6,17 @@ use std::sync::Arc;
 use anyhow::{Context, Result, ensure};
 use config::{Config, File, FileFormat};
 use galadril_registry::domain::Registry;
+use galadril_registry::gol::{GolAuthorityConfig, registered_external_types};
+use galadril_registry::gol_service::GolPublicationConfig;
 use galadril_registry::grpc::RegistryGrpc;
 use galadril_registry::proto::registry_server::RegistryServer;
 use galadril_registry::storage::{LakeFsConfig, LakeFsStore, S3Config};
 use galadril_telemetry::{ConfigureTelemetry, TelemetryConfig};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use tonic::transport::Server;
+
+mod metadata;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -22,6 +26,15 @@ struct ServiceConfig {
     bind: SocketAddr,
     lakefs: LakeFsConfig,
     s3: S3Config,
+    gol: Option<GolServiceConfig>,
+}
+
+#[derive(Debug)]
+struct GolServiceConfig {
+    artifact_bucket: String,
+    authority_path: String,
+    spicedb_endpoint: String,
+    spicedb_token: SecretString,
 }
 
 #[derive(Deserialize)]
@@ -32,6 +45,13 @@ struct BootstrapConfig {
 #[derive(Deserialize)]
 struct BootstrapConnectors {
     s3: BootstrapS3,
+    spicedb: Option<BootstrapSpiceDb>,
+}
+
+#[derive(Deserialize)]
+struct BootstrapSpiceDb {
+    endpoint: String,
+    token: SecretString,
 }
 
 #[derive(Deserialize)]
@@ -102,13 +122,54 @@ impl ServiceConfig {
             .context("REGISTRY_STORAGE_NAMESPACE is required")?;
         let repository_prefix = lookup("REGISTRY_REPOSITORY_PREFIX")
             .unwrap_or_else(|| "galadril".to_owned());
+        let spicedb = bootstrap.connectors.spicedb;
         let s3 = bootstrap.connectors.s3;
         ensure!(
             storage_namespace == format!("s3://{}/", s3.bucket),
             "Registry storage namespace must be the connectors.s3 bucket root"
         );
+        let gol = match (
+            lookup("GOL_ARTIFACT_BUCKET"),
+            lookup("GOL_AUTHORITY_CONFIG_PATH"),
+        ) {
+            (None, None) => None,
+            (Some(bucket), Some(path)) => {
+                ensure!(
+                    bucket != s3.bucket,
+                    "GOL artifact bucket must differ from the lakeFS source bucket"
+                );
+                ensure!(
+                    (3..=63).contains(&bucket.len()) &&
+                        bucket
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() ||
+                                byte.is_ascii_digit() ||
+                                matches!(byte, b'-' | b'.')),
+                    "invalid GOL artifact bucket"
+                );
+                ensure!(
+                    matches!(
+                        path.as_str(),
+                        "/etc/galadril/gol-authorities.json" |
+                            "/etc/gol/gol-authorities.json" |
+                            "/gol-authorities.json"
+                    ),
+                    "GOL authority path must select a supported backend configuration"
+                );
+                Some(GolServiceConfig {
+                    artifact_bucket: bucket,
+                    authority_path: path,
+                    spicedb_endpoint:lookup("SPICEDB_ENDPOINT").or_else(||spicedb.as_ref().map(|config|config.endpoint.clone())).context("approved metadata authority endpoint is required")?,
+                    spicedb_token:lookup("SPICEDB_TOKEN").map(SecretString::from).or_else(||spicedb.map(|config|config.token)).context("approved metadata authority credentials are required")?,
+                })
+            },
+            _ => anyhow::bail!(
+                "GOL_ARTIFACT_BUCKET and GOL_AUTHORITY_CONFIG_PATH must be configured together"
+            ),
+        };
         Ok(Self {
             bind,
+            gol,
             lakefs: LakeFsConfig {
                 endpoint,
                 access_key,
@@ -138,8 +199,48 @@ async fn main() -> Result<()> {
     let result = async {
         let config = ServiceConfig::from_environment()?;
         let store = LakeFsStore::new(config.lakefs, config.s3)?;
-        let registry = Arc::new(Registry::new(store));
+        let artifact_client = store.artifact_client();
+        let mut registry = Registry::new(store);
+        if let Some(gol) = config.gol {
+            let bytes = galadril_registry::deployment_file::DeploymentFile::Authority
+                .read(std::path::Path::new(&gol.authority_path))
+                .context("approved GOL authority configuration unavailable")?;
+            let authority: GolAuthorityConfig = serde_json::from_slice(&bytes)
+                .context("approved GOL authority configuration invalid")?;
+            let metadata = metadata::SpiceDbMetadata::connect(
+                &gol.spicedb_endpoint,
+                gol.spicedb_token.expose_secret(),
+            )
+            .await?;
+            registry = registry.with_gol(GolPublicationConfig::new(
+                artifact_client,
+                gol.artifact_bucket,
+                authority,
+                registered_external_types()?,
+                Arc::new(metadata),
+            )?);
+        } else {
+            tracing::warn!(
+                event.name = "registry.gol.publication_disabled",
+                reason = "approved_authority_configuration_absent"
+            );
+        }
+        let registry = Arc::new(registry);
         let service = RegistryGrpc::new(registry);
+        let service = if let Some(path) =
+            std::env::var_os("REGISTRY_GATEWAY_KEY_PATH")
+        {
+            service.with_gateway_key(
+                &galadril_registry::deployment_file::DeploymentFile::RegistryKey
+                    .read_key(std::path::Path::new(&path))?,
+            )?
+        } else {
+            tracing::warn!(
+                event.name = "registry.gol.source_channel_disabled",
+                reason = "gateway_credential_absent"
+            );
+            service
+        };
         let (health_reporter, health_service) =
             tonic_health::server::health_reporter();
         health_reporter
@@ -165,6 +266,22 @@ mod tests {
     use secrecy::ExposeSecret;
 
     use super::*;
+
+    #[test]
+    fn gol_publication_requires_a_separate_bucket_and_explicit_authority() {
+        let configured =
+            ServiceConfig::from_yaml_and_lookup(YAML, |name| match name {
+                "LAKEFS_ACCESS_KEY_ID" => Some("access".into()),
+                "LAKEFS_SECRET_ACCESS_KEY" => Some("secret".into()),
+                "REGISTRY_STORAGE_NAMESPACE" => Some("s3://lake/".into()),
+                "GOL_ARTIFACT_BUCKET" => Some("lake".into()),
+                "GOL_AUTHORITY_CONFIG_PATH" => {
+                    Some("/etc/galadril/gol-authorities.json".into())
+                },
+                _ => None,
+            });
+        assert!(configured.is_err());
+    }
 
     #[test]
     fn ambient_registry_binding_is_explicit_and_fail_closed() {

@@ -28,6 +28,7 @@ RLS-visible row never implies permission to use it.
 | `document_plugin` | `view`, `use`, `manage` | Explicit tenant activation of installed plugin templates; revocation removes template visibility and use | Gateway |
 | `document` | `view`, `edit`, `delete`, `share`, `manage` | Document operations | Document owner |
 | `ontology` | `view`, `edit`, `delete`, `publish`, `manage` | Ontology inspection, publication, and retirement | Gateway/ontology owner |
+| `gol_resource` | `read`, `write`, `describe`, `execute`, `transfer`, `mailbox_owner`, `mailbox_owner_transfer` | Compiled GOL symbols, properties and instances; all checks intersect tenant and ontology scope, metadata requires explicit `metadata_readers`, BCC requires `mailbox_owner_subject` independently of generic owners | Registry provisions only reserved `__schema` metadata before activation; trusted Gateway effects own real instance grants |
 | `pipeline` | `view`, `execute`, `edit`, `delete`, `publish`, `manage` | Pipeline inspection, dispatch, versioning, publication, and retirement | Gateway/pipeline owner |
 | `conversation` | `view`, `edit`, `delete`, `manage` | Durable Scribe conversation and message operations | Gateway/conversation owner |
 | `entity_state` | `view`, `edit`, `delete`, `manage` | Entity-state read and mutation | Vision |

@@ -1,12 +1,194 @@
 """Unit tests targeting vector storage mappings, dimensionality filters, and similarity calculations."""
 
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import EntityEmbedding
-from galadril_vision.connectors.postgres.vector import VectorStore
+from galadril_vision.connectors.postgres.vector import (
+    CandidateSnapshot,
+    VectorStore,
+)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("scale", [1.0, 1e-300, 1e300])
+async def test_candidate_ranking_follows_receipt_authorization(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, scale: float
+) -> None:
+    """An unreadable prototype must never affect nearest-neighbor ordering."""
+    store = VectorStore(mock_postgres_client, mock_config)
+    value = {
+        "entity_id": "entity-a",
+        "licorne_identity_id": "41",
+        "modality": "text",
+        "embedding": [scale, 0.0, 0.0, 0.0],
+        "observation_key": "observation-a",
+    }
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(
+        return_value=[("entity-a", value, "signed-receipt", "revision-a")]
+    )
+    held = False
+
+    @asynccontextmanager
+    async def authorized(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        nonlocal held
+        assert tenant_id == "tenant-a"
+        assert effects[0].receipt == "signed-receipt"
+        assert effects[0].proposal == value
+        held = True
+        try:
+            yield (True,)
+        finally:
+            held = False
+
+    with patch(
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
+        new=authorized,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [scale, 0.0, 0.0, 0.0],
+            "text",
+            "tenant-a",
+            1,
+            connection=connection,
+        )
+    assert not held
+    assert candidates[0].entity_id == "entity-a"
+    assert candidates[0].similarity == 1.0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("secret_first", [True, False])
+async def test_unreadable_candidates_cannot_displace_readable_ones(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, secret_first: bool
+) -> None:
+    """Denial is applied before top-k even for a perfect unauthorized match."""
+    public = {
+        "entity_id": "public",
+        "licorne_identity_id": "41",
+        "modality": "text",
+        "embedding": [0.0, 1.0, 0.0, 0.0],
+        "observation_key": "public-source",
+    }
+    secret = {
+        **public,
+        "entity_id": "secret",
+        "embedding": [1.0, 0.0, 0.0, 0.0],
+    }
+    rows = [
+        ("public", public, "public-receipt", "public-revision"),
+        ("secret", secret, "secret-receipt", "secret-revision"),
+    ]
+    if secret_first:
+        rows.reverse()
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=rows)
+
+    @asynccontextmanager
+    async def authorized(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        assert tenant_id == "tenant-a"
+        yield tuple(effect.receipt != "secret-receipt" for effect in effects)
+
+    store = VectorStore(mock_postgres_client, mock_config)
+    with patch(
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
+        new=authorized,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [1.0, 0.0, 0.0, 0.0],
+            "text",
+            "tenant-a",
+            1,
+            connection=connection,
+        )
+    assert [candidate.entity_id for candidate in candidates] == ["public"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("count", [1, 16, 128, 512])
+async def test_prototype_reads_share_bounded_authorization_batches(
+    mock_postgres_client: MagicMock, mock_config: MagicMock, count: int
+) -> None:
+    store = VectorStore(mock_postgres_client, mock_config)
+    rows = [
+        (
+            f"entity-{i}",
+            {
+                "entity_id": f"entity-{i}",
+                "licorne_identity_id": str(i + 1),
+                "modality": "text",
+                "embedding": [1.0, 0.0, 0.0, 0.0],
+                "observation_key": "test",
+            },
+            f"receipt-{i}",
+            f"revision-{i}",
+        )
+        for i in range(count)
+    ]
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=rows)
+    batch_sizes: list[int] = []
+
+    @asynccontextmanager
+    async def authorize(
+        effects: tuple[GolEffect, ...], *, tenant_id: str
+    ) -> AsyncIterator[tuple[bool, ...]]:
+        assert tenant_id == "tenant-a"
+        batch_sizes.append(len(effects))
+        yield tuple(effect.instance_id == "entity-0" for effect in effects)
+
+    with patch(
+        "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
+        new=authorize,
+    ):
+        candidates = await store.find_resolution_candidates(
+            [1.0, 0.0, 0.0, 0.0], "text", "tenant-a", 1, connection=connection
+        )
+    assert [candidate.entity_id for candidate in candidates] == ["entity-0"]
+    assert sum(batch_sizes) == count
+    assert max(batch_sizes) <= 64
+    assert len(batch_sizes) == (count + 31) // 32
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("revisions", "confirmed"),
+    [
+        ([("entity-a", "revision-a")], True),
+        ([("entity-a", "changed")], False),
+        ([], False),
+        ([("entity-a", "revision-a"), ("entity-b", "revision-b")], False),
+    ],
+)
+async def test_confirmation_detects_changes_to_even_denied_prototypes(
+    mock_postgres_client: MagicMock,
+    mock_config: MagicMock,
+    revisions: list[tuple[str, str]],
+    confirmed: bool,
+) -> None:
+    store = VectorStore(mock_postgres_client, mock_config)
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=revisions)
+    snapshot = CandidateSnapshot((), (("entity-a", "revision-a"),))
+    assert (
+        await store.confirm_resolution_candidates(
+            connection, "tenant-a", "text", snapshot
+        )
+        is confirmed
+    )
+    statement, parameters = connection.execute.call_args.args
+    assert statement.startswith("SELECT entity_id, prototype_revision::text")
+    assert parameters == ("tenant-a", "text")
 
 
 @pytest.fixture
@@ -142,46 +324,29 @@ async def test_find_similar_with_modality_routing(
 
 
 @pytest.mark.anyio
-async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
+async def test_find_resolution_candidates_ignores_unsigned_side_tables(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
-    """Returns deduplicated pgvector rows with LI-ESKG and PostGIS metadata."""
+    """Identity and spatial side tables cannot silently enrich signed evidence."""
     store = VectorStore(client=mock_postgres_client, config=mock_config)
-    mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [
-        ("ent-1", 0.93, "face", 41, 51.5074, -0.1278, 12.5),
-        ("ent-2", 0.88, "face", None, None, None, 0.0),
-    ]
-    mock_conn = _connection_mock()
-    mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
-    mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
-
-    candidates = await store.find_resolution_candidates(
-        embedding=[0.1, 0.2, 0.3, 0.4],
-        modality="face",
-        tenant_id="tenant-1",
-        top_k=2,
+    connection = _connection_mock()
+    connection.execute.return_value.fetchall = AsyncMock(return_value=[])
+    assert (
+        await store.find_resolution_candidates(
+            [0.1, 0.2, 0.3, 0.4],
+            "face",
+            "tenant-1",
+            2,
+            connection=connection,
+        )
+        == []
     )
-
-    assert candidates[0].licorne_identity_id == 41
-    assert candidates[0].latitude == 51.5074
-    assert candidates[1].licorne_identity_id is None
-    assert mock_cursor.execute.call_count == 2
-    query, params = mock_cursor.execute.call_args.args
-    assert "identity_prototypes" in str(query)
-    assert "prototype.licorne_identity_id" in str(query)
-    assert len(params) == 14
-
-    mock_cursor.execute.reset_mock()
-    results_with_modality = await store.find_similar_with_modality(
-        embedding=[0.1, 0.2, 0.3, 0.4],
-        modality="TEXT",
-        tenant_id="raw-tenant",
-        top_k=5,
-    )
-    assert len(results_with_modality) == 2
-    assert mock_cursor.execute.call_count == 2
+    query, params = connection.execute.call_args.args
+    assert "identity_prototypes" in query
+    assert "gol_receipt IS NOT NULL" in query
+    assert "identity_links" not in query
+    assert "entity_states" not in query
+    assert params == ("tenant-1", "face")
 
 
 @pytest.mark.anyio
@@ -277,6 +442,106 @@ async def test_store_embeddings_batch_processing(
 def anyio_backend() -> str:
     """Runs async contracts on the production asyncio backend."""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_vector_candidate_reads_require_shared_state_admission(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = VectorStore(client=mock_postgres_client, config=mock_config)
+    with pytest.raises(GolDenied):
+        await store.find_resolution_candidates([0.1] * 4, "text", "tenant-a", 3)
+    mock_postgres_client.tenant_connection.assert_not_called()
+
+
+@asynccontextmanager
+async def _unit_scope(**_kwargs: object) -> AsyncIterator[str]:
+    """Supplies a unit transport scope without claiming an authorization decision."""
+    yield "unit-receipt"
+
+
+@asynccontextmanager
+async def _unit_batch(
+    effects: list[GolEffect], **_kwargs: object
+) -> AsyncIterator[tuple[str, ...]]:
+    yield tuple("unit-receipt" for _ in effects)
+
+
+def _unit_state_effect(**kwargs: object) -> GolEffect:
+    return GolEffect.model_validate(
+        {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"tenant_id", "derived"}
+        }
+        | {"target": "tests.scope::Value"}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_vector_candidate_reads_require_shared_state_admission"
+    ):
+        yield
+        return
+    with (
+        patch(
+            "galadril_vision.connectors.postgres.vector.authorized_gol_reads",
+            new=_unit_scope,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
+            new=_unit_scope,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.vector.protected_gol_effects",
+            new=_unit_batch,
+        ),
+        patch(
+            "galadril_vision.connectors.postgres.vector.make_gol_state_effect",
+            new=_unit_state_effect,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_vector_sql_is_inside_the_live_effect_scope(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Read permission must remain bound while the SQL result is fetched."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(**_kwargs: object) -> AsyncIterator[str]:
+        nonlocal held
+        held = True
+        try:
+            yield "unit-receipt"
+        finally:
+            held = False
+
+    conn = _connection_mock()
+    cursor = AsyncMock()
+
+    async def execute(*_args: object) -> None:
+        assert held, "Vector SQL escaped its live permit"
+
+    cursor.execute.side_effect = execute
+    cursor.fetchone.return_value = (1,)
+    conn.cursor.return_value.__aenter__.return_value = cursor
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = conn
+    with patch(
+        "galadril_vision.connectors.postgres.vector.protected_gol_state_effect",
+        new=scope,
+    ):
+        assert await VectorStore(
+            mock_postgres_client, mock_config
+        ).has_embeddings(tenant_id="tenant-a", modality=None)
+    assert not held
 
 
 if __name__ == "__main__":

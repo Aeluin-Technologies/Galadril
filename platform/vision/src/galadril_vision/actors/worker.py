@@ -120,6 +120,7 @@ class PipelineActor:
             step=command.step,
             step_type=command.step_type,
             resource_class=command.resource_class,
+            admission=command.admission,
             status=EventStatus.COMPLETED,
             attempt=command.attempt,
             duration_seconds=duration,

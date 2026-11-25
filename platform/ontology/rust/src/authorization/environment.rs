@@ -7,7 +7,8 @@ use cedar_policy::{EntityTypeName, EntityUid};
 use super::contract::{AuthorityRevision, Route};
 use super::flow::{Flow, Sink};
 use crate::{
-    ExternalTypeId, Name, OntologyId, Primitive, QualifiedName, SymbolRef,
+    ExternalTypeId, Name, OntologyId, Primitive, QualifiedName, Reference,
+    SymbolRef,
 };
 
 /// An approved snapshot of the relevant SpiceDB schema and ID bridge.
@@ -131,6 +132,8 @@ pub struct SecurityEnvironment {
     pub baseline: Flow,
     /// Additional floors inherited by each module's resources.
     pub module_floors: BTreeMap<OntologyId, Flow>,
+    /// Independently approved floors for individual symbols and properties.
+    pub target_floors: BTreeMap<Reference, Flow>,
     /// Independently approved receiving destinations.
     pub sinks: BTreeMap<QualifiedName, Sink>,
     /// Exact adapter descriptors approved by the external type authority.
@@ -148,6 +151,7 @@ impl SecurityEnvironment {
             routes: BTreeMap::new(),
             baseline,
             module_floors: BTreeMap::new(),
+            target_floors: BTreeMap::new(),
             sinks: BTreeMap::new(),
             approved_types: BTreeSet::new(),
         }

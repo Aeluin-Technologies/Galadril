@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from galadril_ontology import OntologySlice
+from galadril_ontology import GolProjection
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -93,7 +93,7 @@ class ExtractPassage(Contract):
 
 class ExtractFacts(Contract):
     passages: tuple[ExtractPassage, ...] = Field(min_length=1, max_length=8)
-    ontology: OntologySlice | None = None
+    ontology: GolProjection | None = None
 
 
 class PassageFacts(Contract):

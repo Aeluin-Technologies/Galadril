@@ -118,19 +118,19 @@ static_resources:
                                   exact: /galadril.registry.v1.Registry/GetRuntimePipeline
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/PutOntology
+                                  exact: /galadril.registry.v1.Registry/SaveGolOntology
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/GetOntology
+                                  exact: /galadril.registry.v1.Registry/GetGolWorkspace
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/PublishOntology
+                                  exact: /galadril.registry.v1.Registry/PublishGolOntology
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/RetireOntology
+                                  exact: /galadril.registry.v1.Registry/DeleteGolOntology
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/ListOntologies
+                                  exact: /galadril.registry.v1.Registry/ListGolOntologies
                             - url_path:
                                 path:
                                   exact: /galadril.registry.v1.Registry/PutBinding
@@ -139,13 +139,13 @@ static_resources:
                                   exact: /galadril.registry.v1.Registry/ListBindings
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/GetOntologySlice
+                                  exact: /galadril.registry.v1.Registry/GetGolBinding
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/DiffOntology
+                                  exact: /galadril.registry.v1.Registry/ValidateGolOntology
                             - url_path:
                                 path:
-                                  exact: /galadril.registry.v1.Registry/MergeOntology
+                                  exact: /galadril.registry.v1.Registry/PreviewGolDependencies
                   runtime:
                     principals:
                     - authenticated:
@@ -172,9 +172,6 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /galadril.registry.v1.Registry/GetRuntimePipeline
-                            - url_path:
-                                path:
-                                  exact: /galadril.registry.v1.Registry/GetOntologySlice
                             - url_path:
                                 path:
                                   exact: /galadril.registry.v1.Registry/ListPublishedPipelines

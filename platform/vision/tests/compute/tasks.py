@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from galadril_ontology import GolDenied, GolSymbolKind
 from galadril_vision.common.config import PostgresConnectorConfig
+from galadril_vision.common.eskg import GolReference
 from galadril_vision.compute.tasks import (
     PostgresRuntimeState,
     _clone_postgres_config,
@@ -19,12 +21,15 @@ from galadril_vision.compute.tasks import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import (
+    CandidateSnapshot,
     IdentityCandidate,
     VectorStore,
 )
-from galadril_vision.identity.licorne import (
+from galadril_vision.identity.contracts import (
+    IdentityResolutionError,
     ResolutionDecision,
     ResolutionRequest,
+    SpatialEvidence,
 )
 
 
@@ -199,16 +204,20 @@ class TestTasksDatabasePipelines:
 
     @pytest.mark.anyio
     @pytest.mark.parametrize("first_created", [False, True])
+    @pytest.mark.parametrize("concurrency", [2, 8])
     async def test_overlapping_resolves_share_a_durable_identity_candidate(
         self,
         first_created: bool,
+        concurrency: int,
     ) -> None:
-        """Serializes candidate lookup and creation before the sink step."""
+        """Confirms concurrent lookups before publishing a single prototype."""
 
         class CandidateStore(VectorStore):
             def __init__(self) -> None:
                 super().__init__(MagicMock(), _postgres_config())
                 self.lock = asyncio.Lock()
+                self.initial_lookups = 0
+                self.both_searching = asyncio.Event()
                 self.prototype: tuple[str, int, tuple[float, ...]] | None = None
 
             @asynccontextmanager
@@ -220,26 +229,44 @@ class TestTasksDatabasePipelines:
                 async with self.lock:
                     yield object()
 
-            async def find_resolution_candidates(
+            async def discover_resolution_candidates(
                 self,
                 embedding: Sequence[float],
                 modality: str,
                 tenant_id: str,
                 top_k: int,
-                *,
-                connection: object | None = None,
-            ) -> list[IdentityCandidate]:
-                assert connection is not None
+            ) -> CandidateSnapshot:
+                assert not self.lock.locked()
                 assert tenant_id == "acme"
                 assert modality == "face"
                 assert top_k == 8
                 assert len(embedding) == 1024
-                if self.prototype is None:
-                    return []
-                entity_id, identity_id, _ = self.prototype
-                return [
-                    IdentityCandidate(entity_id, 0.99, modality, identity_id)
-                ]
+                prototype = self.prototype
+                self.initial_lookups += 1
+                if self.initial_lookups == concurrency:
+                    self.both_searching.set()
+                await asyncio.wait_for(self.both_searching.wait(), timeout=1)
+                if prototype is None:
+                    return CandidateSnapshot((), ())
+                entity_id, identity_id, _ = prototype
+                return CandidateSnapshot(
+                    (
+                        IdentityCandidate(
+                            entity_id, 0.99, modality, identity_id
+                        ),
+                    ),
+                    ((entity_id, "revision"),),
+                )
+
+            async def confirm_resolution_candidates(
+                self,
+                connection: object,
+                tenant_id: str,
+                modality: str,
+                snapshot: CandidateSnapshot,
+            ) -> bool:
+                assert self.lock.locked()
+                return bool(snapshot.revisions) == (self.prototype is not None)
 
             async def store_identity_prototype_on_connection(
                 self,
@@ -250,6 +277,7 @@ class TestTasksDatabasePipelines:
                 embedding: Sequence[float],
                 decision: ResolutionDecision,
                 observation_key: str,
+                spatial: SpatialEvidence | None = None,
             ) -> None:
                 assert connection is not None
                 assert tenant_id == "acme"
@@ -319,28 +347,35 @@ class TestTasksDatabasePipelines:
             "galadril_vision.compute.tasks.get_pg_stores",
             return_value=(MagicMock(), store, MagicMock()),
         ):
-            first, second = await asyncio.gather(resolve("one"), resolve("two"))
+            results = await asyncio.gather(
+                *(resolve(str(index)) for index in range(concurrency))
+            )
 
         assert store.prototype is not None
-        assert Resolver.candidate_counts == [0, 1]
+        assert store.initial_lookups == 2 * concurrency - 1
+        assert Resolver.candidate_counts.count(0) == concurrency
+        assert Resolver.candidate_counts.count(1) == concurrency - 1
         assert (
-            first[0][0]["resolved_entity_id"]
-            == second[0][0]["resolved_entity_id"]
+            len({str(result[0][0]["resolved_entity_id"]) for result in results})
+            == 1
         )
         assert sum(
-            (
-                bool(first[0][0]["licorne_created_identity"]),
-                bool(second[0][0]["licorne_created_identity"]),
-            )
+            bool(result[0][0]["licorne_created_identity"]) for result in results
         ) == int(first_created)
 
     @pytest.mark.anyio
-    async def test_resolve_entities_batch_timeouts_and_unknowns(self) -> None:
-        """Ensures search timeouts gracefully fallback to unmapped entity tracking categories."""
+    @pytest.mark.parametrize(
+        ("failure", "reason"),
+        [(TimeoutError(), "deadline"), (OSError(), "backend")],
+    )
+    async def test_candidate_search_failure_cannot_create_identity(
+        self, failure: Exception, reason: str
+    ) -> None:
+        """A failed candidate lookup cannot be mistaken for an empty domain."""
         state = PostgresRuntimeState()
         cfg = _postgres_config()
         mock_v_store = AsyncMock()
-        mock_v_store.find_resolution_candidates.side_effect = TimeoutError()
+        mock_v_store.find_resolution_candidates.side_effect = failure
 
         inference_results: list[dict[str, object]] = [
             {
@@ -350,11 +385,16 @@ class TestTasksDatabasePipelines:
             }
         ]
 
-        with patch(
-            "galadril_vision.compute.tasks.get_pg_stores",
-            return_value=(MagicMock(), mock_v_store, MagicMock()),
+        with (
+            patch(
+                "galadril_vision.compute.tasks.get_pg_stores",
+                return_value=(MagicMock(), mock_v_store, MagicMock()),
+            ),
+            patch("galadril_vision.compute.tasks.logger") as logger,
         ):
-            with pytest.raises(RuntimeError, match="refusing to create"):
+            with pytest.raises(
+                IdentityResolutionError, match="refusing to create"
+            ):
                 await resolve_entities_batch(
                     state=state,
                     postgres_config=cfg,
@@ -363,6 +403,9 @@ class TestTasksDatabasePipelines:
                     modality="f",
                     threshold=0.8,
                 )
+            logger.warning.assert_called_once_with(
+                "identity.candidate_search.failed", reason=reason
+            )
 
     @pytest.mark.anyio
     async def test_sink_to_db_batch(self) -> None:
@@ -380,17 +423,42 @@ class TestTasksDatabasePipelines:
             mock_conn
         )
 
-        mock_v_store = AsyncMock()
-        mock_g_store = AsyncMock()
-        mock_g_store.prepare_connection = AsyncMock()
+        mock_v_store = AsyncMock(spec_set=VectorStore)
+        mock_g_store = AsyncMock(spec_set=GraphStore)
         mock_g_store.insert_event_on_connection = AsyncMock()
         mock_g_store.ensure_vertex_on_connection = AsyncMock()
         mock_g_store.create_edge_on_connection = AsyncMock()
 
+        held = [False]
+
+        @asynccontextmanager
+        async def protected(
+            effects: tuple[object, ...], **kwargs: object
+        ) -> AsyncIterator[tuple[str, ...]]:
+            held[0] = True
+            try:
+                yield tuple(
+                    f"receipt-{kind}"
+                    for kind in (
+                        "event",
+                        "entity",
+                        "edge",
+                        "state",
+                        "embedding",
+                    )
+                )
+            finally:
+                held[0] = False
+
+        async def insert_event(*args: object, **kwargs: object) -> None:
+            assert held[0], "SQL escaped the host-retained effect boundary"
+
+        mock_g_store.insert_event_on_connection.side_effect = insert_event
         resolved_items: list[list[dict[str, object]]] = [
             [
                 {
                     "resolved_entity_id": "ent_1",
+                    "gol_value": {"name": "Alice"},
                     "embedding": [0.1] * 1024,
                     "entity_type": "User",
                 }
@@ -425,9 +493,35 @@ class TestTasksDatabasePipelines:
             "password": "must-never-index",
         }
 
-        with patch(
-            "galadril_vision.compute.tasks.get_pg_stores",
-            return_value=(mock_client, mock_v_store, mock_g_store),
+        reference = GolReference(
+            tenant_id="acme",
+            ontology_id="domain",
+            ontology_version="1.0.0",
+            source_revision="s",
+            generation_id="g",
+            symbol_key="domain::Entity",
+            symbol_kind=GolSymbolKind.ENTITY,
+        )
+        with (
+            patch(
+                "galadril_ontology.protected_gol_effects", side_effect=protected
+            ) as guard,
+            patch(
+                "galadril_ontology.scoped_instance_id",
+                return_value="scoped-event",
+            ),
+            patch(
+                "galadril_vision.common.eskg.scoped_instance_id",
+                side_effect=lambda value: value,
+            ),
+            patch(
+                "galadril_vision.compute.tasks.resolve_gol_reference",
+                return_value=reference,
+            ),
+            patch(
+                "galadril_vision.compute.tasks.get_pg_stores",
+                return_value=(mock_client, mock_v_store, mock_g_store),
+            ),
         ):
             res = await sink_to_db_batch(
                 state=state,
@@ -442,6 +536,12 @@ class TestTasksDatabasePipelines:
                 modality="m",
                 edge_type="APPEARS_IN",
                 state_type="s",
+                gol_symbol_key="domain::Entity",
+                gol_event_symbol_key="domain::Observation",
+                gol_edge_symbol_key="domain::Edge",
+                gol_entity_state_symbol_key="domain::State",
+                gol_embedding_symbol_key="domain::Embedding",
+                event_values=[{"source_id": "record"}],
                 event_times=["2026-09-30T12:00:00+00:00"],
             )
             assert res == [True]
@@ -457,7 +557,23 @@ class TestTasksDatabasePipelines:
             vertex = mock_g_store.ensure_vertex_on_connection.await_args.args[1]
             assert vertex.label == "Entity"
             assert vertex.properties["observed_type"] == "User"
-            assert vertex.ontology_ref is None
+            assert vertex.ontology_ref == reference
+            assert vertex.properties["gol_value"] == {"name": "Alice"}
+            assert vertex.properties["gol_receipt"] == "receipt-entity"
+            assert event.properties["gol_receipt"] == "receipt-event"
+            assert guard.call_args.args[0][0].instance_id == "scoped-event"
+            assert guard.call_args.args[0][1].instance_id == "ent_1"
+            assert tuple(
+                effect.target for effect in guard.call_args.args[0]
+            ) == (
+                "domain::Observation",
+                "domain::Entity",
+                "domain::Edge",
+                "domain::State",
+                "domain::Embedding",
+            )
+            assert guard.call_count == 1
+            assert held == [False]
             mock_g_store.create_edge_on_connection.assert_called_once()
             mock_conn.execute.assert_called_once()
             embedding = mock_v_store.store_embeddings_batch_on_connection.await_args.args[
@@ -472,6 +588,77 @@ class TestTasksDatabasePipelines:
 def anyio_backend() -> str:
     """Runs async compute contracts on the production asyncio backend."""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_sink_missing_admission_creates_no_database_effects() -> None:
+    with patch(
+        "galadril_vision.compute.tasks.get_pg_stores", new=AsyncMock()
+    ) as storage:
+        with pytest.raises(GolDenied):
+            await sink_to_db_batch(
+                state=PostgresRuntimeState(),
+                postgres_config=_postgres_config(),
+                resolved_items=[[]],
+                record_ids=["record"],
+                sources=["source"],
+                tenant_ids=["acme"],
+                event_types=["Observation"],
+                raw_payloads=[{}],
+                entity_type="Entity",
+                modality="text",
+                edge_type="APPEARS_IN",
+                state_type="observation",
+                gol_symbol_key="domain::Entity",
+                gol_event_symbol_key="domain::Observation",
+                event_values=[{"source_id": "record"}],
+            )
+        storage.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_sink_missing_receipt_cannot_create_database_effects() -> None:
+    @asynccontextmanager
+    async def no_receipt(
+        *args: object, **kwargs: object
+    ) -> AsyncIterator[tuple[None]]:
+        yield (None,)
+
+    with (
+        patch(
+            "galadril_ontology.scoped_instance_id", return_value="scoped-event"
+        ),
+        patch(
+            "galadril_ontology.protected_gol_effects",
+            side_effect=no_receipt,
+        ),
+        patch(
+            "galadril_vision.compute.tasks.resolve_gol_reference",
+            return_value=None,
+        ),
+        patch(
+            "galadril_vision.compute.tasks.get_pg_stores", new=AsyncMock()
+        ) as storage,
+    ):
+        with pytest.raises(GolDenied):
+            await sink_to_db_batch(
+                state=PostgresRuntimeState(),
+                postgres_config=_postgres_config(),
+                resolved_items=[[{}]],
+                record_ids=["record"],
+                sources=["source"],
+                tenant_ids=["acme"],
+                event_types=["Observation"],
+                raw_payloads=[{}],
+                entity_type="Entity",
+                modality="text",
+                edge_type="APPEARS_IN",
+                state_type="observation",
+                gol_symbol_key="domain::Entity",
+                gol_event_symbol_key="domain::Observation",
+                event_values=[{"source_id": "record"}],
+            )
+        storage.assert_not_awaited()
 
 
 if __name__ == "__main__":

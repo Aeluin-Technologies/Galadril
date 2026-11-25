@@ -56,6 +56,10 @@ name = "archive"
 required-features = ["parser", "archive"]
 
 [[test]]
+name = "validation"
+required-features = ["archive"]
+
+[[test]]
 name = "archive_spicedb"
 required-features = ["parser", "archive"]
 

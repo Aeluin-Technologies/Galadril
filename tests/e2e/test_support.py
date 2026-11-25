@@ -15,6 +15,7 @@ import tarfile
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import authentication as e2e_authentication
 import clients as e2e_clients
@@ -27,7 +28,7 @@ from clients import (
     _vision_consumer_groups_have_members,
     _vision_consumers_ready,
     lineage_statuses_complete,
-    pipeline_execution_failure,
+    require_pipeline_execution_not_failed,
     statuses_by_step,
 )
 from environment import (
@@ -40,10 +41,107 @@ from environment import (
     pipeline_environment,
     runfile,
 )
+from galadril_pipeline.config import StepType
+from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
+
+
+def test_fixture_clearance_grant_is_public_and_preserves_existing_clearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fixture authority must keep tenant scope and existing classifications."""
+    statements: list[tuple[str, tuple[object, ...]]] = []
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(
+            self, query: str, parameters: tuple[object, ...]
+        ) -> None:
+            statements.append((" ".join(query.split()), parameters))
+
+    async def connect(dsn: str) -> Connection:
+        assert dsn == e2e_clients.POSTGRES_DSN
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    asyncio.run(e2e_clients.seed_public_clearances("sales-a", "sales-b"))
+
+    ((query, parameters),) = statements
+    assert parameters == (e2e_clients.TENANT_ID, ["sales-a", "sales-b"])
+    assert "INSERT INTO iam_ifc_clearances" in query
+    assert "0, ARRAY[]::TEXT[]" in query
+    assert query.endswith("ON CONFLICT (tenant_id, user_id) DO NOTHING")
+
+
+def test_causal_dispatch_continues_the_completed_sink_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The causal command must carry the same admitted input as its parent."""
+    source_key = f"{e2e_clients.TENANT_ID}/raw/default/nonce/source.txt"
+    record = {"storage_path": f"s3://lake/{source_key}"}
+    result = StepResult(
+        correlation_id=uuid4(),
+        tenant_id=e2e_clients.TENANT_ID,
+        pipeline=f"{e2e_clients.TENANT_ID}/{e2e_clients.PIPELINE_ID}/revision",
+        step="sink",
+        step_type=StepType.SINK,
+        resource_class=ResourceClass.CPU,
+        admission="original-gol-admission",
+        command_id=uuid4(),
+        status=EventStatus.COMPLETED,
+        duration_seconds=0.1,
+        output={"record": record},
+    )
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(self, *_: object) -> Connection:
+            return self
+
+        async def fetchall(self) -> list[tuple[object, ...]]:
+            return [
+                (
+                    result.pipeline,
+                    result.model_dump(mode="json"),
+                    result.correlation_id,
+                    "signed-source-lineage",
+                )
+            ]
+
+    async def connect(*_: object) -> Connection:
+        return Connection()
+
+    published: list[e2e_clients.PipelineCommand] = []
+
+    def publish(command: e2e_clients.PipelineCommand, _trace_id: str) -> None:
+        published.append(command)
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    monkeypatch.setattr(e2e_clients, "_publish_causal_command", publish)
+    asyncio.run(
+        e2e_clients.publish_causal_command(
+            "entity_one", source_key=source_key, trace_id="trace"
+        )
+    )
+
+    (command,) = published
+    assert command.causation_id == result.event_id
+    assert command.admission is None
+    assert command.lineage == "signed-source-lineage"
+    assert command.payload == {"target": "entity:entity_one", "record": record}
 
 
 def _authentication_response(
@@ -506,7 +604,16 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
         in lifecycle.group("attributes")
     )
     assert '"test.EstimatedComputeUnits": "6"' in testing
-    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 4800.0
+    empirical_timeout = e2e_environment.EMPIRICAL_STATE_TIMEOUT_SECONDS
+    assert empirical_timeout >= 2 * 60 * 60
+    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS >= 2 * empirical_timeout + 3600
+
+    configuration = runfile(".bazelrc").read_text(encoding="utf-8")
+    timeout = re.search(
+        r"^test:ci --test_timeout=-1,-1,-1,(\d+)$", configuration, re.MULTILINE
+    )
+    assert timeout is not None
+    assert int(timeout.group(1)) >= PIPELINE_LIFECYCLE_TIMEOUT_SECONDS + 900
 
 
 def test_vision_runtime_gets_a_cold_start_budget() -> None:
@@ -667,33 +774,107 @@ def test_eventually_bounds_one_stuck_observation() -> None:
 def test_eventually_propagates_terminal_pipeline_failure() -> None:
     """A durable step failure must not consume the entire lifecycle budget."""
 
-    class TerminalPipelineFailure(RuntimeError):
-        """Represents work that cannot recover without a new publication."""
-
     async def failed() -> None:
-        raise TerminalPipelineFailure("empirical_resolve: invalid candidate")
+        require_pipeline_execution_not_failed(
+            [("resolve", "failed", "Pipeline execution unavailable")]
+        )
 
     async def exercise() -> None:
-        with pytest.raises(TerminalPipelineFailure, match="empirical_resolve"):
+        with pytest.raises(e2e_clients.PipelineExecutionError, match="resolve"):
             await eventually(
                 failed,
                 timeout_seconds=1.0,
                 description="empirical pipeline",
-                abort_on=(TerminalPipelineFailure,),
+                abort_on=(e2e_clients.PipelineExecutionError,),
             )
 
     asyncio.run(exercise())
 
 
+def test_eventually_keeps_progress_when_the_final_read_hits_the_deadline() -> (
+    None
+):
+    calls = 0
+
+    async def probe() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("observed generation running")
+        await asyncio.Event().wait()
+
+    with pytest.raises(AssertionError, match="observed generation running"):
+        asyncio.run(
+            eventually(probe, timeout_seconds=0.9, description="generation")
+        )
+    assert calls == 2
+
+
 def test_pipeline_failure_preserves_step_and_error() -> None:
     """Makes terminal actor failures actionable instead of timing out opaquely."""
-    assert (
-        pipeline_execution_failure(
+    with pytest.raises(
+        e2e_clients.PipelineExecutionError,
+        match="infer: model fixture unavailable",
+    ):
+        require_pipeline_execution_not_failed(
             [("infer", "failed", "model fixture unavailable")]
         )
-        == "infer: model fixture unavailable"
-    )
-    assert pipeline_execution_failure([("infer", "completed", None)]) is None
+    require_pipeline_execution_not_failed([("infer", "completed", None)])
+
+
+@pytest.mark.parametrize(
+    ("probe", "rows", "step"),
+    [
+        (
+            e2e_clients.read_causal_cohort,
+            [("sink", "failed", "effect denied")],
+            "sink",
+        ),
+        (
+            lambda: e2e_clients.read_causal_state("entity_one"),
+            [None, ("causal", "failed", "effect denied")],
+            "causal",
+        ),
+        (
+            lambda: e2e_clients.read_trial_states(24),
+            [(0,), ("empirical_resolve", "failed", "effect denied")],
+            "empirical_resolve",
+        ),
+    ],
+)
+def test_causal_observations_propagate_durable_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    probe: Callable[[], Awaitable[object]],
+    rows: list[tuple[object, ...] | None],
+    step: str,
+) -> None:
+    """Separates a failed command from an incomplete causal observation."""
+    responses = iter(rows)
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def execute(self, *_: object) -> Connection:
+            return self
+
+        async def fetchall(self) -> list[tuple[str, ...]]:
+            return []
+
+        async def fetchone(self) -> tuple[object, ...] | None:
+            return next(responses)
+
+    async def connect(*_: object) -> Connection:
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    with pytest.raises(
+        e2e_clients.PipelineExecutionError, match=f"{step}: effect denied"
+    ):
+        asyncio.run(probe())
 
 
 def test_tempo_service_names_read_otlp_resource_attributes() -> None:
@@ -753,6 +934,41 @@ def test_tempo_trace_waits_for_every_required_service() -> None:
         ]
     }
     assert complete_tempo_trace(complete, required) is complete
+
+
+def test_tempo_failure_reports_only_error_span_names() -> None:
+    """Keeps exported error details and trace payloads out of test failures."""
+    from assertions import tempo_error_spans
+
+    trace = {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "name": "ray.dispatch",
+                                "status": {"code": 2, "message": "private"},
+                            },
+                            {
+                                "name": "mcp.client.call",
+                                "status": {"code": "STATUS_CODE_ERROR"},
+                            },
+                            {
+                                "name": "pipeline.claim",
+                                "status": {"code": "STATUS_CODE_OK"},
+                            },
+                            {
+                                "name": "unsafe parameterized span name",
+                                "status": {"code": 2},
+                            },
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    assert tempo_error_spans(trace) == ("mcp.client.call", "ray.dispatch")
 
 
 def test_image_loader_command_does_not_require_executable_runfile(
@@ -825,15 +1041,18 @@ def test_vision_startup_rejects_restarts(
         asyncio.run(ComposeEnvironment().assert_vision_did_not_restart())
 
 
-def test_vision_pending_requires_an_otlp_startup_event(
+def test_vision_pending_reads_the_container_startup_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    logs = "unrelated log"
+    logs = "vision-1 | warning that mentions pipeline.publication.pending"
 
     async def record_run(command: tuple[str, ...], **_kwargs: object) -> str:
         if command[:2] == ("docker", "inspect"):
             return "running 0"
-        return logs if "logs" in command else "vision-id"
+        if "logs" in command:
+            assert command[-1] == "vision"
+            return logs
+        return "vision-id"
 
     monkeypatch.setattr(e2e_environment, "_run", record_run)
 
@@ -841,7 +1060,7 @@ def test_vision_pending_requires_an_otlp_startup_event(
         nonlocal logs
         environment = ComposeEnvironment()
         assert not await environment.vision_waiting_for_publication()
-        logs = "event.name: Str(pipeline.publication.pending)"
+        logs = 'vision-1 | {"event.name":"pipeline.publication.pending"}'
         assert await environment.vision_waiting_for_publication()
 
     asyncio.run(exercise())
@@ -892,7 +1111,72 @@ def test_compose_diagnostics_expose_outbox_worker_state(
     assert "application_name" in rendered
     assert "find /tmp/ray" not in rendered
     assert "worker-*.err" in rendered
-    assert commands[-1][-2:] == ("1000", "otel-collector")
+    assert commands[-1][-2:] == ("12000", "otel-collector")
+
+
+def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
+    logs = """
+otel-collector-1  | LogRecord #0
+otel-collector-1  | Body: Str(protected value)
+otel-collector-1  |      -> event.name: Str(gol.worker.effect.denied)
+otel-collector-1  |      -> phase: Str(write_contract)
+otel-collector-1  |      -> reason: Str(value with spaces)
+otel-collector-1  | LogRecord #1
+otel-collector-1  | EventName: ray.actor.task.failed
+otel-collector-1  |      -> error_type: Str(VectorSearchError)
+otel-collector-1  |      -> step: Str(resolve)
+otel-collector-1  | LogRecord #2
+otel-collector-1  | EventName: unrelated.event
+otel-collector-1  |      -> error_type: Str(PrivateError)
+otel-collector-1  | LogRecord #3
+otel-collector-1  | EventName: pipeline.command.failed
+otel-collector-1  |      -> error_type: Str(RayTaskError(CommandProcessingError))
+otel-collector-1  |      -> step: Str(resolve)
+otel-collector-1  | LogRecord #4
+otel-collector-1  | EventName: pipeline.gol.failed
+otel-collector-1  |      -> phase: Str(handler)
+otel-collector-1  |      -> error_type: Str(GolDenied)
+otel-collector-1  |      -> step: Str(sink)
+otel-collector-1  | LogRecord #5
+otel-collector-1  | EventName: gol.worker.resume.denied
+otel-collector-1  |      -> phase: Str(principal_and_input)
+otel-collector-1  | LogRecord #6
+otel-collector-1  | EventName: pipeline.gol.rpc.failed
+otel-collector-1  |      -> phase: Str(begin)
+otel-collector-1  |      -> reason: Str(ReadTimeout)
+otel-collector-1  | LogRecord #7
+otel-collector-1  | EventName: pipeline.publication.failed
+otel-collector-1  |      -> phase: Str(authorize)
+otel-collector-1  |      -> topic: Str(pipeline.lineage.v1)
+otel-collector-1  |      -> status: Str(completed)
+otel-collector-1  |      -> error_type: Str(GolUnavailable)
+otel-collector-1  | LogRecord #8
+otel-collector-1  | EventName: gol.worker.invariant.denied
+otel-collector-1  |      -> reason: Str(Relationship)
+otel-collector-1  | LogRecord #9
+otel-collector-1  | EventName: gol.worker.effect.denied
+otel-collector-1  |      -> phase: Str(write_invariant)
+otel-collector-1  |      -> archive_error: Str(Some(Expired))
+otel-collector-1  | LogRecord #10
+otel-collector-1  | EventName: gol.worker.open.denied
+otel-collector-1  |      -> phase: Str(metadata)
+otel-collector-1  |      -> export_error: Str(Some(AuthorizationUnavailable))
+otel-collector-1  | LogRecord #11
+otel-collector-1  | EventName: gol.publication.denied
+"""
+    assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
+        "gol.worker.effect.denied phase=write_contract",
+        "ray.actor.task.failed error_type=VectorSearchError step=resolve",
+        "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
+        "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
+        "gol.worker.resume.denied phase=principal_and_input",
+        "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
+        "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
+        "gol.worker.invariant.denied reason=Relationship",
+        "gol.worker.effect.denied phase=write_invariant archive_error=Some(Expired)",
+        "gol.worker.open.denied phase=metadata export_error=Some(AuthorizationUnavailable)",
+        "gol.publication.denied",
+    ]
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
@@ -963,7 +1247,7 @@ def test_causal_cohort_waits_for_the_last_event_bucket_to_close(
             ]
 
         async def fetchone(self) -> tuple[object, ...] | None:
-            if "SELECT step, error" in self.query:
+            if "status = 'failed'" in self.query:
                 return None
             if "pipeline_executions" in self.query:
                 return (36,)
@@ -1114,7 +1398,7 @@ def test_gateway_signing_keys_are_owned_by_hydra() -> None:
 def test_gateway_security_limits_are_explicit_in_bootstrap_fixture() -> None:
     """Keeps denial thresholds deterministic across local and remote runners."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
-    assert "max_body_bytes: 4096" in connectors
+    assert "max_body_bytes: 65536" in connectors
     assert "max_graphql_depth: 8" in connectors
 
 
@@ -1159,6 +1443,11 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         "proxy/envoy.yaml",
         "proxy/error-page.lua",
         "application/connectors.yaml",
+        "application/gol-authorities.json",
+        "application/gol-runtime.json",
+        "gol-secrets/gol-effect-key",
+        "registry-secrets/gateway-key",
+        "worker-secrets/worker-key",
         "application/s3-notifications.yaml",
         "observability/otel-collector.yaml",
         "observability/tempo.yaml",
@@ -1169,6 +1458,45 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         "database/010-init-spicedb.sh",
         "database/020-init-galadril-roles.sh",
     } <= names
+
+
+def test_gol_effect_receipts_use_an_isolated_ephemeral_key() -> None:
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as first:
+        first_key = first.extractfile("gol-secrets/gol-effect-key")
+        assert first_key is not None
+        key = first_key.read()
+        assert len(key) == 32
+        source_channel = first.extractfile("registry-secrets/gateway-key")
+        assert source_channel is not None
+        source_key = source_channel.read()
+        assert len(source_key) == 32 and source_key != key
+        worker_file = first.extractfile("worker-secrets/worker-key")
+        assert worker_file is not None
+        worker_key = worker_file.read()
+        assert len(worker_key) == 32 and worker_key not in (key, source_key)
+
+        profile_file = first.extractfile("application/gol-authorities.json")
+        assert profile_file is not None
+        profile = json.load(profile_file)
+        assert "location" not in profile["cedar_context"]
+        assert "context.hour_utc" in profile["cedar_policies"]
+        runtime_file = first.extractfile("application/gol-runtime.json")
+        assert runtime_file is not None
+        runtime = json.load(runtime_file)
+        assert set(runtime["ingress_floors"]) == {
+            f"debug_tenant/{group}"
+            for group in ("default", "sales", "returns", "trial")
+        }
+        assert runtime["shared_state_floor"]["classification"] == "Restricted"
+
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as second:
+        second_key = second.extractfile("gol-secrets/gol-effect-key")
+        assert second_key is not None
+        assert second_key.read() != key
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    assert compose.count("source: e2e-gol-secrets") == 1
+    assert compose.count("source: e2e-registry-secrets") == 2
+    assert compose.count("source: e2e-worker-secrets") == 2
 
 
 def test_spicedb_probe_allowed_supports_canonical_resources() -> None:

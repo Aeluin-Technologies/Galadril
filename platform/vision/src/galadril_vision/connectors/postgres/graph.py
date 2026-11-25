@@ -3,20 +3,31 @@
 from __future__ import annotations
 
 import re
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from functools import lru_cache
+from hashlib import sha256
 from typing import TYPE_CHECKING, LiteralString
 
 import orjson
 import structlog
+from galadril_ontology import (
+    GolEffect,
+    make_gol_state_effect,
+    protected_gol_effect,
+    protected_gol_effects,
+    protected_gol_state_effect,
+    scoped_instance_id,
+)
 from psycopg import AsyncConnection, sql
 from psycopg.rows import TupleRow
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from galadril_vision.common.eskg import (
     ONTOLOGY_KINDS,
     RELATION_ENDPOINTS,
     GraphNodeKind,
+    eskg_write_effect,
     relation_endpoints,
 )
 from galadril_vision.common.exceptions import GraphOperationError
@@ -37,6 +48,8 @@ logger = structlog.get_logger(__name__)
 
 _SYSTEM_TENANT_ID = "galadril-system"
 _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PROBABILITIES = TypeAdapter(list[tuple[str, float]])
+_SCALAR_EVIDENCE = TypeAdapter(dict[str, int | float])
 
 
 def _cypher_identifier(value: str) -> LiteralString:
@@ -169,7 +182,7 @@ class GraphStore:
         if vertex.ontology_ref is not None:
             reference = vertex.ontology_ref
             require_same_tenant(tenant_id, reference.tenant_id)
-            if ONTOLOGY_KINDS.get(kind) != reference.resource_kind:
+            if ONTOLOGY_KINDS.get(kind) != reference.symbol_kind:
                 raise GraphOperationError(
                     "graph_contract", "ontology resource kind is incompatible"
                 )
@@ -180,7 +193,8 @@ class GraphStore:
         props["id"] = vertex.vertex_id
         return props
 
-    def _edge_params(self, edge: GraphEdge) -> dict[str, JsonValue]:
+    @staticmethod
+    def _edge_params(edge: GraphEdge) -> dict[str, JsonValue]:
         """Normalizes tenant constraints and properties for a graph edge."""
         tenant_id = normalize_tenant_id(edge.tenant_id)
         props = edge.properties.copy()
@@ -191,74 +205,201 @@ class GraphStore:
         props["target_id"] = edge.target_vertex_id
         return props
 
+    @classmethod
+    def edge_write_effect(cls, edge: GraphEdge, target: str) -> GolEffect:
+        """Binds the relationship type and both endpoints to the admitted ID."""
+        return eskg_write_effect(
+            target,
+            f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
+            {**cls._edge_params(edge), "edge_type": edge.edge_type},
+        )
+
+    @staticmethod
+    def state_write_effect(state: EntityStateRecord, target: str) -> GolEffect:
+        """Separates numeric series and their labels without dropping any values."""
+        value = state.state_value.copy()
+        if {
+            "scalar_names",
+            "scalar_values",
+            "resolution_labels",
+            "resolution_scores",
+            "display_label",
+        } & value.keys():
+            raise GraphOperationError(
+                "graph_contract", "Conflicting state projection fields"
+            )
+        for key, expected in {
+            "tenant_id": state.tenant_id,
+            "entity_id": state.entity_id,
+            "event_id": state.event_id,
+            "state_type": state.state_type,
+            "event_time": state.event_time.isoformat(),
+        }.items():
+            if key in value and value[key] != expected:
+                raise GraphOperationError(
+                    "graph_contract", "Conflicting state provenance"
+                )
+        try:
+            if "scalar_evidence" in value:
+                evidence = _SCALAR_EVIDENCE.validate_python(
+                    value.pop("scalar_evidence")
+                )
+                value["scalar_names"] = list(evidence)
+                value["scalar_values"] = list(evidence.values())
+            if "resolution_probabilities" in value:
+                probabilities = _PROBABILITIES.validate_python(
+                    value.pop("resolution_probabilities")
+                )
+                value["resolution_labels"] = [name for name, _ in probabilities]
+                value["resolution_scores"] = [
+                    score for _, score in probabilities
+                ]
+        except ValidationError:
+            raise GraphOperationError(
+                "graph_contract", "Invalid numeric evidence"
+            ) from None
+        if "label" in value:
+            value["display_label"] = value.pop("label")
+        return eskg_write_effect(
+            target,
+            f"state:{state.entity_id}:{state.event_id}:{state.state_type}:{state.event_time.isoformat()}",
+            {
+                **value,
+                "entity_id": state.entity_id,
+                "event_id": state.event_id,
+                "state_type": state.state_type,
+                "event_time": state.event_time.isoformat(),
+                "tenant_id": state.tenant_id,
+            },
+        )
+
+    def _vertex_scope(
+        self, vertex: GraphVertex, props: dict[str, JsonValue]
+    ) -> AbstractAsyncContextManager[str | None]:
+        """Business writes retain their exact admitted target and proposal."""
+        if vertex.ontology_ref is not None:
+            value = props.get("gol_value")
+            if not isinstance(value, dict):
+                raise GraphOperationError(
+                    "graph_contract", "GOL proposal unavailable"
+                )
+            return protected_gol_effect(
+                operation="write",
+                target=vertex.ontology_ref.symbol_key,
+                tenant_id=vertex.tenant_id,
+                destination="eskg",
+                purpose="persistence",
+                instance_id=vertex.vertex_id,
+                proposal=value,
+            )
+        return protected_gol_state_effect(
+            operation="write",
+            tenant_id=vertex.tenant_id,
+            destination="eskg",
+            purpose="persistence",
+            derived=True,
+            instance_id=vertex.vertex_id,
+            proposal=props,
+        )
+
+    def _state_scope(
+        self, state: EntityStateRecord
+    ) -> AbstractAsyncContextManager[str | None]:
+        """State publication keeps the same explicit derived contract at each layer."""
+        return protected_gol_state_effect(
+            operation="write",
+            tenant_id=state.tenant_id,
+            destination="eskg",
+            purpose="persistence",
+            derived=True,
+            instance_id=f"state:{state.entity_id}:{state.event_id}:{state.state_type}",
+            proposal=state.state_value,
+        )
+
     async def ensure_vertex_on_connection(
         self, conn: AsyncConnection[TupleRow], vertex: GraphVertex
     ) -> None:
         """Inserts or updates a vertex using an open connection transaction block."""
         props = self._vertex_params(vertex)
-        # AGE has no uniqueness constraint spanning vertex labels. Serialize
-        # identity checks so concurrent producers cannot change a vertex's role.
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended("
-            "jsonb_build_array(%s::text, %s::text, %s::text)::text, 0))",
-            (self._graph_name, props["tenant_id"], vertex.vertex_id),
-        )
-        lookup = sql.SQL("""
-            SELECT ag_catalog.agtype_to_jsonb(kind),
-                   ag_catalog.agtype_to_jsonb(ontology_ref)
-            FROM cypher({graph}, $$
-                MATCH (v {{tenant_id: $tenant_id, id: $id}})
-                RETURN label(v), v.ontology_ref
-            $$, %s::agtype) AS (kind agtype, ontology_ref agtype)
-        """).format(graph=sql.Literal(self._graph_name))
-        existing = await conn.execute(
-            lookup,
-            (
-                orjson.dumps(
-                    {"tenant_id": props["tenant_id"], "id": vertex.vertex_id}
-                ).decode(),
-            ),
-        )
-        rows = await existing.fetchall()
-        if len(rows) > 1 or (
-            rows
-            and (
-                rows[0][0] != vertex.label
-                or (
-                    vertex.ontology_ref is not None
-                    and rows[0][1] is not None
-                    and rows[0][1] != props["ontology_ref"]
+        async with self._vertex_scope(vertex, props) as receipt:
+            if not receipt:
+                raise GraphOperationError(
+                    "graph_contract", "GOL receipt unavailable"
                 )
+            props["gol_receipt"] = receipt
+            # AGE has no uniqueness constraint spanning vertex labels. Serialize
+            # identity checks so concurrent producers cannot change a vertex's role.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "jsonb_build_array(%s::text, %s::text, %s::text)::text, 0))",
+                (self._graph_name, props["tenant_id"], vertex.vertex_id),
             )
-        ):
-            logger.warning(
-                "eskg_vertex_rejected", reason="identity_contract_conflict"
+            lookup = sql.SQL("""
+                SELECT ag_catalog.agtype_to_jsonb(kind),
+                       ag_catalog.agtype_to_jsonb(ontology_ref),
+                       ag_catalog.agtype_to_jsonb(gol_value)
+                FROM cypher({graph}, $$
+                    MATCH (v {{tenant_id: $tenant_id, id: $id}})
+                    RETURN label(v), v.ontology_ref, v.gol_value
+                $$, %s::agtype) AS (kind agtype, ontology_ref agtype, gol_value agtype)
+            """).format(graph=sql.Literal(self._graph_name))
+            existing = await conn.execute(
+                lookup,
+                (
+                    orjson.dumps(
+                        {
+                            "tenant_id": props["tenant_id"],
+                            "id": vertex.vertex_id,
+                        }
+                    ).decode(),
+                ),
             )
-            raise GraphOperationError(
-                "graph_contract", "vertex kind or ontology revision conflict"
+            rows = await existing.fetchall()
+            row = next(iter(rows), None)
+            if len(rows) > 1 or (
+                row is not None
+                and (
+                    len(row) != 3
+                    or row[0] != vertex.label
+                    or (
+                        (row[1] is not None or vertex.ontology_ref is not None)
+                        and (
+                            row[1] != props.get("ontology_ref")
+                            or row[2] != props.get("gol_value")
+                        )
+                    )
+                )
+            ):
+                logger.warning(
+                    "eskg_vertex_rejected", reason="identity_contract_conflict"
+                )
+                raise GraphOperationError(
+                    "graph_contract",
+                    "vertex kind or ontology revision conflict",
+                )
+            set_clause, set_params = _cypher_set_clause("v", props)
+            params = {
+                "tenant_id": props["tenant_id"],
+                "id": props["id"],
+                **set_params,
+            }
+            query = sql.SQL("""
+            SELECT * FROM cypher({graph}, $$
+                MERGE (v:{label} {{tenant_id: $tenant_id, id: $id}})
+                {set_clause}
+                RETURN v
+            $$, %s::agtype) AS (v agtype)
+            """).format(
+                graph=sql.Literal(self._graph_name),
+                label=sql.SQL(_cypher_identifier(vertex.label)),
+                set_clause=set_clause,
             )
-        set_clause, set_params = _cypher_set_clause("v", props)
-        params = {
-            "tenant_id": props["tenant_id"],
-            "id": props["id"],
-            **set_params,
-        }
-        query = sql.SQL("""
-        SELECT * FROM cypher({graph}, $$
-            MERGE (v:{label} {{tenant_id: $tenant_id, id: $id}})
-            {set_clause}
-            RETURN v
-        $$, %s::agtype) AS (v agtype)
-        """).format(
-            graph=sql.Literal(self._graph_name),
-            label=sql.SQL(_cypher_identifier(vertex.label)),
-            set_clause=set_clause,
-        )
-        cursor = await conn.execute(query, (orjson.dumps(params).decode(),))
-        if await cursor.fetchone() is None:
-            raise GraphOperationError(
-                "graph_contract", "vertex kind or ontology revision conflict"
-            )
+            cursor = await conn.execute(query, (orjson.dumps(params).decode(),))
+            if await cursor.fetchone() is None:
+                raise GraphOperationError(
+                    "graph_contract",
+                    "vertex kind or ontology revision conflict",
+                )
 
     async def ensure_vertex(self, vertex: GraphVertex) -> None:
         """Inserts or updates a vertex within a new transaction.
@@ -266,54 +407,98 @@ class GraphStore:
         Raises:
             GraphOperationError: If the execution fails.
         """
-        try:
-            async with self._client.tenant_connection(vertex.tenant_id) as conn:
-                async with conn.transaction():
-                    await self.ensure_vertex_on_connection(conn, vertex)
-        except Exception as exc:
-            raise GraphOperationError("ensure_vertex", str(exc)) from exc
+        async with self._vertex_scope(vertex, self._vertex_params(vertex)):
+            try:
+                async with self._client.tenant_connection(
+                    vertex.tenant_id
+                ) as conn:
+                    async with conn.transaction():
+                        await self.ensure_vertex_on_connection(conn, vertex)
+            except Exception as exc:
+                raise GraphOperationError("ensure_vertex", str(exc)) from exc
 
     async def create_edge_on_connection(
-        self, conn: AsyncConnection[TupleRow], edge: GraphEdge
+        self,
+        conn: AsyncConnection[TupleRow],
+        edge: GraphEdge,
+        *,
+        gol_target: str | None = None,
     ) -> None:
         """Creates or updates a graph edge using an open connection transaction block."""
         props = self._edge_params(edge)
-        try:
-            pairs = relation_endpoints(edge.edge_type)
-        except ValueError as exc:
-            raise GraphOperationError("graph_contract", str(exc)) from exc
-        edge_props = {
-            key: value
-            for key, value in props.items()
-            if key not in {"source_id", "target_id"}
-        }
-        set_clause, set_params = _cypher_set_clause("r", edge_props)
-        params = {
-            "tenant_id": props["tenant_id"],
-            "source_id": props["source_id"],
-            "target_id": props["target_id"],
-            **set_params,
-        }
-        query = sql.SQL("""
-        SELECT * FROM cypher({graph}, $$
-            MATCH (a {{tenant_id: $tenant_id, id: $source_id}})
-            MATCH (b {{tenant_id: $tenant_id, id: $target_id}})
-            WHERE {endpoints}
-            MERGE (a)-[r:{edge_type}]->(b)
-            {set_clause}
-            RETURN r
-        $$, %s::agtype) AS (r agtype)
-        """).format(
-            graph=sql.Literal(self._graph_name),
-            edge_type=sql.SQL(_cypher_identifier(edge.edge_type)),
-            set_clause=set_clause,
-            endpoints=_endpoint_predicate("a", "b", pairs),
+        effect = (
+            self.edge_write_effect(edge, gol_target) if gol_target else None
         )
-        cursor = await conn.execute(query, (orjson.dumps(params).decode(),))
-        if await cursor.fetchone() is None:
-            raise GraphOperationError(
-                "graph_contract", "missing or incompatible relation endpoints"
+        scope = (
+            protected_gol_effect(
+                operation="write",
+                target=effect.target,
+                tenant_id=edge.tenant_id,
+                destination=effect.destination,
+                purpose=effect.purpose,
+                instance_id=effect.instance_id,
+                proposal=effect.proposal,
             )
+            if effect is not None
+            else protected_gol_state_effect(
+                operation="write",
+                tenant_id=edge.tenant_id,
+                destination="eskg",
+                purpose="persistence",
+                derived=True,
+                instance_id=f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
+                proposal=props,
+            )
+        )
+        async with scope as receipt:
+            try:
+                pairs = relation_endpoints(edge.edge_type)
+            except ValueError as exc:
+                raise GraphOperationError("graph_contract", str(exc)) from exc
+            edge_props = {
+                key: value
+                for key, value in props.items()
+                if key not in {"source_id", "target_id"}
+            }
+            if effect is not None:
+                if not receipt:
+                    raise GraphOperationError(
+                        "graph_contract", "GOL edge receipt unavailable"
+                    )
+                edge_props.update(
+                    edge_type=edge.edge_type,
+                    gol_symbol_key=effect.target,
+                    gol_value=effect.proposal,
+                    gol_receipt=receipt,
+                )
+            set_clause, set_params = _cypher_set_clause("r", edge_props)
+            params = {
+                "tenant_id": props["tenant_id"],
+                "source_id": props["source_id"],
+                "target_id": props["target_id"],
+                **set_params,
+            }
+            query = sql.SQL("""
+            SELECT * FROM cypher({graph}, $$
+                MATCH (a {{tenant_id: $tenant_id, id: $source_id}})
+                MATCH (b {{tenant_id: $tenant_id, id: $target_id}})
+                WHERE {endpoints}
+                MERGE (a)-[r:{edge_type}]->(b)
+                {set_clause}
+                RETURN r
+            $$, %s::agtype) AS (r agtype)
+            """).format(
+                graph=sql.Literal(self._graph_name),
+                edge_type=sql.SQL(_cypher_identifier(edge.edge_type)),
+                set_clause=set_clause,
+                endpoints=_endpoint_predicate("a", "b", pairs),
+            )
+            cursor = await conn.execute(query, (orjson.dumps(params).decode(),))
+            if await cursor.fetchone() is None:
+                raise GraphOperationError(
+                    "graph_contract",
+                    "missing or incompatible relation endpoints",
+                )
 
     async def create_edge(self, edge: GraphEdge) -> None:
         """Creates or updates a graph edge within a new transaction.
@@ -321,12 +506,23 @@ class GraphStore:
         Raises:
             GraphOperationError: If the execution fails.
         """
-        try:
-            async with self._client.tenant_connection(edge.tenant_id) as conn:
-                async with conn.transaction():
-                    await self.create_edge_on_connection(conn, edge)
-        except Exception as exc:
-            raise GraphOperationError("create_edge", str(exc)) from exc
+        async with protected_gol_state_effect(
+            operation="write",
+            tenant_id=edge.tenant_id,
+            destination="eskg",
+            purpose="persistence",
+            derived=True,
+            instance_id=f"edge:{edge.source_vertex_id}:{edge.edge_type}:{edge.target_vertex_id}",
+            proposal=self._edge_params(edge),
+        ):
+            try:
+                async with self._client.tenant_connection(
+                    edge.tenant_id
+                ) as conn:
+                    async with conn.transaction():
+                        await self.create_edge_on_connection(conn, edge)
+            except Exception as exc:
+                raise GraphOperationError("create_edge", str(exc)) from exc
 
     async def ensure_metric(self, metric_id: str, tenant_id: str) -> None:
         """Upserts a core system metric tracking vertex."""
@@ -373,50 +569,85 @@ class GraphStore:
                 "upsert_causal_link", "inference_id is required"
             )
         tenant_id_val = normalize_tenant_id(tenant_id)
-        source = GraphVertex(
-            vertex_id=source_feature,
-            label="CausalVariable",
-            tenant_id=tenant_id_val,
-            properties={"name": source_feature},
-        )
-        target = GraphVertex(
-            vertex_id=target_feature,
-            label="CausalVariable",
-            tenant_id=tenant_id_val,
-            properties={"name": target_feature},
-        )
-        set_clause, set_params = _cypher_set_clause("r", properties)
-        params = {
-            "tenant_id": tenant_id_val,
-            "source_id": source_feature,
-            "target_id": target_feature,
-            "inference_id": inference_id,
-            **set_params,
+        value: dict[str, JsonValue] = {
+            **properties,
+            "source_feature": source_feature,
+            "target_feature": target_feature,
         }
-        query = sql.SQL("""
-        SELECT * FROM cypher({graph}, $$
-            MATCH (a:CausalVariable {{tenant_id: $tenant_id, id: $source_id}})
-            MATCH (b:CausalVariable {{tenant_id: $tenant_id, id: $target_id}})
-            MERGE (a)-[r:CAUSES {{
-                tenant_id: $tenant_id,
-                inference_id: $inference_id
-            }}]->(b)
-            {set_clause}
-            RETURN r
-        $$, %s::agtype) AS (r agtype)
-        """).format(
-            graph=sql.Literal(self._graph_name),
-            set_clause=set_clause,
+        source_id = (
+            "causal-variable:" + sha256(source_feature.encode()).hexdigest()
         )
+        target_id = (
+            "causal-variable:" + sha256(target_feature.encode()).hexdigest()
+        )
+        instance = scoped_instance_id(
+            f"link:{inference_id}:{source_id}:{target_id}"
+        )
+        async with protected_gol_state_effect(
+            operation="write",
+            tenant_id=tenant_id_val,
+            destination="eskg",
+            purpose="causal_analysis",
+            derived=True,
+            instance_id=instance,
+            proposal=value,
+        ) as receipt:
+            if not receipt:
+                raise GraphOperationError(
+                    "upsert_causal_link", "GOL receipt unavailable"
+                )
+            properties = {
+                **properties,
+                "gol_value": value,
+                "gol_receipt": receipt,
+                "gol_id": instance,
+            }
+            set_clause, set_params = _cypher_set_clause("r", properties)
+            params = {
+                "tenant_id": tenant_id_val,
+                "source_id": source_id,
+                "target_id": target_id,
+                "source_name": source_feature,
+                "target_name": target_feature,
+                "inference_id": inference_id,
+                **set_params,
+            }
+            query = sql.SQL("""
+            SELECT * FROM cypher({graph}, $$
+                MERGE (a:CausalVariable {{tenant_id: $tenant_id, id: $source_id}})
+                SET a.name = $source_name
+                MERGE (b:CausalVariable {{tenant_id: $tenant_id, id: $target_id}})
+                SET b.name = $target_name
+                MERGE (a)-[r:CAUSES {{
+                    tenant_id: $tenant_id,
+                    inference_id: $inference_id
+                }}]->(b)
+                {set_clause}
+                RETURN r
+            $$, %s::agtype) AS (r agtype)
+            """).format(
+                graph=sql.Literal(self._graph_name),
+                set_clause=set_clause,
+            )
 
-        try:
-            async with self._client.tenant_connection(tenant_id_val) as conn:
-                async with conn.transaction():
-                    await self.ensure_vertex_on_connection(conn, source)
-                    await self.ensure_vertex_on_connection(conn, target)
-                    await conn.execute(query, (orjson.dumps(params).decode(),))
-        except Exception as exc:
-            raise GraphOperationError("upsert_causal_link", str(exc)) from exc
+            try:
+                async with self._client.tenant_connection(
+                    tenant_id_val
+                ) as conn:
+                    async with conn.transaction():
+                        # One tenant lock covers shared variables across concurrent analyses.
+                        await conn.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended("
+                            "'causal-variables:' || %s, 0))",
+                            (tenant_id_val,),
+                        )
+                        await conn.execute(
+                            query, (orjson.dumps(params).decode(),)
+                        )
+            except Exception as exc:
+                raise GraphOperationError(
+                    "upsert_causal_link", str(exc)
+                ) from exc
 
     async def get_relationship_observations(
         self,
@@ -425,73 +656,83 @@ class GraphStore:
         tenant_id: str,
     ) -> tuple[tuple[str, str, str, dict[str, JsonValue]], ...]:
         """Loads structural evidence and derived edges as causal observation features."""
-        if not vertex_ids or not relationship_types:
-            return ()
-        tenant_id_val = normalize_tenant_id(tenant_id)
-        permitted = _permitted_relations(relationship_types)
-        params = orjson.dumps(
-            {
-                "tenant_id": tenant_id_val,
-                "vertex_ids": vertex_ids,
-                "relationship_types": permitted,
-            }
-        ).decode()
-        query = sql.SQL("""
-        SELECT * FROM cypher({graph}, $$
-            MATCH (a)-[r]->(b)
-            WHERE a.tenant_id = $tenant_id
-              AND b.tenant_id = $tenant_id
-              AND a.id IN $vertex_ids
-              AND b.id IN $vertex_ids
-              AND r.tenant_id = $tenant_id
-              AND label(r) IN $relationship_types
-              AND ({contract})
-            RETURN a.id, b.id, label(r), properties(r)
-        $$, %s::agtype) AS (
-            source_id agtype,
-            target_id agtype,
-            relationship_type agtype,
-            properties agtype
-        )
-        """).format(
-            graph=sql.Literal(self._graph_name),
-            contract=_relation_predicate("a", "b", "r"),
-        )
-
-        try:
-            async with self._client.tenant_connection(tenant_id_val) as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, (params,))
-                    rows = await cursor.fetchall()
-        except Exception as exc:
-            raise GraphOperationError(
-                "get_relationship_observations", str(exc)
-            ) from exc
-
-        observations: list[tuple[str, str, str, dict[str, JsonValue]]] = []
-        for row in rows:
-            if not row or len(row) < 4:
-                continue
-            raw_properties = row[3]
-            if isinstance(raw_properties, dict):
-                properties = raw_properties
-            elif isinstance(raw_properties, str):
-                try:
-                    decoded = orjson.loads(raw_properties)
-                    properties = decoded if isinstance(decoded, dict) else {}
-                except orjson.JSONDecodeError:
-                    properties = {}
-            else:
-                properties = {}
-            observations.append(
-                (
-                    str(row[0]).strip('"'),
-                    str(row[1]).strip('"'),
-                    str(row[2]).strip('"'),
-                    properties,
-                )
+        async with protected_gol_state_effect(
+            operation="read",
+            tenant_id=tenant_id,
+            destination="causal_state",
+            purpose="causal_analysis",
+        ):
+            if not vertex_ids or not relationship_types:
+                return ()
+            tenant_id_val = normalize_tenant_id(tenant_id)
+            permitted = _permitted_relations(relationship_types)
+            params = orjson.dumps(
+                {
+                    "tenant_id": tenant_id_val,
+                    "vertex_ids": vertex_ids,
+                    "relationship_types": permitted,
+                }
+            ).decode()
+            query = sql.SQL("""
+            SELECT * FROM cypher({graph}, $$
+                MATCH (a)-[r]->(b)
+                WHERE a.tenant_id = $tenant_id
+                  AND b.tenant_id = $tenant_id
+                  AND a.id IN $vertex_ids
+                  AND b.id IN $vertex_ids
+                  AND r.tenant_id = $tenant_id
+                  AND label(r) IN $relationship_types
+                  AND ({contract})
+                RETURN a.id, b.id, label(r), properties(r)
+            $$, %s::agtype) AS (
+                source_id agtype,
+                target_id agtype,
+                relationship_type agtype,
+                properties agtype
             )
-        return tuple(observations)
+            """).format(
+                graph=sql.Literal(self._graph_name),
+                contract=_relation_predicate("a", "b", "r"),
+            )
+
+            try:
+                async with self._client.tenant_connection(
+                    tenant_id_val
+                ) as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute(query, (params,))
+                        rows = await cursor.fetchall()
+            except Exception as exc:
+                raise GraphOperationError(
+                    "get_relationship_observations", str(exc)
+                ) from exc
+
+            observations: list[tuple[str, str, str, dict[str, JsonValue]]] = []
+            for row in rows:
+                if not row or len(row) < 4:
+                    continue
+                raw_properties = row[3]
+                if isinstance(raw_properties, dict):
+                    properties = raw_properties
+                elif isinstance(raw_properties, str):
+                    try:
+                        decoded = orjson.loads(raw_properties)
+                        properties = (
+                            decoded if isinstance(decoded, dict) else {}
+                        )
+                    except orjson.JSONDecodeError:
+                        properties = {}
+                else:
+                    properties = {}
+                observations.append(
+                    (
+                        str(row[0]).strip('"'),
+                        str(row[1]).strip('"'),
+                        str(row[2]).strip('"'),
+                        properties,
+                    )
+                )
+            return tuple(observations)
 
     async def get_entity_k_hop_neighbors(
         self,
@@ -518,88 +759,96 @@ class GraphStore:
         Raises:
             GraphOperationError: If the traversal query fails.
         """
-        if not relationship_types:
-            return []
+        async with protected_gol_state_effect(
+            operation="read",
+            tenant_id=tenant_id,
+            destination="causal_state",
+            purpose="causal_analysis",
+        ):
+            if not relationship_types:
+                return []
 
-        permitted = _permitted_relations(relationship_types)
-        k_min_val, k_max_val = int(k_min), int(k_max)
-        max_vertices_val = int(max_vertices)
-        if k_min_val < 1 or k_max_val < k_min_val or max_vertices_val < 1:
-            raise GraphOperationError(
-                "get_entity_k_hop_neighbors", "invalid traversal bounds"
-            )
-        tenant_id_val = normalize_tenant_id(tenant_id)
-        try:
-            async with self._client.tenant_connection(tenant_id_val) as conn:
-                # AGE cannot alternate relationship labels in a variable-length pattern.
-                query = sql.SQL("""
-                      SELECT * FROM cypher({graph}, $$
-                          MATCH (e)-[r]->(n)
-                          WHERE e.tenant_id = $tenant_id
-                            AND e.id IN $frontier_ids
-                            AND n.tenant_id = $tenant_id
-                            AND label(r) IN $relationship_types
-                            AND r.tenant_id = $tenant_id
-                            AND ({contract})
-                            AND NOT (n.id IN $seen_ids)
-                          RETURN DISTINCT n.id
-                          UNION
-                          MATCH (n)-[r]->(e)
-                          WHERE e.tenant_id = $tenant_id
-                            AND e.id IN $frontier_ids
-                            AND n.tenant_id = $tenant_id
-                            AND r.tenant_id = $tenant_id
-                            AND label(r) IN $relationship_types
-                            AND ({reverse_contract})
-                            AND NOT (n.id IN $seen_ids)
-                          RETURN DISTINCT n.id
-                      $$, %s::agtype) AS (id agtype)
-                      LIMIT {max_vertices}
-                """).format(
-                    graph=sql.Literal(self._graph_name),
-                    max_vertices=sql.SQL(str(max_vertices_val)),
-                    contract=_relation_predicate("e", "n", "r"),
-                    reverse_contract=_relation_predicate("n", "e", "r"),
+            permitted = _permitted_relations(relationship_types)
+            k_min_val, k_max_val = int(k_min), int(k_max)
+            max_vertices_val = int(max_vertices)
+            if k_min_val < 1 or k_max_val < k_min_val or max_vertices_val < 1:
+                raise GraphOperationError(
+                    "get_entity_k_hop_neighbors", "invalid traversal bounds"
                 )
-                seen = {entity_id}
-                visited_ids = [entity_id]
-                frontier = [entity_id]
-                out: list[str] = []
-                async with conn.cursor() as cur:
-                    for depth in range(1, k_max_val + 1):
-                        if not frontier or len(out) >= max_vertices_val:
-                            break
-                        params = orjson.dumps(
-                            {
-                                "tenant_id": tenant_id_val,
-                                "frontier_ids": frontier,
-                                "seen_ids": visited_ids,
-                                "relationship_types": permitted,
-                            }
-                        ).decode()
-                        await cur.execute(query, (params,))
-                        rows = await cur.fetchall()
-                        next_frontier: list[str] = []
-                        for row in rows:
-                            if not row or row[0] is None:
-                                continue
-                            node_id = str(row[0]).strip('"')
-                            if not node_id or node_id in seen:
-                                continue
-                            seen.add(node_id)
-                            visited_ids.append(node_id)
-                            next_frontier.append(node_id)
-                            if depth >= k_min_val:
-                                out.append(node_id)
-                            if len(next_frontier) >= max_vertices_val:
+            tenant_id_val = normalize_tenant_id(tenant_id)
+            try:
+                async with self._client.tenant_connection(
+                    tenant_id_val
+                ) as conn:
+                    # AGE cannot alternate relationship labels in a variable-length pattern.
+                    query = sql.SQL("""
+                          SELECT * FROM cypher({graph}, $$
+                              MATCH (e)-[r]->(n)
+                              WHERE e.tenant_id = $tenant_id
+                                AND e.id IN $frontier_ids
+                                AND n.tenant_id = $tenant_id
+                                AND label(r) IN $relationship_types
+                                AND r.tenant_id = $tenant_id
+                                AND ({contract})
+                                AND NOT (n.id IN $seen_ids)
+                              RETURN DISTINCT n.id
+                              UNION
+                              MATCH (n)-[r]->(e)
+                              WHERE e.tenant_id = $tenant_id
+                                AND e.id IN $frontier_ids
+                                AND n.tenant_id = $tenant_id
+                                AND r.tenant_id = $tenant_id
+                                AND label(r) IN $relationship_types
+                                AND ({reverse_contract})
+                                AND NOT (n.id IN $seen_ids)
+                              RETURN DISTINCT n.id
+                          $$, %s::agtype) AS (id agtype)
+                          LIMIT {max_vertices}
+                    """).format(
+                        graph=sql.Literal(self._graph_name),
+                        max_vertices=sql.SQL(str(max_vertices_val)),
+                        contract=_relation_predicate("e", "n", "r"),
+                        reverse_contract=_relation_predicate("n", "e", "r"),
+                    )
+                    seen = {entity_id}
+                    visited_ids = [entity_id]
+                    frontier = [entity_id]
+                    out: list[str] = []
+                    async with conn.cursor() as cur:
+                        for depth in range(1, k_max_val + 1):
+                            if not frontier or len(out) >= max_vertices_val:
                                 break
-                        frontier = next_frontier
-        except Exception as exc:
-            raise GraphOperationError(
-                "get_entity_k_hop_neighbors", str(exc)
-            ) from exc
+                            params = orjson.dumps(
+                                {
+                                    "tenant_id": tenant_id_val,
+                                    "frontier_ids": frontier,
+                                    "seen_ids": visited_ids,
+                                    "relationship_types": permitted,
+                                }
+                            ).decode()
+                            await cur.execute(query, (params,))
+                            rows = await cur.fetchall()
+                            next_frontier: list[str] = []
+                            for row in rows:
+                                if not row or row[0] is None:
+                                    continue
+                                node_id = str(row[0]).strip('"')
+                                if not node_id or node_id in seen:
+                                    continue
+                                seen.add(node_id)
+                                visited_ids.append(node_id)
+                                next_frontier.append(node_id)
+                                if depth >= k_min_val:
+                                    out.append(node_id)
+                                if len(next_frontier) >= max_vertices_val:
+                                    break
+                            frontier = next_frontier
+            except Exception as exc:
+                raise GraphOperationError(
+                    "get_entity_k_hop_neighbors", str(exc)
+                ) from exc
 
-        return out
+            return out
 
     async def get_event_ids_for_entities(
         self,
@@ -626,113 +875,131 @@ class GraphStore:
         Raises:
             GraphOperationError: If the query execution fails.
         """
-        if not entity_ids or not relationship_types:
-            return []
+        async with protected_gol_state_effect(
+            operation="read",
+            tenant_id=tenant_id,
+            destination="causal_state",
+            purpose="causal_analysis",
+        ):
+            if not entity_ids or not relationship_types:
+                return []
 
-        permitted = _permitted_relations(relationship_types)
-        max_events_val = int(max_events)
-        if max_events_val < 1:
-            raise GraphOperationError(
-                "get_event_ids_for_entities", "invalid event limit"
-            )
-        tenant_id_val = normalize_tenant_id(tenant_id)
-        params = orjson.dumps(
-            {
-                "entity_ids": entity_ids,
-                "tenant_id": tenant_id_val,
-                "relationship_types": permitted,
-                "window_start": window_start.isoformat(),
-                "window_end": window_end.isoformat(),
-            }
-        ).decode()
-
-        try:
-            async with self._client.tenant_connection(tenant_id_val) as conn:
-                query = sql.SQL("""
-                      SELECT * FROM cypher({graph_name}, $$
-                          UNWIND $entity_ids AS eid
-                          MATCH (ent:Entity {{tenant_id: $tenant_id, id: eid}})-[r]->(ev:Event)
-                          WHERE exists(ev.timestamp)
-                            AND ev.tenant_id = $tenant_id
-                            AND label(r) IN $relationship_types
-                            AND r.tenant_id = $tenant_id
-                            AND ({contract})
-                            AND ev.timestamp >= $window_start
-                            AND ev.timestamp <= $window_end
-                        RETURN DISTINCT ev.id
-                        UNION
-                          UNWIND $entity_ids AS eid
-                          MATCH (ev:Event)-[r]->(ent:Entity {{tenant_id: $tenant_id, id: eid}})
-                          WHERE ev.tenant_id = $tenant_id
-                            AND r.tenant_id = $tenant_id
-                            AND label(r) IN $relationship_types
-                            AND ({reverse_contract})
-                            AND ev.timestamp >= $window_start
-                            AND ev.timestamp <= $window_end
-                          RETURN DISTINCT ev.id
-                    $$, %s::agtype) AS (id agtype)
-                    LIMIT {max_events}
-                """).format(
-                    graph_name=sql.Literal(self._graph_name),
-                    max_events=sql.SQL(str(max_events_val)),
-                    contract=_relation_predicate("ent", "ev", "r"),
-                    reverse_contract=_relation_predicate("ev", "ent", "r"),
+            permitted = _permitted_relations(relationship_types)
+            max_events_val = int(max_events)
+            if max_events_val < 1:
+                raise GraphOperationError(
+                    "get_event_ids_for_entities", "invalid event limit"
                 )
-                async with conn.cursor() as cur:
-                    await cur.execute(query, (params,))
-                    rows = await cur.fetchall()
-        except Exception as exc:
-            raise GraphOperationError(
-                "get_event_ids_for_entities", str(exc)
-            ) from exc
+            tenant_id_val = normalize_tenant_id(tenant_id)
+            params = orjson.dumps(
+                {
+                    "entity_ids": entity_ids,
+                    "tenant_id": tenant_id_val,
+                    "relationship_types": permitted,
+                    "window_start": window_start.isoformat(),
+                    "window_end": window_end.isoformat(),
+                }
+            ).decode()
 
-        return [
-            str(row[0]).strip('"') for row in rows if row and row[0] is not None
-        ]
+            try:
+                async with self._client.tenant_connection(
+                    tenant_id_val
+                ) as conn:
+                    query = sql.SQL("""
+                          SELECT * FROM cypher({graph_name}, $$
+                              UNWIND $entity_ids AS eid
+                              MATCH (ent:Entity {{tenant_id: $tenant_id, id: eid}})-[r]->(ev:Event)
+                              WHERE exists(ev.timestamp)
+                                AND ev.tenant_id = $tenant_id
+                                AND label(r) IN $relationship_types
+                                AND r.tenant_id = $tenant_id
+                                AND ({contract})
+                                AND ev.timestamp >= $window_start
+                                AND ev.timestamp <= $window_end
+                            RETURN DISTINCT ev.id
+                            UNION
+                              UNWIND $entity_ids AS eid
+                              MATCH (ev:Event)-[r]->(ent:Entity {{tenant_id: $tenant_id, id: eid}})
+                              WHERE ev.tenant_id = $tenant_id
+                                AND r.tenant_id = $tenant_id
+                                AND label(r) IN $relationship_types
+                                AND ({reverse_contract})
+                                AND ev.timestamp >= $window_start
+                                AND ev.timestamp <= $window_end
+                              RETURN DISTINCT ev.id
+                        $$, %s::agtype) AS (id agtype)
+                        LIMIT {max_events}
+                    """).format(
+                        graph_name=sql.Literal(self._graph_name),
+                        max_events=sql.SQL(str(max_events_val)),
+                        contract=_relation_predicate("ent", "ev", "r"),
+                        reverse_contract=_relation_predicate("ev", "ent", "r"),
+                    )
+                    async with conn.cursor() as cur:
+                        await cur.execute(query, (params,))
+                        rows = await cur.fetchall()
+            except Exception as exc:
+                raise GraphOperationError(
+                    "get_event_ids_for_entities", str(exc)
+                ) from exc
+
+            return [
+                str(row[0]).strip('"')
+                for row in rows
+                if row and row[0] is not None
+            ]
 
     async def insert_event_on_connection(
         self, conn: AsyncConnection[TupleRow], event: EventRecord
     ) -> None:
         """Inserts an event vertex and log table record using an active connection transaction."""
         tenant_id = normalize_tenant_id(event.tenant_id)
-        props = event.properties.copy()
-        if "tenant_id" in props:
-            require_same_tenant(tenant_id, props["tenant_id"])
-        props["tenant_id"] = tenant_id
-        props["timestamp"] = event.timestamp.isoformat()
-        props["event_type"] = event.event_type.value
-        if event.location_coords:
-            location: list[JsonValue] = list(event.location_coords)
-            props["location"] = location
-
-        await self.ensure_vertex_on_connection(
-            conn,
-            GraphVertex(
-                vertex_id=event.event_id,
-                label=GraphNodeKind.EVENT,
-                tenant_id=tenant_id,
-                properties=props,
-                ontology_ref=event.ontology_ref,
-            ),
+        vertex = GraphVertex(
+            event.event_id,
+            GraphNodeKind.EVENT,
+            tenant_id,
+            event.properties,
+            event.ontology_ref,
         )
+        async with self._vertex_scope(vertex, self._vertex_params(vertex)):
+            props = event.properties.copy()
+            if "tenant_id" in props:
+                require_same_tenant(tenant_id, props["tenant_id"])
+            props["tenant_id"] = tenant_id
+            props["timestamp"] = event.timestamp.isoformat()
+            props["event_type"] = event.event_type.value
+            if event.location_coords:
+                location: list[JsonValue] = list(event.location_coords)
+                props["location"] = location
 
-        query = sql.SQL("""
-            INSERT INTO eskg_events (
-                tenant_id, event_id, event_type, event_time, properties
+            await self.ensure_vertex_on_connection(
+                conn,
+                GraphVertex(
+                    vertex_id=event.event_id,
+                    label=GraphNodeKind.EVENT,
+                    tenant_id=tenant_id,
+                    properties=props,
+                    ontology_ref=event.ontology_ref,
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s::jsonb)
-            ON CONFLICT (tenant_id, event_id, event_time) DO NOTHING
-        """)
-        await conn.execute(
-            query,
-            (
-                tenant_id,
-                event.event_id,
-                event.event_type.value,
-                event.timestamp,
-                orjson.dumps(props).decode(),
-            ),
-        )
+
+            query = sql.SQL("""
+                INSERT INTO eskg_events (
+                    tenant_id, event_id, event_type, event_time, properties
+                )
+                VALUES (%s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (tenant_id, event_id, event_time) DO NOTHING
+            """)
+            await conn.execute(
+                query,
+                (
+                    tenant_id,
+                    event.event_id,
+                    event.event_type.value,
+                    event.timestamp,
+                    orjson.dumps(props).decode(),
+                ),
+            )
 
     async def insert_event(self, event: EventRecord) -> None:
         """Inserts an event vertex and log table record inside a new transaction.
@@ -740,19 +1007,29 @@ class GraphStore:
         Raises:
             GraphOperationError: If the insertions fail.
         """
-        try:
-            async with self._client.tenant_connection(event.tenant_id) as conn:
-                async with conn.transaction():
-                    await self.insert_event_on_connection(conn, event)
-        except Exception as exc:
-            raise GraphOperationError("insert_event", str(exc)) from exc
-
-        logger.debug(
-            "event_inserted",
-            tenant_id=event.tenant_id,
-            event_id=event.event_id,
-            type=event.event_type,
+        vertex = GraphVertex(
+            event.event_id,
+            GraphNodeKind.EVENT,
+            event.tenant_id,
+            event.properties,
+            event.ontology_ref,
         )
+        async with self._vertex_scope(vertex, self._vertex_params(vertex)):
+            try:
+                async with self._client.tenant_connection(
+                    event.tenant_id
+                ) as conn:
+                    async with conn.transaction():
+                        await self.insert_event_on_connection(conn, event)
+            except Exception as exc:
+                raise GraphOperationError("insert_event", str(exc)) from exc
+
+            logger.debug(
+                "event_inserted",
+                tenant_id=event.tenant_id,
+                event_id=event.event_id,
+                type=event.event_type,
+            )
 
     async def link_entity_to_event(
         self,
@@ -814,65 +1091,32 @@ class GraphStore:
     ) -> None:
         """Appends a structured state record into a hyper-table using an active transaction connection."""
         tenant_id = normalize_tenant_id(state.tenant_id)
-        state_json = orjson.dumps(state.state_value).decode()
+        async with self._state_scope(state) as receipt:
+            if not receipt:
+                raise GraphOperationError(
+                    "graph_contract", "GOL receipt unavailable"
+                )
+            state_json = orjson.dumps(
+                {
+                    **state.state_value,
+                    "gol_value": state.state_value,
+                    "gol_receipt": receipt,
+                }
+            ).decode()
 
-        geom_wkt = None
-        if "lat" in state.state_value and "lon" in state.state_value:
-            geom_wkt = f"SRID=4326;POINT({state.state_value['lon']} {state.state_value['lat']})"
-
-        query = sql.SQL("""
-            INSERT INTO entity_states (
-                entity_id, event_id, state_type, state_value, geom, event_time,
-                tenant_id
-            )
-            VALUES (%s, %s, %s, %s::jsonb, ST_GeomFromEWKT(%s), %s, %s)
-        """)
-        await conn.execute(
-            query,
-            (
-                state.entity_id,
-                state.event_id,
-                state.state_type,
-                state_json,
-                geom_wkt,
-                state.event_time,
-                tenant_id,
-            ),
-        )
-
-    async def insert_entity_state(self, state: EntityStateRecord) -> None:
-        """Appends a single structured state snapshot into a database hyper-table."""
-        async with self._client.tenant_connection(state.tenant_id) as conn:
-            async with conn.transaction():
-                await self.insert_entity_state_on_connection(conn, state)
-        logger.debug(
-            "entity_state_inserted",
-            tenant_id=state.tenant_id,
-            entity_id=state.entity_id,
-            state_type=state.state_type,
-        )
-
-    async def insert_entity_states_batch_on_connection(
-        self,
-        conn: AsyncConnection[TupleRow],
-        states: list[EntityStateRecord],
-        *,
-        expected_tenant_id: str,
-    ) -> None:
-        """Executes a batch multi-row insertion into a database state hyper-table connection."""
-        if not states:
-            return
-
-        tenant_id = normalize_tenant_id(expected_tenant_id)
-        params = []
-        for state in states:
-            require_same_tenant(tenant_id, state.tenant_id)
-            state_json = orjson.dumps(state.state_value).decode()
             geom_wkt = None
             if "lat" in state.state_value and "lon" in state.state_value:
                 geom_wkt = f"SRID=4326;POINT({state.state_value['lon']} {state.state_value['lat']})"
 
-            params.append(
+            query = sql.SQL("""
+                INSERT INTO entity_states (
+                    entity_id, event_id, state_type, state_value, geom, event_time,
+                    tenant_id
+                )
+                VALUES (%s, %s, %s, %s::jsonb, ST_GeomFromEWKT(%s), %s, %s)
+            """)
+            await conn.execute(
+                query,
                 (
                     state.entity_id,
                     state.event_id,
@@ -881,18 +1125,106 @@ class GraphStore:
                     geom_wkt,
                     state.event_time,
                     tenant_id,
-                )
+                ),
             )
 
-        query = sql.SQL("""
-            INSERT INTO entity_states (
-                entity_id, event_id, state_type, state_value, geom, event_time,
-                tenant_id
+    async def insert_entity_state(self, state: EntityStateRecord) -> None:
+        """Appends a single structured state snapshot into a database hyper-table."""
+        async with self._state_scope(state):
+            async with self._client.tenant_connection(state.tenant_id) as conn:
+                async with conn.transaction():
+                    await self.insert_entity_state_on_connection(conn, state)
+            logger.debug(
+                "entity_state_inserted",
+                tenant_id=state.tenant_id,
+                entity_id=state.entity_id,
+                state_type=state.state_type,
             )
-            VALUES (%s, %s, %s, %s::jsonb, ST_GeomFromEWKT(%s), %s, %s)
-        """)
-        async with conn.cursor() as cur:
-            await cur.executemany(query, params)
+
+    async def insert_entity_states_batch_on_connection(
+        self,
+        conn: AsyncConnection[TupleRow],
+        states: list[EntityStateRecord],
+        *,
+        expected_tenant_id: str,
+        gol_target: str | None = None,
+        business_values: list[tuple[dict[str, JsonValue], str]] | None = None,
+    ) -> None:
+        """Executes a batch multi-row insertion into a database state hyper-table connection."""
+        if not states:
+            return
+
+        tenant_id = normalize_tenant_id(expected_tenant_id)
+        if gol_target and (
+            business_values is None or len(business_values) != len(states)
+        ):
+            raise GraphOperationError(
+                "graph_contract", "GOL state provenance unavailable"
+            )
+        effects = [
+            self.state_write_effect(state, gol_target)
+            if gol_target
+            else make_gol_state_effect(
+                operation="write",
+                tenant_id=tenant_id,
+                destination="eskg",
+                purpose="persistence",
+                derived=True,
+                instance_id=f"state:{state.entity_id}:{state.event_id}:{state.state_type}",
+                proposal=state.state_value,
+            )
+            for state in states
+        ]
+        async with protected_gol_effects(
+            effects, tenant_id=tenant_id
+        ) as receipts:
+            params = []
+            for index, (state, effect, receipt) in enumerate(
+                zip(states, effects, receipts, strict=True)
+            ):
+                require_same_tenant(tenant_id, state.tenant_id)
+                value = state.state_value
+                if gol_target and business_values is not None:
+                    if not receipt:
+                        raise GraphOperationError(
+                            "graph_contract", "GOL state receipt unavailable"
+                        )
+                    business_value, business_receipt = business_values[index]
+                    value = {
+                        **value,
+                        "gol_value": business_value,
+                        "gol_receipt": business_receipt,
+                        "gol_state_symbol_key": gol_target,
+                        "gol_state_id": effect.instance_id,
+                        "gol_state_value": effect.proposal,
+                        "gol_state_receipt": receipt,
+                    }
+                state_json = orjson.dumps(value).decode()
+                geom_wkt = None
+                if "lat" in state.state_value and "lon" in state.state_value:
+                    geom_wkt = f"SRID=4326;POINT({state.state_value['lon']} {state.state_value['lat']})"
+
+                params.append(
+                    (
+                        state.entity_id,
+                        state.event_id,
+                        state.state_type,
+                        state_json,
+                        geom_wkt,
+                        state.event_time,
+                        tenant_id,
+                    )
+                )
+
+            query = sql.SQL("""
+                INSERT INTO entity_states (
+                    entity_id, event_id, state_type, state_value, geom, event_time,
+                    tenant_id
+                )
+                VALUES (%s, %s, %s, %s::jsonb, ST_GeomFromEWKT(%s), %s, %s)
+            """)
+            async with conn.cursor() as cur:
+                await cur.executemany(query, params)
 
     async def insert_entity_states_batch(
         self, states: list[EntityStateRecord]
@@ -902,14 +1234,27 @@ class GraphStore:
             return
 
         tenant_id = normalize_tenant_id(states[0].tenant_id)
-        async with self._client.tenant_connection(tenant_id) as conn:
-            async with conn.transaction():
-                await self.insert_entity_states_batch_on_connection(
-                    conn, states, expected_tenant_id=tenant_id
-                )
+        effects = [
+            make_gol_state_effect(
+                operation="write",
+                tenant_id=tenant_id,
+                destination="eskg",
+                purpose="persistence",
+                derived=True,
+                instance_id=f"state:{state.entity_id}:{state.event_id}:{state.state_type}",
+                proposal=state.state_value,
+            )
+            for state in states
+        ]
+        async with protected_gol_effects(effects, tenant_id=tenant_id):
+            async with self._client.tenant_connection(tenant_id) as conn:
+                async with conn.transaction():
+                    await self.insert_entity_states_batch_on_connection(
+                        conn, states, expected_tenant_id=tenant_id
+                    )
 
-        logger.debug(
-            "entity_states_batch_inserted",
-            tenant_id=tenant_id,
-            count=len(states),
-        )
+            logger.debug(
+                "entity_states_batch_inserted",
+                tenant_id=tenant_id,
+                count=len(states),
+            )

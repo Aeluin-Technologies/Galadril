@@ -1,21 +1,8 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
-    name = "test_model",
-    srcs = ["test_model.py"],
-    deps = [
-        "//platform/ontology/src/galadril_ontology",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_runtime",
-    srcs = ["test_runtime.py"],
-    deps = [
-        "//platform/ontology/src/galadril_ontology",
-        "@pip//anyio",  # keep: pytest plugin loaded at runtime
-        "@pip//pydantic",
-        "@pip//pytest",
-    ],
+    name = "test_gol_runtime",
+    srcs = ["test_gol_runtime.py"],
+    main = "test_gol_runtime.py",
+    deps = ["//platform/ontology/src/galadril_ontology", "@pip//httpx", "@pip//pydantic"],
 )

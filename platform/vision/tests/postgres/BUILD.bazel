@@ -41,6 +41,7 @@ py_test(
     srcs = ["test_vector.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "@pip//anyio",  # keep: pytest plugin loaded at runtime
@@ -53,6 +54,7 @@ py_test(
     srcs = ["test_graph.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "@pip//anyio",  # keep: pytest plugin loaded at runtime

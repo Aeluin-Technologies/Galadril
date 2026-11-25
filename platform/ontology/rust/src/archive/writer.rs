@@ -88,6 +88,15 @@ pub fn compile_archive(
             ))?,
         )?;
     }
+    for (owner, contract) in crate::validation::contracts(project)
+        .map_err(|_| ArchiveError::Encoding)?
+    {
+        writer.add(
+            Kind::Definition,
+            format!("v/{}", target_key(&Reference::Symbol(owner))),
+            &contract.encode().map_err(|_| ArchiveError::Encoding)?,
+        )?;
+    }
     for (symbol, id) in project.symbols() {
         let definition = project
             .modules()

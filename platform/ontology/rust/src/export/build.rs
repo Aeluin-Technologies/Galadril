@@ -1,26 +1,27 @@
 //! Build closed schemas from independently approved metadata nodes.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 
 use serde_json::{Map, Value, json};
 
-use super::model::{Definition, Field};
+use super::model::{Definition, Field, FieldKind};
 use super::source::Source;
 use super::{
     ExportError, ExportOptions, ExportRequest, ExternalMappings,
     MappingPrecision, Projection, SchemaDocument, SchemaPart, SchemaProfile,
     Selection, access_for, is_description, scalar,
 };
-use crate::authorization::{PermissionProvider, TrustedRuntime};
+use crate::authorization::{Access, PermissionProvider, TrustedRuntime};
 use crate::{FieldRef, Name, Reference, SymbolRef, TypeRef};
 
 pub(super) async fn export(
     source: &impl Source,
     request: &ExportRequest<'_>,
-    runtime: &impl TrustedRuntime,
-    provider: &impl PermissionProvider,
+    runtime: &(impl TrustedRuntime + Sync),
+    provider: &(impl PermissionProvider + Sync),
 ) -> Result<SchemaDocument, ExportError> {
     let projection = request.projection;
     let part = request.part;
@@ -185,7 +186,7 @@ struct Builder<'a, S, R, P> {
     count: usize,
 }
 
-impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
+impl<S: Source, R: TrustedRuntime + Sync, P: PermissionProvider + Sync>
     Builder<'_, S, R, P>
 {
     fn optional(&self, ty: &TypeRef) -> bool {
@@ -281,8 +282,13 @@ impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
         &'a mut self,
         ty: &'a TypeRef,
         depth: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, ExportError>> + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<Value>, ExportError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             self.spend(depth)?;
             let value = match ty {
@@ -397,8 +403,13 @@ impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
         definition: Definition,
         selection: &'a Selection,
         depth: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, ExportError>> + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<Value>, ExportError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             self.spend(depth)?;
             match definition {
@@ -435,26 +446,43 @@ impl<S: Source, R: TrustedRuntime, P: PermissionProvider>
     }
 }
 
+pub(super) enum Proposal<'a> {
+    Projection(&'a Value),
+    Replacement(&'a Value),
+}
+
 pub(super) async fn submit(
     source: &impl Source,
     document: &SchemaDocument,
-    selection: &Selection,
-    proposal: &Value,
-    runtime: &impl TrustedRuntime,
-    provider: &impl PermissionProvider,
-    business: &impl super::GolValidator,
+    access: &Access,
+    proposal: Proposal<'_>,
+    runtime: &(impl TrustedRuntime + Sync),
+    provider: &(impl PermissionProvider + Sync),
+    business: &(impl super::GolValidator + Sync),
 ) -> Result<(), ExportError> {
-    document.validate_json(proposal)?;
-    let properties = proposal.as_object().ok_or(ExportError::InvalidJson)?;
-    let Reference::Symbol(symbol) = &selection.access.route.target else {
+    let value = match proposal {
+        Proposal::Projection(value) | Proposal::Replacement(value) => value,
+    };
+    document.validate_json(value)?;
+    let properties = value.as_object().ok_or(ExportError::InvalidJson)?;
+    let Reference::Symbol(symbol) = &access.route.target else {
         return Err(ExportError::Unsupported);
     };
     let Definition::Entity { mut fields } = source.definition(symbol).await?
     else {
         return Err(ExportError::Unsupported);
     };
+    if matches!(proposal, Proposal::Replacement(_)) {
+        for (name, field) in &fields {
+            if !properties.contains_key(name.as_str()) &&
+                !can_omit(source, &field.kind).await?
+            {
+                return Err(ExportError::InvalidJson);
+            }
+        }
+    }
     let mut requests = vec![access_for(
-        &selection.access,
+        access,
         symbol.clone().into(),
         crate::authorization::Operation::Write,
     )];
@@ -466,7 +494,7 @@ pub(super) async fn submit(
         let field = fields.remove(&name).ok_or(ExportError::Unavailable)?;
         assignment_type(source, field.kind.value_type()?, 0).await?;
         requests.push(access_for(
-            &selection.access,
+            access,
             FieldRef::new(symbol.clone(), name).into(),
             crate::authorization::Operation::Write,
         ));
@@ -477,12 +505,40 @@ pub(super) async fn submit(
         }
     }
     let target = requests.first().ok_or(ExportError::Unavailable)?;
-    if business.validate(target, proposal).await !=
-        super::GolValidation::Accepted
+    if business.validate(target, value).await != super::GolValidation::Accepted
     {
         return Err(ExportError::Business);
     }
     Ok(())
+}
+
+/// Resolves optional aliases against the full canonical record, including
+/// fields absent from the caller's authorized metadata projection.
+async fn can_omit(
+    source: &impl Source,
+    kind: &FieldKind,
+) -> Result<bool, ExportError> {
+    let mut ty = match kind {
+        FieldKind::Key(ty) | FieldKind::Value(ty) => Cow::Borrowed(ty),
+        FieldKind::OwnedAttribute { cardinality, .. } => {
+            return Ok(cardinality.min == 0);
+        },
+    };
+    for _ in 0..=32 {
+        match ty.as_ref() {
+            TypeRef::Option(_) => return Ok(true),
+            TypeRef::Named(symbol) => {
+                let target = match source.definition(symbol).await? {
+                    Definition::TypeAlias { target } |
+                    Definition::Attribute { value_type: target } => target,
+                    _ => return Ok(false),
+                };
+                ty = Cow::Owned(target);
+            },
+            _ => return Ok(false),
+        }
+    }
+    Err(ExportError::Limit)
 }
 
 /// Rejects record replacement until the runtime can bind writes to every
@@ -491,7 +547,7 @@ fn assignment_type<'a>(
     source: &'a impl Source,
     ty: TypeRef,
     depth: usize,
-) -> Pin<Box<dyn Future<Output = Result<(), ExportError>> + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<(), ExportError>> + Send + 'a>> {
     Box::pin(async move {
         if depth > 32 {
             return Err(ExportError::Limit);

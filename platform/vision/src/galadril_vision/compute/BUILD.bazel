@@ -25,7 +25,7 @@ py_library(
         ":helpers",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "//platform/vision/src/galadril_vision/identity",
+        "//platform/vision/src/galadril_vision/identity:contracts",
         "@pip//numpy",
         "@pip//opencv_python_headless",
         "@pip//orjson",

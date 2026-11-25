@@ -55,13 +55,45 @@
           "state_type": {
             "type": "string"
           },
-          "ontology_resource_id": {
+          "gol_symbol_key": {
             "type": "string"
           },
-          "event_ontology_resource_id": {
+          "gol_event_symbol_key": {
             "type": "string"
+          },
+          "gol_edge_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an ESKG relationship and its endpoints."
+          },
+          "gol_entity_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an entity state observation."
+          },
+          "gol_embedding_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for an embedding and its provenance."
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
-        }
+        },
+        "required": [
+          "gol_symbol_key",
+          "gol_event_symbol_key",
+          "gol_edge_symbol_key",
+          "gol_entity_state_symbol_key",
+          "gol_embedding_symbol_key",
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "sink",
       "model_class": null
@@ -78,8 +110,24 @@
       "description": "Index source passages, grounded facts and vectors for authorized multi-hop retrieval. Connect ESKG in parallel to authorize their canonical events.",
       "parameters_schema": {
         "type": "object",
-        "properties": {},
-        "additionalProperties": false
+        "properties": {
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "sink",
       "model_class": null
@@ -109,8 +157,23 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 256
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
-        }
+        },
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "resolve",
       "model_class": null
@@ -137,10 +200,23 @@
           },
           "cron": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
         "required": [
-          "amarth_target_outcome"
+          "amarth_target_outcome",
+          "gol_transfer_symbol_key"
         ]
       },
       "step_type": "causal",
@@ -161,9 +237,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.audio.whisper.WhisperModel"
@@ -183,9 +274,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.embedding.bgem3.BgeM3Model"
@@ -205,9 +311,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.embedding.qwen3.Qwen3EmbeddingModel"
@@ -227,9 +348,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.embedding.siglip.SigLIPModel"
@@ -249,9 +385,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.image.face_recognition.FaceRecognitionModel"
@@ -271,9 +422,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.image.grounded_sam.GroundedSamModel"
@@ -293,9 +459,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.image.owl.OwlV2Model"
@@ -315,9 +496,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.image.prithvi.PrithviEOModel"
@@ -337,9 +533,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.osint.geoclip.GeoCLIPModel"
@@ -359,9 +570,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.temporal.time_series.TimesFMModel"
@@ -381,9 +607,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.text.eru.EruExtractorModel"
@@ -403,9 +644,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.text.glm_ocr.GlmOcrModel"
@@ -425,9 +681,24 @@
         "properties": {
           "action": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.text.got_ocr.GotOcrModel"
@@ -444,8 +715,24 @@
       "description": "Local multilingual BGE v2-m3 ONNX int8 reranking.",
       "parameters_schema": {
         "type": "object",
-        "properties": {},
-        "additionalProperties": true
+        "properties": {
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.reranking.BgeRerankerModel"
@@ -462,8 +749,24 @@
       "description": "Local Qwen3 reranking with trained yes/no logits.",
       "parameters_schema": {
         "type": "object",
-        "properties": {},
-        "additionalProperties": true
+        "properties": {
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "gol_transfer_symbol_key"
+        ]
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.qwen_reranking.QwenRerankerModel"
@@ -485,7 +788,8 @@
           "field",
           "pattern",
           "match_branch",
-          "default_branch"
+          "default_branch",
+          "gol_transfer_symbol_key"
         ],
         "properties": {
           "field": {
@@ -500,6 +804,18 @@
           },
           "default_branch": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         }
       }
@@ -519,7 +835,8 @@
         "type": "object",
         "required": [
           "field",
-          "instructions"
+          "instructions",
+          "gol_transfer_symbol_key"
         ],
         "properties": {
           "field": {
@@ -549,6 +866,18 @@
               "type": "string",
               "maxLength": 256
             }
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         }
       }
@@ -569,7 +898,8 @@
         "required": [
           "conditions",
           "match_branch",
-          "default_branch"
+          "default_branch",
+          "gol_transfer_symbol_key"
         ],
         "properties": {
           "conditions": {
@@ -590,6 +920,18 @@
           },
           "default_branch": {
             "type": "string"
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         }
       }
@@ -608,7 +950,8 @@
       "parameters_schema": {
         "type": "object",
         "required": [
-          "pipeline_ref"
+          "pipeline_ref",
+          "gol_transfer_symbol_key"
         ],
         "properties": {
           "pipeline_ref": {
@@ -630,6 +973,18 @@
                 "type": "string"
               }
             }
+          },
+          "gol_transfer_symbol_key": {
+            "type": "string",
+            "description": "Authorized GOL target for Kafka release under the original admitted calculation."
+          },
+          "gol_state_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for shared state reads and native state effects."
+          },
+          "gol_derived_symbol_key": {
+            "type": "string",
+            "description": "GOL contract for exact derived values persisted by this step."
           }
         }
       }

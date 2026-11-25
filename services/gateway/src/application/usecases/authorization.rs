@@ -20,49 +20,17 @@ use chrono::Timelike as _;
 use loth::engine::LothEngine;
 use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 
+use super::relationship_retry::resilient_structural_check;
 use crate::application::ports::iam_store::IamStore;
 use crate::domain::validate_tenant_id;
-
-/// Retries only idempotent dependency failures; every retry reads current
-/// policy.
-async fn resilient_structural_check<F, Fut>(
-    mut check: F,
-) -> Result<bool, AuthError>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<bool, AuthError>>,
-{
-    for attempt in 0..3_u32 {
-        match check().await {
-            Err(AuthError::SpiceDbStatus { operation, status })
-                if attempt < 2 &&
-                    matches!(
-                        status.code(),
-                        tonic::Code::Unavailable |
-                            tonic::Code::DeadlineExceeded |
-                            tonic::Code::ResourceExhausted |
-                            tonic::Code::Aborted
-                    ) =>
-            {
-                tracing::warn!(event.name = "authorization.check.retry", attempt = attempt + 1, grpc_code = ?status.code(), operation);
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    100 * u64::from(attempt + 1),
-                ))
-                .await;
-            },
-            result => return result,
-        }
-    }
-    Err(AuthError::ValidationError {
-        message: "Authorization retry budget exhausted".into(),
-    })
-}
 
 /// Dynamic request context.
 #[derive(
     Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize,
 )]
 pub struct QueryContext {
+    /// Set only after the authenticated transport rechecks revocable MFA.
+    pub mfa_verified: bool,
     pub entity_id: Option<String>,
     pub modality: Option<String>,
     pub state_type: Option<String>,
@@ -886,7 +854,7 @@ mod tests {
             std::future::ready(if attempts.get() == 1 {
                 Err(loth::types::AuthError::SpiceDbStatus {
                     operation: "check_permission",
-                    status: tonic::Status::unavailable("private endpoint"),
+                    status: tonic::Status::cancelled("private endpoint"),
                 })
             } else {
                 Ok(false)
@@ -901,6 +869,8 @@ mod tests {
     async fn structural_retry_is_bounded_and_never_retries_permanent_failures()
     {
         for (code, expected) in [
+            (tonic::Code::Cancelled, 3),
+            (tonic::Code::Internal, 3),
             (tonic::Code::Unavailable, 3),
             (tonic::Code::DeadlineExceeded, 3),
             (tonic::Code::PermissionDenied, 1),
@@ -909,7 +879,7 @@ mod tests {
             let attempts = std::cell::Cell::new(0);
             let result = super::resilient_structural_check(|| {
                 attempts.set(attempts.get() + 1);
-                std::future::ready(Err(
+                std::future::ready(Err::<bool, _>(
                     loth::types::AuthError::SpiceDbStatus {
                         operation: "check_permission",
                         status: tonic::Status::new(code, "private detail"),

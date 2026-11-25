@@ -23,6 +23,11 @@ EventString = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
 ]
 
+AdmissionHandle = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)
+]
+LineageProof = Annotated[str, StringConstraints(min_length=1, max_length=65536)]
+
 
 def utc_now() -> datetime:
     """Returns an aware UTC timestamp for event envelopes."""
@@ -51,7 +56,9 @@ class EventStatus(StrEnum):
 class EventEnvelope(BaseModel):
     """Common identity and causality fields for all durable events."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", hide_input_in_errors=True
+    )
 
     schema_version: Literal[1] = 1
     event_id: UUID = Field(default_factory=uuid4)
@@ -77,6 +84,8 @@ class PipelineCommand(EventEnvelope):
     step: EventString
     step_type: StepType
     resource_class: ResourceClass
+    admission: AdmissionHandle | None = Field(default=None, repr=False)
+    lineage: LineageProof | None = Field(default=None, repr=False)
     attempt: int = Field(default=0, ge=0)
     payload: dict[str, JsonValue] = Field(default_factory=dict)
     attributes: dict[str, JsonValue] = Field(default_factory=dict)
@@ -94,6 +103,7 @@ class StepResult(EventEnvelope):
     step: EventString
     step_type: StepType
     resource_class: ResourceClass
+    admission: AdmissionHandle | None = Field(default=None, repr=False)
     status: EventStatus
     attempt: int = Field(default=0, ge=0)
     duration_seconds: float = Field(ge=0.0)

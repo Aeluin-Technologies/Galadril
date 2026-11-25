@@ -1,0 +1,5 @@
+filegroup(
+    name = "configuration",
+    srcs = glob(["*.json", "*.cedar", "*.cedarschema", "*.yaml"]),
+    visibility = ["//visibility:public"],
+)

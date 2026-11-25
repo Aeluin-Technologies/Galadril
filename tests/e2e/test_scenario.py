@@ -6,17 +6,64 @@ import csv
 import io
 import json
 from collections import Counter
+from dataclasses import replace
 
 import pytest
 from empirical_data import load_retail_rows, load_trial_rows
+from retrieval_benchmark import load_benchmark
 from scenario import (
     ADMIN,
     RETURNS_STEWARDS,
     SALES_STEWARDS,
+    RetailState,
+    assert_retail_identities,
     build_access_oracle,
     build_retail_uploads,
     encode_trial_rows,
+    retail_smoke_rows,
 )
+
+
+@pytest.mark.parametrize(
+    "violation", [None, "cross-owner", "split", "duplicate-event"]
+)
+def test_retail_identities_follow_the_uploader_scope(
+    violation: str | None,
+) -> None:
+    """Checks both authorized merges and separation across uploader scopes."""
+    uploads = build_retail_uploads(load_retail_rows())
+    states = [
+        RetailState(
+            entity_id=f"{row.customer_id}/{upload.actor}",
+            event_id=f"event/{row.source_row}",
+            customer_id=row.customer_id,
+            source_row=row.source_row,
+        )
+        for upload in uploads
+        for row in upload.rows
+    ]
+    first = states[0]
+    if violation == "cross-owner":
+        other_index = next(
+            index
+            for index, state in enumerate(states)
+            if state.customer_id == first.customer_id
+            and state.entity_id != first.entity_id
+        )
+        states[other_index] = replace(
+            states[other_index], entity_id=first.entity_id
+        )
+    elif violation == "split":
+        assert states[1].entity_id == first.entity_id
+        states[1] = replace(states[1], entity_id="separate-identity")
+    elif violation == "duplicate-event":
+        states[1] = replace(states[1], event_id=first.event_id)
+    if violation is not None:
+        with pytest.raises(AssertionError):
+            assert_retail_identities(states, uploads)
+        return
+    events = assert_retail_identities(states, uploads)
+    assert Counter(map(len, events.values())) == {1: 22, 9: 22, 10: 2}
 
 
 def test_upload_plan_preserves_lineage_and_principals() -> None:
@@ -94,6 +141,72 @@ def test_trial_payload_preserves_all_anonymous_randomized_rows() -> None:
         1,
         6,
     }
+
+
+def test_retail_smoke_preserves_actor_scopes_and_repeated_observations() -> (
+    None
+):
+    rows = retail_smoke_rows(load_retail_rows(), set())
+    uploads = build_retail_uploads(rows, full=False)
+    assert len(rows) == 24
+    assert {
+        upload.actor for upload in uploads if upload.data_type == "sales"
+    } == set(SALES_STEWARDS)
+    assert {
+        upload.actor for upload in uploads if upload.data_type == "returns"
+    } == set(RETURNS_STEWARDS)
+    access = build_access_oracle(uploads)
+    assert access["e2e-exact-reader"] == {"sales-00.csv"}
+    assert access["e2e-analyst"] == {
+        "returns-00.csv",
+        "returns-02.csv",
+        "sales-00.csv",
+        "sales-02.csv",
+        "sales-04.csv",
+        "sales-06.csv",
+    }
+    assert sum(len(upload.rows) for upload in uploads) == len(rows)
+
+
+def test_retail_ci_ingests_every_retrieval_source() -> None:
+    """Each retrieval citation must bind to evidence ingested by the CI profile."""
+    benchmark = load_benchmark()
+    sources = {
+        (document.customer_id, document.source_row)
+        for document in benchmark.documents
+    }
+    cohort = retail_smoke_rows(load_retail_rows(), sources)
+    uploads = build_retail_uploads(cohort, full=False)
+    ingested = {
+        (row.customer_id, row.source_row)
+        for upload in uploads
+        for row in upload.rows
+    }
+    assert len(ingested) == len(cohort) == 24
+    assert sources <= ingested, sources - ingested
+
+
+def test_retail_ci_reserves_sales_slots_for_late_citations() -> None:
+    rows = load_retail_rows()
+    customer = min(row.customer_id for row in rows)
+    purchases = tuple(
+        row for row in rows if row.customer_id == customer and not row.cancelled
+    )
+    required = {(customer, row.source_row) for row in purchases[-2:]}
+    cohort = retail_smoke_rows(rows, required)
+    assert (
+        tuple(
+            row
+            for row in cohort
+            if row.customer_id == customer and not row.cancelled
+        )
+        == purchases[-2:]
+    )
+
+
+def test_retail_ci_reports_an_unknown_retrieval_source() -> None:
+    with pytest.raises(ValueError, match="Unknown retail retrieval sources"):
+        retail_smoke_rows(load_retail_rows(), {(-1, -1)})
 
 
 if __name__ == "__main__":

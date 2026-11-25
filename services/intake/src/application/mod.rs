@@ -14,7 +14,9 @@ use serde_json::{Value, json};
 
 use crate::application::router::PipelineRouter;
 use crate::domain::models::FileEvent;
-use crate::domain::ports::{BlobStorage, EventProducer, IngestionServicePort};
+use crate::domain::ports::{
+    AuthzHints, BlobStorage, EventProducer, IngestionServicePort,
+};
 
 /// Standard event processor wrapping I/O bridges and dynamic tenant routing.
 pub struct IngestionService {
@@ -46,9 +48,9 @@ impl IngestionService {
         if value.is_empty() || value.chars().any(char::is_whitespace) {
             anyhow::bail!("authorization subject is invalid");
         }
-        let typed = if value.starts_with("user:") ||
-            value.starts_with("role:") ||
-            value.starts_with("group:")
+        let typed = if value.starts_with("user:")
+            || value.starts_with("role:")
+            || value.starts_with("group:")
         {
             value.to_owned()
         } else {
@@ -68,23 +70,28 @@ impl IngestionService {
         match subject_type {
             "user" if relation.is_none() => {},
             "role" | "group"
-                if !owner_only &&
-                    relation == Some("member") &&
-                    subject_id.starts_with(&format!("{tenant}/")) => {},
+                if !owner_only
+                    && relation == Some("member")
+                    && subject_id.starts_with(&format!("{tenant}/")) => {},
             _ => anyhow::bail!("authorization subject relation is invalid"),
         }
         Ok(typed)
     }
 
-    fn inject_authz(
-        record: &mut Value,
-        resource: &str,
-        tenant: &str,
-        viewers: &[String],
-        owner: Option<&String>,
-        authentication_provenance: Option<&String>,
-        delegation_id: Option<&String>,
-    ) -> Result<()> {
+    fn inject_authz(record: &mut Value, hints: &AuthzHints) -> Result<()> {
+        let resource = hints
+            .resource
+            .as_deref()
+            .context("Trusted object resource is missing")?;
+        let key = resource
+            .strip_prefix("raw:")
+            .context("Trusted object resource is invalid")?;
+        let tenant = hints.require_trusted_ingestion(key)?;
+        let viewers = &hints.viewers;
+        let owner = hints.owner.as_ref();
+        let authentication_provenance =
+            hints.authentication_provenance.as_ref();
+        let delegation_id = hints.delegation_id.as_ref();
         let obj = record
             .as_object_mut()
             .ok_or_else(|| anyhow!("record is not a JSON object"))?;
@@ -128,6 +135,7 @@ impl IngestionService {
                 "initiating_actor": owner.map_or("unknown", String::as_str),
                 "authentication_provenance": authentication_provenance,
                 "delegation_id": delegation_id,
+                "gol_admission": hints.gol_admission,
                 "requested_permission": "materialize",
                 "requested_resource": resource
             }),
@@ -240,18 +248,9 @@ impl IngestionServicePort for IngestionService {
                 .with_context(|| {
                     format!("Observation validation failed for {key}")
                 })?;
-                Self::inject_authz(
-                    record,
-                    hints
-                        .resource
-                        .as_deref()
-                        .context("Trusted object resource is missing")?,
-                    &tenant,
-                    &hints.viewers,
-                    hints.owner.as_ref(),
-                    hints.authentication_provenance.as_ref(),
-                    hints.delegation_id.as_ref(),
-                ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
+                Self::inject_authz(record, &hints).context(
+                    "Failed to inject trusted authorization context",
+                )?;
 
                 self.producer
                     .publish(
@@ -290,27 +289,62 @@ mod tests {
     use serde_json::json;
 
     use super::IngestionService;
+    use crate::domain::ports::AuthzHints;
+
+    fn trusted(resource: &str, admission: Option<&str>) -> AuthzHints {
+        AuthzHints {
+            tenant: Some("tenant-a".to_owned()),
+            viewers: Vec::new(),
+            owner: Some("alice".to_owned()),
+            source_principal: Some("service:gateway".to_owned()),
+            permission: Some("ingest".to_owned()),
+            resource: Some(resource.to_owned()),
+            authentication_provenance: Some(
+                "https://issuer.example".to_owned(),
+            ),
+            delegation_id: Some("delegation_1".to_owned()),
+            gol_admission: admission.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn authz_replaces_payload_admission_with_gateway_metadata() -> Result<()> {
+        let mut record = json!({"authz": {"gol_admission": "forged"}});
+        IngestionService::inject_authz(
+            &mut record,
+            &trusted("raw:tenant-a/source/object", Some("gateway-admission")),
+        )?;
+        assert_eq!(
+            record.pointer("/authz/gol_admission"),
+            Some(&json!("gateway-admission"))
+        );
+        assert!(
+            !format!(
+                "{:?}",
+                trusted(
+                    "raw:tenant-a/source/object",
+                    Some("secret-admission")
+                )
+            )
+            .contains("secret-admission")
+        );
+        Ok(())
+    }
 
     #[test]
     fn authz_lineage_preserves_gateway_raw_resource() -> Result<()> {
         let mut record = json!({"id": "observation_1"});
         IngestionService::inject_authz(
             &mut record,
-            "raw:tenant-a/raw/default/report.txt",
-            "tenant-a",
-            &[],
-            Some(&"alice".to_owned()),
-            Some(&"https://issuer.example".to_owned()),
-            Some(&"delegation_1".to_owned()),
+            &trusted("raw:tenant-a/raw/default/report.txt", None),
         )?;
-
         assert_eq!(
-            record["authz"]["requested_resource"],
-            "raw:tenant-a/raw/default/report.txt"
+            record.pointer("/authz/requested_resource"),
+            Some(&json!("raw:tenant-a/raw/default/report.txt"))
         );
         assert_eq!(
-            record["authz"]["tuples"][0]["resource"],
-            "raw:tenant-a/raw/default/report.txt"
+            record.pointer("/authz/tuples/0/resource"),
+            Some(&json!("raw:tenant-a/raw/default/report.txt"))
         );
         Ok(())
     }

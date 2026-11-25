@@ -119,6 +119,17 @@ pub(super) fn propagate(
         }
     }
 
+    for (target, floor) in &environment.target_floors {
+        let Some(current) = flows.get_mut(target) else {
+            return Err(Issue::new(
+                IssueKind::InvalidTarget,
+                Some(target.clone()),
+                "The IFC floor names an unknown target",
+            ));
+        };
+        *current = current.join(floor);
+    }
+
     let mut dependents = BTreeMap::<Reference, BTreeSet<Reference>>::new();
     let mut prerequisites = Edges::new();
     for reference in flows.keys() {

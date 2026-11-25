@@ -106,8 +106,8 @@ fn parse_sensor_json(content: &[u8]) -> Result<Vec<Value>> {
             .get("measurement_type")
             .and_then(Value::as_str)
             .is_some_and(|value| !value.trim().is_empty());
-        let has_value = record.get("value").is_some() ||
-            record.get("dimensions").is_some();
+        let has_value = record.get("value").is_some()
+            || record.get("dimensions").is_some();
         if !has_measurement || !has_value {
             bail!(
                 "sensor record {index} requires measurement_type and value or dimensions"
@@ -122,8 +122,8 @@ fn parse_media_reference(
     expected_family: &str,
 ) -> Result<Vec<Value>> {
     let media_type = normalized_media_type(context.media_type);
-    if media_type != "application/octet-stream" &&
-        !media_type.starts_with(expected_family)
+    if media_type != "application/octet-stream"
+        && !media_type.starts_with(expected_family)
     {
         bail!(
             "parser '{expected_family}' cannot accept media type '{media_type}'"
@@ -134,9 +134,9 @@ fn parse_media_reference(
 
 fn parse_document_reference(context: &ParseContext<'_>) -> Result<Vec<Value>> {
     let media_type = normalized_media_type(context.media_type);
-    if media_type.starts_with("image/") ||
-        media_type.starts_with("audio/") ||
-        media_type.starts_with("video/")
+    if media_type.starts_with("image/")
+        || media_type.starts_with("audio/")
+        || media_type.starts_with("video/")
     {
         bail!("parser 'document' cannot accept media type '{media_type}'");
     }

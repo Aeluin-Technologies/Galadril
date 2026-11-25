@@ -55,6 +55,33 @@ use crate::application::usecases::sso_admin::SsoAdminService;
 use crate::application::usecases::uploads::UploadService;
 use crate::config::AppConfig;
 
+#[async_trait::async_trait]
+impl crate::application::ports::upload_store::UploadAdmission
+    for crate::application::usecases::gol::GolService
+{
+    /// Keeps the storage coordinator on the same trusted GOL host boundary.
+    async fn issue_ingress(
+        &self,
+        tenant: &str,
+        user: &str,
+        source_object_id: &str,
+        revision: &str,
+        group: &str,
+        context: &crate::application::usecases::authorization::QueryContext,
+    ) -> Result<String> {
+        crate::application::usecases::gol::GolService::issue_ingress(
+            self,
+            tenant,
+            user,
+            source_object_id,
+            revision,
+            group,
+            context,
+        )
+        .await
+    }
+}
+
 /// Starts the authenticated, tenant-scoped GraphQL control plane.
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -255,6 +282,15 @@ async fn main() -> Result<()> {
             Err(std::env::VarError::NotPresent) => None,
             Err(error) => return Err(error.into()),
         };
+        let gol = Arc::new(crate::application::usecases::gol::GolService::from_environment(
+            registry_client.clone(),
+            Arc::clone(&identity),
+            Arc::clone(&iam_store_dyn),
+            Arc::clone(&authorization),
+            config.s3.as_ref(),
+            spicedb_endpoint,
+            spicedb_token,
+        ).await?);
         let registry_store =
             Arc::new(RegistryStore::new(registry_client, database.clone()));
         let control_plane_store = registry_store.clone();
@@ -263,6 +299,7 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
+            Arc::clone(&gol) as Arc<dyn crate::application::ports::control_plane_store::GolDisclosure>,
         ));
 
         let search_store = Arc::new(PgSearchStore::new(database.clone()));
@@ -298,12 +335,14 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
+            Arc::clone(&gol) as Arc<dyn crate::application::ports::upload_store::UploadAdmission>,
         ));
 
         let pipeline_store = registry_store;
         let causal = Arc::new(crate::application::usecases::causal::CausalService::new(
             Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
             Arc::clone(&authorization),
+            Arc::clone(&gol),
         ));
         let pengolo_store = Arc::new(crate::adapters::outbound::database::pengolo::PgPengoloStore::new(database.clone()));
         let document_index=Arc::new(crate::adapters::outbound::database::document_index::PgDocumentIndex::new(database.clone()));
@@ -315,7 +354,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&audit),
                 Arc::clone(&search),
                 Arc::clone(&explore),
-                causal,
+                Arc::clone(&causal),
                 conversation_store.clone(),
             ),
         );
@@ -339,7 +378,7 @@ async fn main() -> Result<()> {
         }
         let pengolo = Arc::new(crate::application::usecases::pengolo::PengoloService::new(
             pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
-        ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())));
+        ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())).with_causal_evidence(Arc::clone(&causal)));
         chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
         if let Some(compiler) = crate::adapters::outbound::document_compiler::CompilerClient::from_environment()? { chat_tools.set_document_compiler(Arc::new(compiler))?; }
         let maintenance=Arc::clone(&pengolo);
@@ -354,9 +393,10 @@ async fn main() -> Result<()> {
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
-        ));
+        ).with_causal_evidence(causal));
 
         let services = Arc::new(GatewayServices {
+            gol: Arc::clone(&gol),
             authorization: Arc::clone(&authorization),
             utils,
             local_provisioning: std::env::var("AUTH_LOCAL_LOGIN_ENABLED").is_ok_and(|value| value == "true"),

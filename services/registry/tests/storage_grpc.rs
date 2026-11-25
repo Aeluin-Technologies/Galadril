@@ -6,43 +6,194 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::{Credentials, Region};
+use galadril_ontology::archive::remote::{
+    Generation, RemoteOptions, RemoteStore,
+};
+use galadril_ontology::authorization::Instance;
 use galadril_registry::domain::Registry;
-use galadril_registry::grpc::{RegistryGrpc, registry_client};
+use galadril_registry::gol::{
+    GolAuthorityConfig, GolFile, registered_external_types,
+};
+use galadril_registry::gol_service::{GolPublicationConfig, SaveGolOntology};
+use galadril_registry::grpc::{RegistryGrpc, registry_client_with_key};
 use galadril_registry::proto::registry_server::RegistryServer;
 use galadril_registry::proto::{self};
 use galadril_registry::storage::{LakeFsConfig, LakeFsStore, S3Config};
 use reqwest::Client as HttpClient;
 use secrecy::SecretString;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
+#[path = "../src/metadata.rs"]
+mod metadata;
+
+const APPROVAL: &str =
+    include_str!("../../../infrastructure/gol/authorities.json");
+const SCHEMA: &str = include_str!("../../../schemas/spicedb/schema.zed");
+const SPICE_TOKEN: &str = "registry-isolated-publication-test";
+
+async fn spice_post(base: &str, path: &str, body: Value) -> Result<Value> {
+    Ok(HttpClient::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()?
+        .post(format!("{base}{path}"))
+        .bearer_auth(SPICE_TOKEN)
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+fn relationship(
+    kind: &str,
+    id: &str,
+    relation: &str,
+    subject_type: &str,
+    subject_id: &str,
+) -> Value {
+    json!({"resource":{"objectType":kind,"objectId":id},"relation":relation,"subject":{"object":{"objectType":subject_type,"objectId":subject_id}}})
+}
+
+async fn check(base: &str, id: &str, permission: &str) -> Result<bool> {
+    let answer=spice_post(base,"/v1/permissions/check",json!({"resource":{"objectType":"gol_resource","objectId":id},"permission":permission,"subject":{"object":{"objectType":"user","objectId":"test"}},"consistency":{"fullyConsistent":true}})).await?;
+    Ok(answer.get("permissionship").and_then(Value::as_str) ==
+        Some("PERMISSIONSHIP_HAS_PERMISSION"))
+}
+
+fn source_store(
+    lakefs_endpoint: &str,
+    s3_endpoint: &str,
+) -> Result<LakeFsStore> {
+    LakeFsStore::new(
+        LakeFsConfig {
+            endpoint: lakefs_endpoint.into(),
+            access_key: "registry-access".to_owned(),
+            secret_key: SecretString::from("registry-secret"),
+            repository_prefix: "galadril".to_owned(),
+            storage_namespace: "s3://lake/".to_owned(),
+            branch: "main".to_owned(),
+        },
+        S3Config {
+            endpoint: s3_endpoint.into(),
+            region: "us-east-1".to_owned(),
+            access_key: "minioadmin".to_owned(),
+            secret_key: SecretString::from("minioadmin"),
+        },
+    )
+}
+
+async fn concurrent_source_replacements_are_isolated(
+    lakefs: &str,
+    s3: &str,
+    revision: &str,
+    source: &str,
+) -> Result<()> {
+    use galadril_registry::storage::RevisionStore;
+    let left_store = source_store(lakefs, s3)?;
+    let right_store = source_store(lakefs, s3)?;
+    left_store.load("tenant_a", Some(revision)).await?;
+    right_store.load("tenant_a", Some(revision)).await?;
+    let left = Registry::new(left_store);
+    let right = Registry::new(right_store);
+    let gate = tokio::sync::Barrier::new(2);
+    let left_text =
+        format!("{source}\n// writer-left {}\n", "a".repeat(200_000));
+    let right_text =
+        format!("{source}\n// writer-right {}\n", "b".repeat(200_000));
+    let write_left = async {
+        gate.wait().await;
+        left.save_gol_ontology(SaveGolOntology {
+            tenant_id: "tenant_a",
+            ontology_id: "people",
+            display_name: "Left",
+            files: vec![GolFile {
+                path: "people.gol".into(),
+                text: left_text.clone(),
+            }],
+            author: "test",
+            expected_revision: Some(revision),
+        })
+        .await
+    };
+    let write_right = async {
+        gate.wait().await;
+        right
+            .save_gol_ontology(SaveGolOntology {
+                tenant_id: "tenant_a",
+                ontology_id: "people",
+                display_name: "Right",
+                files: vec![GolFile {
+                    path: "people.gol".into(),
+                    text: right_text.clone(),
+                }],
+                author: "test",
+                expected_revision: Some(revision),
+            })
+            .await
+    };
+    let (left_result, right_result) = tokio::join!(write_left, write_right);
+    let expected = match (left_result, right_result) {
+        (Ok(_), Err(error)) => {
+            ensure!(
+                error.to_string().contains("changed"),
+                "unexpected losing writer error: {error}"
+            );
+            ("Left", left_text)
+        },
+        (Err(error), Ok(_)) => {
+            ensure!(
+                error.to_string().contains("changed"),
+                "unexpected losing writer error: {error}"
+            );
+            ("Right", right_text)
+        },
+        _ => anyhow::bail!(
+            "concurrent source replacements did not produce exactly one commit and one conflict"
+        ),
+    };
+    let visible = left.gol_workspace("tenant_a", "people", None).await?;
+    ensure!(
+        visible.summary.display_name == expected.0 &&
+            visible
+                .files
+                .first()
+                .is_some_and(|file| file.text == expected.1),
+        "source bytes and catalog from different writers were mixed"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
 {
     let network = format!("galadril-registry-test-{}", std::process::id());
-    let minio_name = format!("galadril-minio-{}", std::process::id());
+    let minio_name = format!("galadril-rustfs-{}", std::process::id());
     let minio = GenericImage::new(
-        "bitnamilegacy/minio@sha256",
-        "6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20",
+        "rustfs/rustfs",
+        "1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c",
     )
     .with_exposed_port(9000.tcp())
-    .with_wait_for(WaitFor::message_on_stderr("API:"))
+    .with_wait_for(WaitFor::seconds(5))
     .with_network(&network)
     .with_container_name(&minio_name)
     .with_cmd([
-        "server",
-        "/bitnami/minio/data",
-        "--console-address",
-        ":9001",
+        "rustfs",
+        "/data",
     ])
-    .with_env_var("MINIO_ROOT_USER", "minioadmin")
-    .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
+    .with_env_var("RUSTFS_ACCESS_KEY", "minioadmin")
+    .with_env_var("RUSTFS_SECRET_KEY", "minioadmin")
+    .with_env_var("RUSTFS_CONSOLE_ENABLE", "false")
     .start()
     .await
-    .context("MinIO test container failed")?;
+    .context("RustFS test container failed")?;
     let s3_endpoint =
         format!("http://127.0.0.1:{}", minio.get_host_port_ipv4(9000).await?);
     let s3_client = S3Client::from_conf(
@@ -61,6 +212,44 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             .build(),
     );
     s3_client.create_bucket().bucket("lake").send().await?;
+    s3_client
+        .create_bucket()
+        .bucket("ontology-artifacts")
+        .send()
+        .await?;
+    let spice = GenericImage::new("authzed/spicedb", "v1.56.2")
+        .with_exposed_port(50051.tcp())
+        .with_exposed_port(8443.tcp())
+        .with_wait_for(WaitFor::message_on_stderr(
+            "http server started serving",
+        ))
+        .with_cmd([
+            "serve-testing",
+            "--http-enabled",
+            "--http-addr=:8443",
+            "--skip-release-check=true",
+        ])
+        .start()
+        .await?;
+    let spice_http =
+        format!("http://127.0.0.1:{}", spice.get_host_port_ipv4(8443).await?);
+    spice_post(&spice_http, "/v1/schema/write", json!({"schema":SCHEMA}))
+        .await?;
+    let owner =
+        relationship("ontology", "tenant_a/people", "owner", "user", "test");
+    spice_post(&spice_http,"/v1/relationships/write",json!({"updates":[
+        {"operation":"OPERATION_TOUCH","relationship":relationship("tenant","tenant_a","member","user","test")},
+        {"operation":"OPERATION_TOUCH","relationship":relationship("ontology","tenant_a/people","parent","tenant","tenant_a")},
+        {"operation":"OPERATION_TOUCH","relationship":owner.clone()}
+    ]})).await?;
+    let metadata = metadata::SpiceDbMetadata::connect(
+        &format!(
+            "http://127.0.0.1:{}",
+            spice.get_host_port_ipv4(50051).await?
+        ),
+        SPICE_TOKEN,
+    )
+    .await?;
 
     let lakefs = GenericImage::new("treeverse/lakefs", "1.88.0")
         .with_exposed_port(8000.tcp())
@@ -101,24 +290,21 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         "http://127.0.0.1:{}",
         lakefs.get_host_port_ipv4(8000).await?
     );
-    let store = LakeFsStore::new(
-        LakeFsConfig {
-            endpoint: lakefs_endpoint.clone(),
-            access_key: "registry-access".to_owned(),
-            secret_key: SecretString::from("registry-secret"),
-            repository_prefix: "galadril".to_owned(),
-            storage_namespace: "s3://lake/".to_owned(),
-            branch: "main".to_owned(),
-        },
-        S3Config {
-            endpoint: s3_endpoint,
-            region: "us-east-1".to_owned(),
-            access_key: "minioadmin".to_owned(),
-            secret_key: SecretString::from("minioadmin"),
-        },
-    )?;
+    let store = source_store(&lakefs_endpoint, &s3_endpoint)?;
+    let source_probe = source_store(&lakefs_endpoint, &s3_endpoint)?;
     let repository = store.repository_for_tenant("tenant_a")?;
-    let service = RegistryGrpc::new(Arc::new(Registry::new(store)));
+    let approval: GolAuthorityConfig = serde_json::from_str(APPROVAL)?;
+    let publication = GolPublicationConfig::new(
+        s3_client.clone(),
+        "ontology-artifacts",
+        approval,
+        registered_external_types()?,
+        Arc::new(metadata),
+    )?;
+    let service = RegistryGrpc::new(Arc::new(
+        Registry::new(store).with_gol(publication),
+    ))
+    .with_gateway_key(&[9u8; 32])?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     let server = tokio::spawn(async move {
@@ -127,54 +313,335 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await
     });
-    let mut client = registry_client(&format!("http://{address}"))?;
-    let ontology_json = serde_json::json!({
-        "version": "1",
-        "resources": [{
-            "resource_id": "object.person",
-            "kind": "object_type",
-            "display_name": "Person",
-            "description": "A person",
-            "references": [],
-            "attributes": {}
-        }]
-    })
-    .to_string()
-    .into_bytes();
-    let ontology = client
-        .put_ontology(proto::PutOntologyRequest {
-            authoring_command_json: None,
-            tenant_id: "tenant_a".to_owned(),
-            ontology_id: "people".to_owned(),
-            display_name: "People".to_owned(),
-            ontology_json: ontology_json.clone(),
-            author: "test".to_owned(),
-            message: "create ontology".to_owned(),
-            expected_revision_id: None,
-            create_only: true,
+    let mut client =
+        registry_client_with_key(&format!("http://{address}"), &[9u8; 32])?;
+    let source = r#"ontology people version "1.0.0" {
+        entity Person { field name: String; }
+        access Person {
+            resource: "gol_resource";
+            permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+            permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+            permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+            permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        }
+    }"#;
+    let workspace = client
+        .save_gol_ontology(proto::SaveGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            display_name: "People".into(),
+            files: vec![proto::GolFile {
+                path: "people.gol".into(),
+                text: source.into(),
+            }],
+            author: "test".into(),
+            expected_revision: None,
         })
         .await?
         .into_inner();
+    let source_revision = workspace
+        .summary
+        .context("missing workspace summary")?
+        .source_revision;
+    let metadata_only = galadril_registry::storage::RevisionStore::load(
+        &source_probe,
+        "tenant_a",
+        Some(&source_revision),
+    )
+    .await?;
+    ensure!(
+        metadata_only
+            .state
+            .ontologies
+            .get("people")
+            .is_some_and(|record| record.files.is_empty()),
+        "pipeline/catalog reads eagerly opened authored GOL sources"
+    );
+    concurrent_source_replacements_are_isolated(
+        &lakefs_endpoint,
+        &s3_endpoint,
+        &source_revision,
+        source,
+    )
+    .await?;
+    let source_metadata = serde_json::to_value(
+        metadata_only
+            .state
+            .ontologies
+            .get("people")
+            .context("source metadata")?,
+    )?;
+    ensure!(
+        source_metadata
+            .get("source_digest")
+            .and_then(Value::as_str)
+            .is_some_and(|digest| digest.len() == 64),
+        "source catalog does not pin immutable content"
+    );
     let read = client
-        .get_ontology(proto::GetOntologyRequest {
-            tenant_id: "tenant_a".to_owned(),
-            ontology_id: "people".to_owned(),
-            revision_id: ontology.revision_id.clone(),
+        .get_gol_workspace(proto::GetGolWorkspaceRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: Some(source_revision.clone()),
         })
         .await?
         .into_inner();
-    assert_eq!(read.ontology_json, ontology_json);
+    ensure!(
+        read.files.first().is_some_and(
+            |file| file.path == "people.gol" && file.text == source
+        )
+    );
+    let preview = client
+        .preview_gol_dependencies(proto::PreviewGolDependenciesRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: source_revision.clone(),
+            approved_owners: Vec::new(),
+        })
+        .await?
+        .into_inner();
+    let plan_pin = preview
+        .plan_pin
+        .context("missing complete dependency plan")?;
+    let validation = client
+        .validate_gol_ontology(proto::ValidateGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: source_revision.clone(),
+            plan_pin: plan_pin.clone(),
+            approved_owners: Vec::new(),
+        })
+        .await?
+        .into_inner();
+    ensure!(validation.status == "valid", "{:?}", validation.diagnostics);
+    let published = client
+        .publish_gol_ontology(proto::PublishGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: source_revision.clone(),
+            expected_generation: None,
+            author_id: "test".into(),
+            plan_pin: plan_pin.clone(),
+            approved_owners: Vec::new(),
+        })
+        .await?
+        .into_inner();
+    let namespace = format!("t_{:x}", Sha256::digest(b"tenant_a"));
+    let remote = RemoteStore::connect_namespace(
+        s3_client.clone(),
+        "ontology-artifacts",
+        "tenant_a",
+        namespace.parse()?,
+        "people".parse()?,
+        RemoteOptions::default(),
+    )
+    .await?;
+    let first: Generation = published.generation.parse()?;
+    let snapshot = remote.open_generation(first).await?;
+    let provenance = snapshot
+        .provenance()
+        .context("missing active source provenance")?;
+    ensure!(provenance.source_revision.as_ref() == source_revision);
+    let symbol = provenance
+        .candidates
+        .iter()
+        .find(|symbol| symbol.key().name().as_str() == "Person")
+        .context("missing Person symbol")?;
+    let schema_instance = Instance {
+        tenant: "tenant_a".into(),
+        owner: symbol.clone(),
+        id: "__schema".into(),
+    }
+    .object_id()
+    .context("schema identity")?;
+    ensure!(check(&spice_http, &schema_instance, "describe").await?);
+    ensure!(
+        !check(&spice_http, &schema_instance, "mailbox_owner").await?,
+        "publishing must not grant mailbox ownership"
+    );
+    let data_instance = Instance {
+        tenant: "tenant_a".into(),
+        owner: symbol.clone(),
+        id: "real-data".into(),
+    }
+    .object_id()
+    .context("data identity")?;
+    ensure!(
+        !check(&spice_http, &data_instance, "read").await?,
+        "publishing must not grant data access"
+    );
+    spice_post(&spice_http,"/v1/relationships/write",json!({"updates":[{"operation":"OPERATION_DELETE","relationship":owner.clone()}]})).await?;
+    ensure!(
+        client
+            .publish_gol_ontology(proto::PublishGolOntologyRequest {
+                tenant_id: "tenant_a".into(),
+                ontology_id: "people".into(),
+                source_revision: source_revision.clone(),
+                expected_generation: Some(first.to_string()),
+                author_id: "test".into(),
+                plan_pin: plan_pin.clone(),
+                approved_owners: Vec::new(),
+            })
+            .await
+            .is_err(),
+        "revoked publisher activated a generation"
+    );
+    ensure!(
+        remote.active().await? == Some(first),
+        "failed provisioning changed the active manifest"
+    );
+    spice_post(&spice_http,"/v1/relationships/write",json!({"updates":[{"operation":"OPERATION_TOUCH","relationship":owner}]})).await?;
+    let head = client
+        .get_gol_workspace(proto::GetGolWorkspaceRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: None,
+        })
+        .await?
+        .into_inner()
+        .summary
+        .context("missing current workspace")?;
+    let draft = client
+        .save_gol_ontology(proto::SaveGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            display_name: "People".into(),
+            files: vec![proto::GolFile {
+                path: "people.gol".into(),
+                text: format!("{source}\n"),
+            }],
+            author: "test".into(),
+            expected_revision: Some(head.source_revision),
+        })
+        .await?
+        .into_inner()
+        .summary
+        .context("missing saved draft")?;
+    ensure!(
+        draft.active_generation.as_deref() ==
+            Some(published.generation.as_str()) &&
+            draft.active_source_revision.as_deref() ==
+                Some(source_revision.as_str()) &&
+            draft.source_revision != source_revision,
+        "saving a draft discarded the active publication baseline"
+    );
+    let second = client
+        .publish_gol_ontology(proto::PublishGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: source_revision.clone(),
+            expected_generation: Some(first.to_string()),
+            author_id: "test".into(),
+            plan_pin: plan_pin.clone(),
+            approved_owners: Vec::new(),
+        })
+        .await?
+        .into_inner();
+    ensure!(second.generation != first.to_string());
+    ensure!(
+        snapshot.generation() == first &&
+            snapshot
+                .provenance()
+                .is_some_and(
+                    |value| value.source_revision.as_ref() == source_revision
+                ),
+        "existing generation lease changed during activation"
+    );
+    ensure!(
+        remote.open_generation(first).await.is_err(),
+        "retired generation was reopened"
+    );
+    spice_post(&spice_http,"/v1/relationships/write",json!({"updates":[
+        {"operation":"OPERATION_TOUCH","relationship":relationship("ontology","tenant_a/workspace=2Econsumer","parent","tenant","tenant_a")},
+        {"operation":"OPERATION_TOUCH","relationship":relationship("ontology","tenant_a/workspace=2Econsumer","owner","user","test")}
+    ]})).await?;
+    let consumer=client.save_gol_ontology(proto::SaveGolOntologyRequest {tenant_id:"tenant_a".into(),ontology_id:"workspace.consumer".into(),display_name:"Consumer".into(),files:vec![proto::GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import people version \"1.0.0\"; }".into()}],author:"test".into(),expected_revision:None}).await?.into_inner().summary.context("consumer summary")?;
+    let consumer_plan = client
+        .preview_gol_dependencies(proto::PreviewGolDependenciesRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "workspace.consumer".into(),
+            source_revision: consumer.source_revision.clone(),
+            approved_owners: vec!["people".into()],
+        })
+        .await?
+        .into_inner()
+        .plan_pin
+        .context("consumer plan")?;
     client
-        .publish_ontology(proto::PublishOntologyRequest {
-            tenant_id: "tenant_a".to_owned(),
-            ontology_id: "people".to_owned(),
-            display_name: "People".to_owned(),
-            publication_id: "publication-1".to_owned(),
-            revision_id: ontology.revision_id,
-            metadata_json: br#"{"channel":"stable"}"#.to_vec(),
-            create_only: true,
+        .publish_gol_ontology(proto::PublishGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "workspace.consumer".into(),
+            source_revision: consumer.source_revision.clone(),
+            expected_generation: None,
+            author_id: "test".into(),
+            plan_pin: consumer_plan,
+            approved_owners: vec!["people".into()],
         })
         .await?;
+    let cyclic_source=source.replacen("ontology people version \"1.0.0\" {","ontology people version \"1.0.0\" { import workspace.consumer version \"1.0.0\";",1);
+    let cyclic = client
+        .save_gol_ontology(proto::SaveGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            display_name: "People".into(),
+            files: vec![proto::GolFile {
+                path: "people.gol".into(),
+                text: cyclic_source,
+            }],
+            author: "test".into(),
+            expected_revision: Some(consumer.source_revision),
+        })
+        .await?
+        .into_inner()
+        .summary
+        .context("cyclic source summary")?;
+    let cyclic_plan = client
+        .preview_gol_dependencies(proto::PreviewGolDependenciesRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: cyclic.source_revision.clone(),
+            approved_owners: vec!["workspace.consumer".into()],
+        })
+        .await?
+        .into_inner()
+        .plan_pin
+        .context("cyclic publication plan")?;
+    let valid_cycle = client
+        .validate_gol_ontology(proto::ValidateGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: cyclic.source_revision.clone(),
+            plan_pin: cyclic_plan.clone(),
+            approved_owners: vec!["workspace.consumer".into()],
+        })
+        .await?
+        .into_inner();
+    ensure!(
+        valid_cycle.status == "valid",
+        "a publication cycle is not a GOL type error: {:?}",
+        valid_cycle.diagnostics
+    );
+    let rejected = client
+        .publish_gol_ontology(proto::PublishGolOntologyRequest {
+            tenant_id: "tenant_a".into(),
+            ontology_id: "people".into(),
+            source_revision: cyclic.source_revision,
+            expected_generation: Some(second.generation.clone()),
+            author_id: "test".into(),
+            plan_pin: cyclic_plan,
+            approved_owners: vec!["workspace.consumer".into()],
+        })
+        .await;
+    ensure!(
+        rejected.is_err_and(|error| error
+            .message()
+            .starts_with("gol::publication_cycle")),
+        "a dependency reintroduced an older root generation"
+    );
+    ensure!(
+        remote.active().await? == Some(second.generation.parse()?),
+        "publication cycle changed active generation"
+    );
 
     let definition_json = serde_json::json!({
         "name": "daily",
@@ -183,7 +650,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             "step": "sink",
             "type": "sink",
             "input_from": ["source"],
-            "params": {"ontology_id": "people"}
+            "params": {}
         }]
     })
     .to_string()
@@ -203,29 +670,11 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         })
         .await?
         .into_inner();
-    let binding = client
-        .put_binding(proto::PutBindingRequest {
-            tenant_id: "tenant_a".to_owned(),
-            binding: Some(proto::OntologyBinding {
-                pipeline_id: "daily".to_owned(),
-                block_id: "sink".to_owned(),
-                ontology_id: "people".to_owned(),
-                resource_ids: vec!["object.person".to_owned()],
-                resource_kinds: Vec::new(),
-                include_dependencies: true,
-                metadata_json: br#"{"purpose":"runtime"}"#.to_vec(),
-                updated_at_ms: 42,
-                head_revision_id: String::new(),
-            }),
-            expected_revision_id: pipeline.head_revision_id,
-        })
-        .await?
-        .into_inner();
     let read = client
         .get_pipeline(proto::GetPipelineRequest {
             tenant_id: "tenant_a".to_owned(),
             pipeline_id: "daily".to_owned(),
-            revision_id: Some(binding.head_revision_id),
+            revision_id: Some(pipeline.head_revision_id),
         })
         .await?
         .into_inner();
@@ -280,7 +729,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         branch.status().is_success(),
         "lakeFS branch was not created"
     );
-    for path in ["ontology/state.json", "pipeline/state.json"] {
+    for path in ["gol/sources.json", "pipeline/state.json"] {
         let artifact = HttpClient::new()
             .get(format!(
                 "{lakefs_endpoint}/api/v1/repositories/{repository}/refs/main/objects"

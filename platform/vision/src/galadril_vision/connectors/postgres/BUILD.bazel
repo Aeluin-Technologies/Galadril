@@ -14,10 +14,12 @@ py_library(
     imports = ["../../.."],
     visibility = ["//visibility:public"],
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/common",
-        "//platform/vision/src/galadril_vision/identity",
+        "//platform/vision/src/galadril_vision/identity:contracts",
         "@pip//geoalchemy2",
         "@pip//greenlet",  # keep: required by SQLAlchemy's asyncio runtime
+        "@pip//opentelemetry_api",
         "@pip//orjson",
         "@pip//pgvector",
         "@pip//psycopg",

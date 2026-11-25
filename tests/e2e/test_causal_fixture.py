@@ -70,6 +70,12 @@ def test_causal_fixture_separates_decoys_without_changing_the_label(
     assert first["label"] == second["label"] == decoy["label"]
     assert first["source_field"] == second["source_field"] == "alpha"
     assert decoy["source_field"] == "decoy"
+    assert first["confidence"] != second["confidence"]
+    assert (
+        first["gol_value"]
+        == second["gol_value"]
+        == {"display_name": first["label"]}
+    )
 
     first_vector = _vector(first["embedding"])
     second_vector = _vector(second["embedding"])
@@ -228,32 +234,19 @@ def test_causal_fixture_produces_discoverable_lag(
         outcome = ((((index - 1) * 7) % 13) + 1) / 14.0
         prediction = _predict(model, "alpha", signal, outcome)
         observed_at = start + timedelta(seconds=elapsed)
-        observations.extend(
-            (
-                Observation(
-                    observation_id=f"state:{index}",
-                    graph_node_id="alpha",
-                    observed_at=observed_at,
-                    observation_type="E2E_OBSERVATION",
-                    scalar_values={"confidence": outcome},
-                ),
-                Observation(
-                    observation_id=f"embedding:{index}",
-                    graph_node_id="alpha",
-                    observed_at=observed_at,
-                    observation_type="E2E_OBSERVATION",
-                    embeddings={
-                        "e2e_embedding": _vector(prediction["embedding"])
-                        + (0.0,) * 1020
-                    },
-                ),
-                Observation(
-                    observation_id=f"event:{index}",
-                    graph_node_id=f"event-{index}",
-                    observed_at=observed_at,
-                    observation_type="Observation",
-                    scalar_values={"presence": 1.0},
-                ),
+        scalars = prediction.get("scalar_evidence")
+        assert isinstance(scalars, dict)
+        assert scalars.get("signal") == signal
+        observations.append(
+            Observation(
+                observation_id=f"state:{index}",
+                graph_node_id="alpha",
+                observed_at=observed_at,
+                observation_type="E2E_OBSERVATION",
+                scalar_values={
+                    "confidence": outcome,
+                    "signal": scalars["signal"],
+                },
             )
         )
         elapsed += base_seconds
@@ -261,7 +254,7 @@ def test_causal_fixture_produces_discoverable_lag(
             elapsed += extra_seconds
     window = ObservationWindow(
         start=start,
-        end=start + timedelta(seconds=120),
+        end=start + timedelta(minutes=30),
         bucket=timedelta(seconds=1),
         observations=tuple(observations),
     )
@@ -269,11 +262,11 @@ def test_causal_fixture_produces_discoverable_lag(
     result = AmarthRouter(strict_dag=True).analyze_observation_window(
         window,
         "E2E_OBSERVATION.confidence",
-        analysis_window_size="120s",
+        analysis_window_size="30m",
     )
 
     assert any(
-        link.source_feature.startswith("E2E_OBSERVATION.e2e_embedding.pc")
+        link.source_feature == "E2E_OBSERVATION.signal"
         and link.target_feature == "E2E_OBSERVATION.confidence"
         for link in result["causal_links"]
     )

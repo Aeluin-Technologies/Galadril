@@ -106,7 +106,8 @@ async def delegated_call(
         attributes={"mcp.id": capability_id, "mcp.tool": tool},
         record_exception=False,
         set_status_on_exception=False,
-    ):
+    ) as span:
+        reason = "gateway_transport"
         try:
             response = await http.post(
                 gateway,
@@ -119,14 +120,30 @@ async def delegated_call(
                 timeout=15,
             )
             if response.status_code != 200 or len(response.content) > 4096:
+                reason = "delegation_rejected"
+                span.set_attribute(
+                    "mcp.failure.http_status", response.status_code
+                )
                 raise MCPUnavailable("MCP delegation unavailable")
+            reason = "delegation_response"
             grant = _Grant.model_validate_json(response.content)
+            reason = "provider_transport"
             return await _call(grant, resource, endpoint, tool, arguments)
         except (
+            MCPUnavailable,
             httpx.HTTPError,
             httpx2.HTTPError,
             ValueError,
             MCPError,
             ExceptionGroup,
-        ):
+        ) as error:
+            if (
+                isinstance(error, MCPUnavailable)
+                and reason == "provider_transport"
+            ):
+                reason = "provider_result"
+            span.set_attribute("mcp.failure.reason", reason)
+            span.set_status(trace.StatusCode.ERROR)
+            if isinstance(error, MCPUnavailable):
+                raise
             raise MCPUnavailable("MCP transport unavailable") from None

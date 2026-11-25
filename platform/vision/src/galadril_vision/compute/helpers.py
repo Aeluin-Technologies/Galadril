@@ -85,6 +85,8 @@ def _document_evidence(payload: object) -> list[dict[str, str]] | None:
 _EMBEDDING_KEYS = frozenset(("embedding", "embeddings", "vector", "features"))
 _METADATA_KEYS = frozenset(
     (
+        "gol_symbol_key",
+        "gol_value",
         "bbox",
         "confidence",
         "label",

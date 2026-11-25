@@ -9,8 +9,8 @@ use crate::authoring::{
     PipelineRelease, definition_hash, merge_definitions, valid_branch,
     validate_draft, validate_executable,
 };
-use crate::domain::{PipelineView, PutPipeline, Registry};
-use crate::state::{OntologyBindingRecord, PipelineRecord, TenantState};
+use crate::domain::{PipelineValidation, PipelineView, PutPipeline, Registry};
+use crate::state::{GolBindingRecord, PipelineRecord, TenantState};
 use crate::storage::{RevisionStore, valid_tenant};
 
 impl<S: RevisionStore> Registry<S> {
@@ -24,23 +24,16 @@ impl<S: RevisionStore> Registry<S> {
         block: &str,
         ontology: &str,
     ) -> Result<()> {
-        let binding = OntologyBindingRecord {
+        let mut binding = GolBindingRecord {
             pipeline_id: pipeline.pipeline_id.clone(),
             block_id: block.into(),
             ontology_id: ontology.into(),
-            resource_ids: vec![],
-            resource_kinds: vec![
-                "object_type".into(),
-                "event_type".into(),
-                "property".into(),
-                "link_type".into(),
-            ],
-            include_dependencies: true,
-            metadata: serde_json::json!({"source":"explicit_tenant_selection"}),
+            generation: String::new(),
+            source_revision: String::new(),
+            symbols: Vec::new(),
             updated_at_ms: Utc::now().timestamp_millis(),
         };
-        self.validate_published_binding(tenant, state, &binding)
-            .await?;
+        self.capture_gol_binding(tenant, &mut binding).await?;
         let step = pipeline
             .definition
             .get_mut("pipeline")
@@ -343,7 +336,7 @@ impl<S: RevisionStore> Registry<S> {
                     input.pipeline_id,
                     &snapshot.revision_id,
                     &record.definition,
-                    false,
+                    PipelineValidation::Draft,
                 )
                 .await?;
                 record.authoring.approval = Some(ContentReview {
@@ -363,12 +356,20 @@ impl<S: RevisionStore> Registry<S> {
                         definition_hash(&record.definition)?,
                     "pipeline approval stale"
                 );
+                self.validate_pipeline_bindings(
+                    input.tenant_id,
+                    &state,
+                    input.pipeline_id,
+                    &record.definition,
+                    PipelineValidation::Release,
+                )
+                .await?;
                 self.compile_composition(
                     input.tenant_id,
                     input.pipeline_id,
                     &snapshot.revision_id,
                     &record.definition,
-                    true,
+                    PipelineValidation::Release,
                 )
                 .await?;
                 record.authoring.release = Some(PipelineRelease {
@@ -396,18 +397,11 @@ impl<S: RevisionStore> Registry<S> {
                         definition_hash(&pinned.record.definition)?,
                     "pipeline publication invalid"
                 );
-                self.compile_composition(
+                self.compile_pipeline_revision(
                     input.tenant_id,
                     input.pipeline_id,
                     &release.revision_id,
-                    &pinned.record.definition,
-                    true,
-                )
-                .await?;
-                self.runtime_pipeline(
-                    input.tenant_id,
-                    input.pipeline_id,
-                    &release.revision_id,
+                    PipelineValidation::Release,
                 )
                 .await?;
                 record.published_revision_id =

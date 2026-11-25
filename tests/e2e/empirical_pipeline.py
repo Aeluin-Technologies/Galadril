@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
+from time import monotonic
 
 import psycopg
 import pytest
 from assertions import eventually, require_mapping, require_sequence
 from authentication import login_user
 from clients import (
+    ONTOLOGY_ID,
+    PIPELINE_ID,
     POSTGRES_DSN,
     TENANT_ID,
     UPLOADER_ID,
@@ -22,31 +24,31 @@ from clients import (
     authenticated_token,
     canonical_spicedb_object_id,
     read_s3_object,
+    seed_public_clearances,
     upload_presigned,
 )
 from empirical_data import load_retail_rows
-from scenario import ADMIN, build_access_oracle, build_retail_uploads
-
-
-@dataclass(frozen=True, slots=True)
-class RetailState:
-    """One persisted row whose source identity is independently checked."""
-
-    entity_id: str
-    event_id: str
-    customer_id: int
-    source_row: int
+from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
+from scenario import (
+    ADMIN,
+    RetailState,
+    UploadBatch,
+    assert_retail_identities,
+    build_access_oracle,
+    build_retail_uploads,
+    retail_smoke_rows,
+)
 
 
 class EmpiricalPipelineFailure(RuntimeError):
     """Signals a terminal empirical DAG result that polling cannot repair."""
 
 
-async def _create_principals(gateway: GatewayClient) -> None:
+async def _create_principals(
+    gateway: GatewayClient, uploads: tuple[UploadBatch, ...]
+) -> None:
     """Uses the public administrator mutation for every scenario identity."""
-    actors = {
-        upload.actor for upload in build_retail_uploads(load_retail_rows())
-    }
+    actors = {upload.actor for upload in uploads}
     actors.update(
         {
             "e2e-sales-reader",
@@ -75,9 +77,12 @@ async def _create_principals(gateway: GatewayClient) -> None:
         await login_user(actor)
 
 
-async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
+async def _grant_domains(
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    uploads: tuple[UploadBatch, ...],
+) -> None:
     """Uses tenant-admin Gateway mutations for scoped ingest and read grants."""
-    uploads = build_retail_uploads(load_retail_rows())
     await spicedb.touch(
         RelationshipSpec("tenant", TENANT_ID, "administrator", "user", ADMIN)
     )
@@ -112,11 +117,64 @@ async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
         await grant(domain, reader, "READ")
 
 
+async def _grant_pipeline_execution(
+    spicedb: SpiceDBProbe, actors: set[str]
+) -> None:
+    """Grants the empirical writers access to the exact pipeline and its GOL contracts."""
+    schema_ids = tuple(
+        "-".join(
+            part.encode("utf-8").hex()
+            for part in (TENANT_ID, ONTOLOGY_ID, symbol, "__schema")
+        )
+        for symbol in (
+            "E2EEntity",
+            "E2EObservation",
+            "IdentityPrototype",
+            "ObservationEdge",
+            "ObservationEmbedding",
+            "ObservationState",
+        )
+    )
+    await spicedb.touch(
+        *(
+            RelationshipSpec(
+                resource_type,
+                f"{TENANT_ID}/{resource}",
+                relation,
+                "user",
+                actor,
+            )
+            for actor in sorted(actors - {ADMIN})
+            for resource_type, resource, relation in (
+                ("pipeline", PIPELINE_ID, "executor"),
+                ("ontology", ONTOLOGY_ID, "editor"),
+            )
+        ),
+        *(
+            RelationshipSpec(
+                "gol_resource", resource_id, "metadata_readers", "user", actor
+            )
+            for actor in sorted(actors)
+            for resource_id in schema_ids
+        ),
+    )
+
+
 async def _upload_rows(
-    gateway: GatewayClient, spicedb: SpiceDBProbe
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    uploads: tuple[UploadBatch, ...],
 ) -> dict[str, str]:
-    """Promotes 36 independently owned Gateway uploads without timing sleeps."""
-    uploads = build_retail_uploads(load_retail_rows())
+    """Promotes independently owned Gateway uploads without timing sleeps."""
+    first, *_ = uploads
+    actors = {upload.actor for upload in uploads}
+    await _grant_pipeline_execution(spicedb, actors)
+    await seed_public_clearances(*sorted(actors - {first.actor}))
+    promote = """
+        mutation PromoteEmpirical($key: String!, $name: String!, $groupId: String!) {
+          completeUpload(stagingKey: $key, targetName: $name, groupId: $groupId)
+        }
+        """
     keys: dict[str, str] = {}
     for upload in uploads:
         token = authenticated_token(upload.actor)
@@ -140,20 +198,21 @@ async def _upload_rows(
         staging_key = staged.get("stagingKey")
         assert isinstance(upload_url, str) and isinstance(staging_key, str)
         await upload_presigned(upload_url, upload.payload)
-        completed = await gateway.execute(
-            token,
-            """
-            mutation PromoteEmpirical($key: String!, $name: String!, $groupId: String!) {
-              completeUpload(stagingKey: $key, targetName: $name, groupId: $groupId)
-            }
-            """,
-            {
-                "key": staging_key,
-                "name": upload.name,
-                "groupId": upload.data_type,
-            },
-        )
-        key = f"{TENANT_ID}/raw/{upload.data_type}/{upload.name}"
+        variables = {
+            "key": staging_key,
+            "name": upload.name,
+            "groupId": upload.data_type,
+        }
+        nonce = staging_key.rsplit("/", 1)[-1]
+        key = f"{TENANT_ID}/raw/{upload.data_type}/{nonce}/{upload.name}"
+        if upload is first:
+            with pytest.raises(
+                GraphQLOperationError, match="Upload admission unavailable"
+            ):
+                await gateway.execute(token, promote, variables)
+            assert await read_s3_object(key) is None
+            await seed_public_clearances(upload.actor)
+        completed = await gateway.execute(token, promote, variables)
         assert completed.get("completeUpload") == key
         evidence = await read_s3_object(key)
         assert evidence is not None
@@ -187,7 +246,7 @@ async def _grant_readers(
     await spicedb.touch(*grants)
 
 
-async def _retail_states() -> tuple[RetailState, ...] | None:
+async def _retail_states(expected: int) -> tuple[RetailState, ...] | None:
     """Reports empirical DAG progress and fails on terminal worker errors."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
@@ -228,14 +287,14 @@ async def _retail_states() -> tuple[RetailState, ...] | None:
             raise EmpiricalPipelineFailure(
                 f"Vision {step} failed: {str(error)[-2000:]}"
             )
-    if len(rows) > 240:
+    if len(rows) > expected:
         raise EmpiricalPipelineFailure(
             f"Intake duplicated empirical observations: {len(rows)} states"
         )
     outbox_count = int(outbox_row[0]) if outbox_row is not None else -1
-    if len(rows) < 240 or outbox_count != 0:
+    if len(rows) < expected or outbox_count != 0:
         raise RuntimeError(
-            f"Empirical progress: states={len(rows)}/240, "
+            f"Empirical progress: states={len(rows)}/{expected}, "
             f"authz_outbox={outbox_count}, executions=[{summary}]"
         )
     return tuple(
@@ -244,65 +303,33 @@ async def _retail_states() -> tuple[RetailState, ...] | None:
     )
 
 
-async def _assert_identity_oracle(
-    states: tuple[RetailState, ...],
-) -> dict[int, str]:
-    """Compares the entire empirical source-customer to LI-ESKG identity map."""
-    expected = Counter(row.customer_id for row in load_retail_rows())
-    actual = Counter(state.customer_id for state in states)
-    assert actual == expected
-    expected_rows = {
-        row.source_row: row.customer_id for row in load_retail_rows()
-    }
-    assert {
-        state.source_row: state.customer_id for state in states
-    } == expected_rows
-    assert len({state.event_id for state in states}) == 240
-    entities: dict[int, set[str]] = defaultdict(set)
-    for state in states:
-        entities[state.customer_id].add(state.entity_id)
-    assert len(entities) == 24
-    assert all(len(ids) == 1 for ids in entities.values())
-    distinct = {next(iter(ids)) for ids in entities.values()}
-    assert len(distinct) == 24
-    return {customer: next(iter(ids)) for customer, ids in entities.items()}
-
-
 async def _assert_gateway_projection(
     gateway: GatewayClient,
     spicedb: SpiceDBProbe,
     states: tuple[RetailState, ...],
     keys: Mapping[str, str],
+    uploads: tuple[UploadBatch, ...],
 ) -> None:
     """Matches Gateway output against each caller's independent object oracle."""
-    uploads = build_retail_uploads(load_retail_rows())
+    entity_events = assert_retail_identities(states, uploads)
     access = build_access_oracle(uploads)
     source_by_event = await spicedb.event_sources()
     source_by_row = {
-        row.source_row: canonical_spicedb_object_id(keys[upload.name])
-        for upload in uploads
-        for row in upload.rows
+        row.source_row: upload.name for upload in uploads for row in upload.rows
     }
-    assert all(
-        source_by_event.get(
-            canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
-        )
-        == source_by_row[state.source_row]
-        for state in states
-    )
+    source_ids = {
+        name: canonical_spicedb_object_id(key) for name, key in keys.items()
+    }
     expected_events: dict[str, set[str]] = defaultdict(set)
-    for upload in uploads:
-        key = canonical_spicedb_object_id(keys[upload.name])
-        for state in states:
-            if (
-                source_by_event.get(
-                    canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
-                )
-                == key
-            ):
-                expected_events[upload.name].add(state.event_id)
-        assert len(expected_events[upload.name]) == len(upload.rows)
-    identity = await _assert_identity_oracle(states)
+    for state in states:
+        name = source_by_row[state.source_row]
+        assert (
+            source_by_event.get(
+                canonical_spicedb_object_id(f"{TENANT_ID}/{state.event_id}")
+            )
+            == source_ids[name]
+        )
+        expected_events[name].add(state.event_id)
 
     def source_event(hit: object) -> str:
         """Decodes the public JSON scalar without trusting its wire representation."""
@@ -314,14 +341,15 @@ async def _assert_gateway_projection(
         return event
 
     for actor, names in access.items():
+        token = await login_user(actor)
         visible = (
             set().union(*(expected_events[name] for name in names))
             if names
             else set()
         )
-        for entity_id in identity.values():
+        for entity_id, events in entity_events.items():
             hits = await gateway.execute(
-                authenticated_token(actor),
+                token,
                 """
                 query EmpiricalProjection($entityId: String!) {
                   structuredSearch(input: {entityId: $entityId, limit: 50}) {
@@ -337,20 +365,22 @@ async def _assert_gateway_projection(
                     hits.get("structuredSearch"), "empirical search"
                 )
             }
-            expected_for_entity = {
-                state.event_id
-                for state in states
-                if state.entity_id == entity_id
-            } & visible
-            assert returned == expected_for_entity, (actor, entity_id)
+            assert returned == events & visible, (actor, entity_id)
 
-        selected = next(iter(identity.values()))
+        selected = min(
+            (
+                entity
+                for entity, events in entity_events.items()
+                if events & visible
+            ),
+            default=min(entity_events),
+        )
         graph_data = await gateway.execute(
-            authenticated_token(actor),
+            token,
             """
             query EmpiricalGraph($entityId: String!) {
               entityRelations(entityId: $entityId, depth: 1, limit: 50) {
-                nodes { id label properties }
+                nodes { id kind properties }
                 edges { fromId toId properties }
               }
             }
@@ -365,11 +395,9 @@ async def _assert_gateway_projection(
             for node in require_sequence(graph.get("nodes"), "graph nodes")
         ]
         event_nodes = {
-            str(node["id"])
-            for node in nodes
-            if str(node["id"]).startswith("evt_")
+            str(node["id"]) for node in nodes if node["kind"] == "Event"
         }
-        assert event_nodes <= visible, actor
+        assert event_nodes == entity_events[selected] & visible, actor
         if actor == ADMIN:
             assert event_nodes
             assert any(node["properties"] not in ({}, "{}") for node in nodes)
@@ -382,12 +410,20 @@ async def _assert_gateway_projection(
 
 
 async def exercise_empirical_pipeline(
-    gateway: GatewayClient, spicedb: SpiceDBProbe
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    *,
+    full: bool,
+    required_sources: set[tuple[int, int]],
 ) -> None:
     """Runs real multi-principal retail ingestion and permission projection."""
+    rows = load_retail_rows()
+    if not full:
+        rows = retail_smoke_rows(rows, required_sources)
+    uploads = build_retail_uploads(rows, full=full)
     print("E2E stage: preparing empirical principals", flush=True)
-    await _create_principals(gateway)
-    await _grant_domains(gateway, spicedb)
+    await _create_principals(gateway, uploads)
+    await _grant_domains(gateway, spicedb, uploads)
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
             authenticated_token("e2e-sales-reader"),
@@ -453,12 +489,21 @@ async def exercise_empirical_pipeline(
         user_id="e2e-sales-a",
     )
     print("E2E stage: uploading empirical retail observations", flush=True)
-    keys = await _upload_rows(gateway, spicedb)
+    started = monotonic()
+    keys = await _upload_rows(gateway, spicedb, uploads)
     await _grant_readers(spicedb, keys)
     states = await eventually(
-        _retail_states,
-        timeout_seconds=1200.0,
-        description="240 retail row observations and drained SpiceDB outbox",
+        lambda: _retail_states(len(rows)),
+        timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
+        description=f"{len(rows)} retail row observations and drained SpiceDB outbox",
         abort_on=(EmpiricalPipelineFailure,),
     )
-    await _assert_gateway_projection(gateway, spicedb, states, keys)
+    print(
+        f"E2E retail: {len(states)} observations durable after {monotonic() - started:.1f}s",
+        flush=True,
+    )
+    await _assert_gateway_projection(gateway, spicedb, states, keys, uploads)
+    print(
+        f"E2E retail: authorization oracle complete after {monotonic() - started:.1f}s",
+        flush=True,
+    )

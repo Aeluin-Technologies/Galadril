@@ -160,10 +160,12 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
                     "graph_context_received": contextual,
                 }
             answer = json.dumps(results, separators=(",", ":"))
-            for start in range(0, len(answer), 64):
-                yield _chunk({"content": answer[start : start + 64]})
-                # Leave time to disconnect while the durable worker is active.
-                await asyncio.sleep(0.06)
+            chunk_size = 4096
+            for start in range(0, len(answer), chunk_size):
+                yield _chunk({"content": answer[start : start + chunk_size]})
+                if start == 0:
+                    # Preserve a disconnect window without pacing each callback.
+                    await asyncio.sleep(0.06)
             yield _chunk({}, "stop")
         yield b"data: [DONE]\n\n"
 

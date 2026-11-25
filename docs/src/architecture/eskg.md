@@ -12,13 +12,13 @@ The AGE label and the API `kind` are the same structural kind:
 
 | Kind | Meaning | Optional ontology resource kind |
 | --- | --- | --- |
-| `Entity` | Authoritative identity of an observed physical entity | `object_type` |
-| `Event` | Immutable observation or occurrence | `event_type` |
-| `State` | A property observation of an entity at an event time | `property` |
-| `LatentIdentity` | Unresolved identity hypothesis | `object_type` |
+| `Entity` | Authoritative identity of an observed physical entity | `entity` |
+| `Event` | Immutable observation or occurrence | `entity` |
+| `State` | A property observation of an entity at an event time | `field` |
+| `LatentIdentity` | Unresolved identity hypothesis | `entity` |
 | `Inference` | Evidence-backed interpretation | none |
 | `Decision` | Identity-resolution decision | none |
-| `CausalVariable` | A measured variable used by causal inference | `property` |
+| `CausalVariable` | A measured variable used by causal inference | `field` |
 | `Metric` | Operational metric, outside the base ESKG | none |
 
 `Person`, `Observation`, and `Transaction` are classifications, not structural
@@ -26,20 +26,34 @@ kinds. Extractor strings may be retained as `observed_type` or `event_type`;
 they confer no ontology membership. An unclassified instance has no ontology
 reference. `Person` would describe an object type, not a property.
 
-An optional `ontology_ref` is an indivisible record containing `tenant_id`,
-`ontology_id`, `revision_id`, `resource_id`, and `resource_kind`. The revision
-is the opaque immutable Registry revision, never a display name, ontology
-version string, pipeline revision, or floating production publication.
-The producer resolves the resource from its active block-local Registry slice,
-checks its resource kind and tenant, and copies the revision from that slice.
-Missing resources, partial references, and incompatible kinds fail closed.
-Reinterpreting evidence under a new revision must not rewrite its old reference.
+An optional `ontology_ref` is an indivisible GOL provenance record containing
+`tenant_id`, `ontology_id`, `ontology_version`, `source_revision`, `generation_id`,
+`symbol_key`, and `symbol_kind`. The generation pins the compiled artifact;
+module version and source revision are separate identities. Selectors use
+`module::Name` or `module::Name.field`. The producer derives all provenance from
+its admitted Gateway descriptor, never a caller-selected revision. Existing
+references remain immutable when a later generation becomes active.
 
-The Vision sink accepts `ontology_resource_id` and
-`event_ontology_resource_id` parameters; resolved items may additionally carry
-their own `ontology_resource_id`. These identifiers must be included in the
-sink block's Registry binding. The sink derives all other reference fields from
-the active slice; callers cannot select a different revision through a payload.
+The Vision sink uses `gol_symbol_key` and `gol_event_symbol_key` for the
+business entity and event. It uses `gol_edge_symbol_key`,
+`gol_entity_state_symbol_key`, and `gol_embedding_symbol_key` for the
+relationship, state observation, and embedding projections. Each selector
+must resolve to an admitted symbol in the deployed generation.
+Resolved items may select a different `gol_symbol_key` only when that exact target
+is in the admitted projection and its live write obligations succeed. GOL entity
+classifications apply to both structural Entity and Event; field classifications
+apply to structural State and CausalVariable. This does not add GOL declarations
+for ESKG's structural machinery.
+
+Business values are explicit `gol_value` objects, separate from structural
+resolution metadata. The sink submits these exact values for host validation; it
+does not infer fields or discard unknown values to fit a schema.
+
+The sink prepares the event, entity, relationship, state, and embedding
+proposals before acquiring a single Gateway permit. The PostgreSQL transaction,
+including the authorization outbox, runs while that permit is held. A missing
+or revoked admission prevents persistence. The server retains calculation IFC
+provenance across retries and related steps.
 
 ## Relations
 

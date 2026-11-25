@@ -23,6 +23,8 @@ from clients import (
 )
 from pengolo_browser import exercise_pengolo_browser
 
+# Shared requests still need detached Scribe execution after the send acknowledgement.
+_SHARED_GENERATION_TIMEOUT_SECONDS = 180.0
 _METADATA = "id ownerId projectId expiresAt revision updatedAt"
 _CHAT = f"{{ {_METADATA} data {{ title pinned activeGeneration }} }}"
 _PROJECT = f"{{ {_METADATA} data {{ name icon color shared roles contextMode instructions }} }}"
@@ -142,14 +144,41 @@ async def _invalid_input(
 
 
 async def _events(
-    gateway: GatewayClient, identifier: str, *, temporary: bool = False
+    gateway: GatewayClient,
+    identifier: str,
+    *,
+    actor: str = UPLOADER_ID,
+    temporary: bool = False,
 ) -> dict[str, object]:
-    result = await gateway.execute(
-        authenticated_token(UPLOADER_ID),
-        "query Events($id:String!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:0, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
-        {"id": identifier, "temporary": temporary},
+    token = authenticated_token(actor)
+    events: list[object] = []
+    after = 0
+    for _ in range(64):
+        result = await gateway.execute(
+            token,
+            "query Events($id:String!, $after:Int!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:$after, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
+            {"id": identifier, "after": after, "temporary": temporary},
+        )
+        page = _object(result.get("pengoloEvents"))
+        batch = require_sequence(page.get("events"), "Pengolo events")
+        events.extend(batch)
+        if len(batch) < 64 or page.get("status") in {
+            "completed",
+            "failed",
+            "cancelled",
+        }:
+            page["events"] = events
+            return page
+        sequence = require_mapping(batch[-1], "last Pengolo event").get(
+            "sequence"
+        )
+        assert type(sequence) is int and sequence > after, (
+            "Pengolo cursor did not advance"
+        )
+        after = sequence
+    raise AssertionError(
+        "Pengolo event history exceeds the bounded replay limit"
     )
-    return _object(result.get("pengoloEvents"))
 
 
 class GenerationFailure(RuntimeError):
@@ -157,12 +186,24 @@ class GenerationFailure(RuntimeError):
 
 
 async def _completed(
-    gateway: GatewayClient, identifier: str, *, temporary: bool = False
-) -> dict[str, object] | None:
-    page = await _events(gateway, identifier, temporary=temporary)
-    if page.get("status") in {"failed", "cancelled"}:
-        raise GenerationFailure(f"Pengolo generation is terminal: {page}")
-    return page if page.get("status") == "completed" else None
+    gateway: GatewayClient,
+    identifier: str,
+    *,
+    actor: str = UPLOADER_ID,
+    temporary: bool = False,
+) -> dict[str, object]:
+    page = await _events(gateway, identifier, actor=actor, temporary=temporary)
+    status = page.get("status")
+    if status == "completed":
+        return page
+    count = len(require_sequence(page.get("events"), "Pengolo events"))
+    if status in {"failed", "cancelled"}:
+        raise GenerationFailure(
+            f"Pengolo generation {status} after {count} events"
+        )
+    if status in {"pending", "running"}:
+        raise RuntimeError(f"Pengolo generation {status}, events={count}")
+    raise GenerationFailure("Pengolo returned an unknown generation status")
 
 
 def _graph_unavailable(page: Mapping[str, object]) -> bool | None:
@@ -649,13 +690,12 @@ async def exercise_pengolo(
         },
         actor=OUTSIDER_ID,
     )
+    accessible_id = _text(_object(accessible.get("generation")), "id")
     await eventually(
-        lambda: _completed(
-            gateway, _text(_object(accessible.get("generation")), "id")
-        ),
-        timeout_seconds=30,
+        lambda: _completed(gateway, accessible_id, actor=OUTSIDER_ID),
+        timeout_seconds=_SHARED_GENERATION_TIMEOUT_SECONDS,
         description="shared project without private graph context",
-        abort_on=(GenerationFailure,),
+        abort_on=(GenerationFailure, GraphQLOperationError),
     )
     restricted = await _object_mutation(
         gateway,
@@ -670,18 +710,16 @@ async def exercise_pengolo(
         actor=OUTSIDER_ID,
     )
 
+    restricted_id = _text(_object(restricted.get("generation")), "id")
+
     async def graph_denied() -> bool | None:
-        result = await gateway.execute(
-            authenticated_token(OUTSIDER_ID),
-            "query Events($id:String!) { pengoloEvents(generationId:$id,after:0) { status events { sequence kind content } } }",
-            {"id": _text(_object(restricted.get("generation")), "id")},
+        return _graph_unavailable(
+            await _events(gateway, restricted_id, actor=OUTSIDER_ID)
         )
-        page = _object(result.get("pengoloEvents"))
-        return _graph_unavailable(page)
 
     await eventually(
         graph_denied,
-        timeout_seconds=30,
+        timeout_seconds=_SHARED_GENERATION_TIMEOUT_SECONDS,
         description="independent private graph authorization",
         abort_on=(AssertionError,),
     )
@@ -748,17 +786,15 @@ async def exercise_pengolo(
         },
         "key",
     )
-    plan = json.dumps(
-        {
-            "entity_id": state.entity_id,
-            "causal_entity_id": causal,
-            "question": "Review the operational evidence",
-            "pengolo": True,
-        }
-    )
+    plan = {
+        "entity_id": state.entity_id,
+        "causal_entity_id": causal,
+        "question": "Review the operational evidence",
+        "pengolo": True,
+    }
     base: dict[str, object] = {
         "idempotencyKey": str(uuid.uuid4()),
-        "prompt": plan,
+        "prompt": json.dumps(plan),
         "modelAlias": "fixture",
         "graphContext": {"kind": "entity", "id": state.entity_id},
     }
@@ -853,13 +889,20 @@ async def exercise_pengolo(
         )
         >= 2
     )
-    first = await _object_mutation(gateway, "sendPengolo", base)
-    retry = await _object_mutation(gateway, "sendPengolo", base)
+    # The chatbot phase already exercises graph search and causal retrieval.
+    replay_request = {
+        **base,
+        "prompt": json.dumps({**plan, "calculator_only": True}),
+    }
+    first = await _object_mutation(gateway, "sendPengolo", replay_request)
+    retry = await _object_mutation(gateway, "sendPengolo", replay_request)
     assert _text(_object(first.get("chat")), "id") == _text(
         _object(retry.get("chat")), "id"
     )
-    await _denied(gateway, "sendPengolo", {**base, "prompt": "Changed payload"})
-    await _denied(gateway, "sendPengolo", base, actor=OUTSIDER_ID)
+    await _denied(
+        gateway, "sendPengolo", {**replay_request, "prompt": "Changed payload"}
+    )
+    await _denied(gateway, "sendPengolo", replay_request, actor=OUTSIDER_ID)
     generation_id = _text(_object(first.get("generation")), "id")
     # There is deliberately no subscription while the model continues running.
     page = await eventually(
@@ -889,6 +932,7 @@ async def exercise_pengolo(
     )
     assert metadata.get("reasoning_effort") == "medium"
     assert metadata.get("graph_context_received") is True
+    assert _object(answer).get("run_python") == 2
     chat_id = _text(_object(first.get("chat")), "id")
     chat = _object(
         (
@@ -950,7 +994,7 @@ async def exercise_pengolo(
         gateway,
         "sendPengolo",
         {
-            **base,
+            **replay_request,
             "idempotencyKey": str(uuid.uuid4()),
             "temporary": True,
             "withLibrary": True,
@@ -970,7 +1014,11 @@ async def exercise_pengolo(
     transient = await _object_mutation(
         gateway,
         "sendPengolo",
-        {**base, "idempotencyKey": str(uuid.uuid4()), "temporary": True},
+        {
+            **replay_request,
+            "idempotencyKey": str(uuid.uuid4()),
+            "temporary": True,
+        },
     )
     temporary_chat = _text(_object(transient.get("chat")), "id")
     temporary_id = _text(_object(transient.get("generation")), "id")
@@ -1027,10 +1075,10 @@ async def exercise_pengolo(
                 "causal_entity_id": causal,
                 "question": "Live browser evidence",
                 "pengolo": True,
+                "calculator_only": True,
                 "slow": True,
             }
         ),
-        str(state.state_value.get("label", state.entity_id)),
         administrator=administrator,
     )
     print(

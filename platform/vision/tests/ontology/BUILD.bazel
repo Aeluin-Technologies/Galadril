@@ -22,7 +22,7 @@ py_test(
     srcs = ["test_registry_runtime.py"],
     legacy_create_init = False,
     deps = [
-        "//platform/registry/python/galadril_registry_api",
+        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/connectors/version",
         "@pip//cloudpickle",
         "@pip//pytest",

@@ -5,6 +5,7 @@ py_test(
     srcs = ["test_routing.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/adapters:routing",
@@ -18,9 +19,10 @@ py_test(
     srcs = ["test_memory.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/vision/src/galadril_vision/adapters",
+        "//platform/vision/src/galadril_vision/adapters:memory",
         "//platform/vision/src/galadril_vision/application",
         "@pip//httpx",
         "@pip//pytest",

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "resource_type": "gol_resource",
+  "id_encoding": "lowercase-hex-utf8-components-joined-by-hyphen",
+  "components": [
+    "authenticated_tenant",
+    "ontology_module",
+    "symbol_name",
+    "instance_id"
+  ],
+  "metadata_instance_id": "__schema",
+  "storage_tenant_segment": "t_ followed by sha256(UTF-8 authenticated tenant)",
+  "logical_tenant_rewritten": false,
+  "iam_id_encoding": "alphanumeric / _ | - + unchanged; other UTF-8 bytes encoded =HH uppercase"
+}

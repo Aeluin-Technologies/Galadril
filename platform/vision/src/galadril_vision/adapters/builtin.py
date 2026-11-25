@@ -199,6 +199,13 @@ class BuiltinStepAdapter:
                     continue
             worker.result()
             raise
+        if (
+            isinstance(prediction.prediction, dict)
+            and "gol_event_value" in prediction.prediction
+        ):
+            record["gol_value"] = _required_object(
+                prediction.prediction, "gol_event_value"
+            )
         output = {
             "record": record,
             "data": {
@@ -344,12 +351,18 @@ class BuiltinStepAdapter:
             modality=str(params.get("modality") or "data"),
             edge_type=str(params.get("edge_type") or "APPEARS_IN"),
             state_type=str(params.get("state_type") or "observation"),
-            ontology_resource_id=_optional_string(
-                params, "ontology_resource_id"
+            gol_symbol_key=_optional_string(params, "gol_symbol_key"),
+            gol_event_symbol_key=_optional_string(
+                params, "gol_event_symbol_key"
             ),
-            event_ontology_resource_id=_optional_string(
-                params, "event_ontology_resource_id"
+            gol_edge_symbol_key=_optional_string(params, "gol_edge_symbol_key"),
+            gol_entity_state_symbol_key=_optional_string(
+                params, "gol_entity_state_symbol_key"
             ),
+            gol_embedding_symbol_key=_optional_string(
+                params, "gol_embedding_symbol_key"
+            ),
+            event_values=[_required_object(record, "gol_value")],
         )
         return _json_object(
             {"record": record, "data": {"persisted": success[0]}}

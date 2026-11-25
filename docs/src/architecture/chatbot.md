@@ -79,12 +79,11 @@ Sources consulted on 2026-10-04:
 9. Historical answers can contain previously authorized evidence. Recheck
    evidence visibility before feeding such history to a new run; until complete
    provenance exists, history sharing is restricted to its original actor.
-10. Amarth may use every required tenant input, regardless of the requesting
-    user's raw-data visibility. Access to a root causal result follows that
-    entity's view permission. Publish bounded root statistics, without input
-    identities, source features, raw observations or the complete causal chain.
-    Historical causal results are rechecked against root access independently
-    of raw evidence permissions.
+10. Vision admits each causal observation and preserves its signed GOL
+    provenance in the result. Gateway checks the requesting user's root grant,
+    the result fields, the original inputs and the information-flow policy
+    before releasing bounded statistics. Conversation provenance references
+    the exact result receipt so replay and prompt history use the same checks.
 
 ## Conversation transitions
 
@@ -126,7 +125,7 @@ PostgreSQL under the application role. Run all tests through Bazel.
 
 The pipeline lifecycle E2E ends with the real private runtime and an independent
 OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
-check users with and without evidence access, root-only causal access, ABAC,
+check users with full evidence access and root-only grants, ABAC,
 revocation and cursor replay after client disconnection. Model quality and Mac
 performance require separate evaluation using the selected real model.
 

@@ -6,7 +6,8 @@ import asyncio
 import json
 import ssl
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -16,7 +17,12 @@ import boto3
 import grpc
 import httpx
 import psycopg
-from assertions import require_mapping, require_sequence
+from assertions import (
+    eventually,
+    require_mapping,
+    require_sequence,
+    tempo_error_spans,
+)
 from authentication import authenticated_token as authenticated_token
 from authzed.api.v1 import (
     AsyncClient,
@@ -43,7 +49,12 @@ from confluent_kafka import (
 )
 from confluent_kafka.admin import AdminClient
 from galadril_pipeline.config import StepType
-from galadril_pipeline.events import PipelineCommand, ResourceClass
+from galadril_pipeline.events import (
+    EventStatus,
+    PipelineCommand,
+    ResourceClass,
+    StepResult,
+)
 from galadril_registry_api import registry_pb2
 from google.protobuf.message import Message
 from grpcutil import insecure_bearer_token_credentials
@@ -54,7 +65,7 @@ TENANT_ID = "debug_tenant"
 UPLOADER_ID = "e2e_uploader"
 OUTSIDER_ID = "e2e_outsider"
 PIPELINE_ID = "e2e_pipeline"
-ONTOLOGY_ID = "e2e_ontology"
+ONTOLOGY_ID = "e2e.lifecycle"
 GATEWAY_URL = "https://127.0.0.1:18080/graphql"
 REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
@@ -76,14 +87,6 @@ def gateway_tls_context() -> ssl.SSLContext:
     return ssl.create_default_context(
         cadata=identity_files()["identity/gateway/ca.pem"].decode("ascii")
     )
-
-
-class _Revision(Protocol):
-    revision_id: str
-
-
-class _Binding(Protocol):
-    head_revision_id: str
 
 
 class _RuntimePipeline(Protocol):
@@ -259,23 +262,13 @@ def _serialize(message: object) -> bytes:
     return cast(bytes, cast(Message, message).SerializeToString())
 
 
-def _ontology_revision(data: bytes) -> object:
-    """Deserializes one Registry ontology revision."""
-    return registry_pb2.OntologyRevision.FromString(data)
-
-
-def _binding(data: bytes) -> object:
-    """Deserializes one Registry binding response."""
-    return registry_pb2.OntologyBinding.FromString(data)
-
-
 def _pipeline(data: bytes) -> object:
     """Deserializes one Registry runtime pipeline."""
     return registry_pb2.Pipeline.FromString(data)
 
 
 class RegistryFixtures:
-    """Authors prerequisites absent from Gateway's current public schema."""
+    """Reads pipeline pins; ontology writes always pass through Gateway."""
 
     __slots__ = ("_channel",)
 
@@ -291,55 +284,6 @@ class RegistryFixtures:
     async def close(self) -> None:
         """Closes the Registry HTTP/2 channel."""
         await self._channel.close()
-
-    async def put_ontology(self, ontology_json: bytes) -> str:
-        """Creates the ontology revision required by pipeline bindings."""
-        response = cast(
-            _Revision,
-            await self._channel.unary_unary(
-                "/galadril.registry.v1.Registry/PutOntology",
-                request_serializer=_serialize,
-                response_deserializer=_ontology_revision,
-            )(
-                registry_pb2.PutOntologyRequest(
-                    tenant_id=TENANT_ID,
-                    ontology_id=ONTOLOGY_ID,
-                    display_name="E2E ontology",
-                    ontology_json=ontology_json,
-                    author=UPLOADER_ID,
-                    message="Seed E2E ontology",
-                    create_only=True,
-                )
-            ),
-        )
-        return response.revision_id
-
-    async def put_binding(
-        self, *, block_id: str, expected_revision_id: str
-    ) -> str:
-        """Binds one pipeline block and returns the resulting immutable head."""
-        response = cast(
-            _Binding,
-            await self._channel.unary_unary(
-                "/galadril.registry.v1.Registry/PutBinding",
-                request_serializer=_serialize,
-                response_deserializer=_binding,
-            )(
-                registry_pb2.PutBindingRequest(
-                    tenant_id=TENANT_ID,
-                    expected_revision_id=expected_revision_id,
-                    binding=registry_pb2.OntologyBinding(
-                        pipeline_id=PIPELINE_ID,
-                        block_id=block_id,
-                        ontology_id=ONTOLOGY_ID,
-                        resource_ids=["object.entity"],
-                        include_dependencies=True,
-                        metadata_json=b"{}",
-                    ),
-                )
-            ),
-        )
-        return response.head_revision_id
 
     async def get_runtime_pipeline(self, revision_id: str) -> bytes:
         """Verifies the exact revision Vision will resolve at startup."""
@@ -514,7 +458,7 @@ class SpiceDBProbe:
 
 
 async def seed_users() -> None:
-    """Creates both test identities in Gateway's authoritative directory."""
+    """Provisions fixture identities and explicit clearances independently of roles."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
     ) as connection:
@@ -537,16 +481,59 @@ async def seed_users() -> None:
             ),
         )
 
+        await connection.execute(
+            """
+            INSERT INTO iam_ifc_clearances (tenant_id, user_id, classification, compartments)
+            VALUES (%s, %s, 3, ARRAY['Legal','Mailbox']),
+                   (%s, %s, 0, ARRAY[]::TEXT[]),
+                   (%s, %s, 3, ARRAY['Legal','Mailbox']),
+                   (%s, %s, 3, ARRAY['Legal','Mailbox'])
+            ON CONFLICT (tenant_id, user_id) DO UPDATE
+            SET classification=EXCLUDED.classification, compartments=EXCLUDED.compartments
+            """,
+            (
+                TENANT_ID,
+                UPLOADER_ID,
+                TENANT_ID,
+                OUTSIDER_ID,
+                "isolated_e2e_tenant",
+                UPLOADER_ID,
+                "other_tenant",
+                UPLOADER_ID,
+            ),
+        )
 
-def pipeline_execution_failure(
+
+async def seed_public_clearances(*user_ids: str) -> None:
+    """Grants Public clearance through the isolated database fixture authority."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        await connection.execute(
+            """
+            INSERT INTO iam_ifc_clearances (tenant_id, user_id, classification, compartments)
+            SELECT %s, subject.user_id, 0, ARRAY[]::TEXT[]
+            FROM unnest(%s::TEXT[]) AS subject(user_id)
+            ON CONFLICT (tenant_id, user_id) DO NOTHING
+            """,
+            (TENANT_ID, list(user_ids)),
+        )
+
+
+class PipelineExecutionError(AssertionError):
+    """Reports a durable failure for a pipeline with retries disabled."""
+
+
+def require_pipeline_execution_not_failed(
     rows: Sequence[tuple[object, object, object]],
-) -> str | None:
-    """Returns the first durable step failure with its persisted reason."""
+) -> None:
+    """Raises the first durable step failure with its persisted reason."""
     for step, status, error in rows:
         if str(status) == "failed":
             reason = str(error) if error is not None else "unspecified error"
-            return f"{step}: {reason}"
-    return None
+            raise PipelineExecutionError(
+                f"Vision pipeline execution failed: {step}: {reason}"
+            )
 
 
 async def read_pipeline_state() -> DerivedPipelineState | None:
@@ -579,11 +566,9 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
             (TENANT_ID,),
         )
         outbox_row = await outbox_cursor.fetchone()
-    failure = pipeline_execution_failure(
+    require_pipeline_execution_not_failed(
         [(row[0], row[1], row[3]) for row in execution_rows]
     )
-    if failure is not None:
-        raise AssertionError(f"Vision pipeline execution failed: {failure}")
     if entity_row is None or outbox_row is None or int(outbox_row[0]) != 0:
         return None
     completed_steps = frozenset(
@@ -602,6 +587,59 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
         state_value=state_value,
         correlation_id=correlation_id,
         completed_steps=completed_steps,
+    )
+
+
+async def read_trial_states(
+    expected: int,
+) -> tuple[tuple[str, str, str, Mapping[str, object]], ...]:
+    """Reports a failed empirical command before waiting for its derived state."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT entity_id, event_id, state_value->>'source_field', state_value
+            FROM entity_states
+            WHERE tenant_id = %s AND state_value->>'label' = 'trial-participant'
+            """,
+            (TENANT_ID,),
+        )
+        rows = await cursor.fetchall()
+        outbox = await connection.execute(
+            "SELECT COUNT(*) FROM authz_outbox WHERE tenant_id = %s",
+            (TENANT_ID,),
+        )
+        outbox_row = await outbox.fetchone()
+        failures = await connection.execute(
+            """
+            SELECT step, status, error
+            FROM pipeline_executions
+            WHERE tenant_id = %s AND pipeline LIKE %s AND status = 'failed'
+              AND step IN ('empirical_infer', 'empirical_resolve', 'empirical_sink')
+            ORDER BY created_at
+            LIMIT 1
+            """,
+            (TENANT_ID, f"%/{PIPELINE_ID}/%"),
+        )
+        failure = await failures.fetchone()
+    if failure is not None:
+        require_pipeline_execution_not_failed((failure,))
+    if len(rows) > expected:
+        raise PipelineExecutionError("Vision duplicated randomized-trial rows")
+    if len(rows) < expected or outbox_row is None or int(outbox_row[0]) != 0:
+        pending = int(outbox_row[0]) if outbox_row is not None else -1
+        raise RuntimeError(
+            f"Trial progress: states={len(rows)}/{expected}, authz_outbox={pending}"
+        )
+    return tuple(
+        (
+            str(entity),
+            str(event),
+            str(source),
+            require_mapping(state, "trial state"),
+        )
+        for entity, event, source, state in rows
     )
 
 
@@ -624,14 +662,17 @@ async def read_causal_cohort() -> str | None:
         rows = await cursor.fetchall()
         failure_cursor = await connection.execute(
             """
-            SELECT step, error FROM pipeline_executions
+            SELECT step, status, error FROM pipeline_executions
             WHERE tenant_id = %s AND pipeline LIKE %s
               AND status = 'failed'
+            ORDER BY created_at
             LIMIT 1
             """,
             (TENANT_ID, f"%/{PIPELINE_ID}/%"),
         )
         failure = await failure_cursor.fetchone()
+        if failure is not None:
+            require_pipeline_execution_not_failed((failure,))
         completed_cursor = await connection.execute(
             """
             SELECT COUNT(*) FROM pipeline_executions
@@ -665,10 +706,6 @@ async def read_causal_cohort() -> str | None:
             (TENANT_ID,),
         )
         alignment = await alignment_cursor.fetchone()
-    if failure is not None:
-        raise AssertionError(
-            f"Causal fixture pipeline failed at {failure[0]}: {failure[1]}"
-        )
     observed: dict[str, set[tuple[str, str | None]]] = {
         "alpha": set(),
         "decoy": set(),
@@ -755,33 +792,54 @@ async def publish_causal_command(
     ) as connection:
         cursor = await connection.execute(
             """
-            SELECT pipeline, result, correlation_id FROM pipeline_executions
-            WHERE tenant_id = %s
-              AND step = 'sink' AND status = 'completed'
-              AND result->'output'->'record'->>'storage_path' LIKE %s
-            LIMIT 1
+            SELECT run.pipeline, run.result, run.correlation_id,
+                   event.properties->>'gol_receipt'
+            FROM pipeline_executions AS run
+            JOIN eskg_events AS event ON event.tenant_id = run.tenant_id
+              AND event.properties->>'record_id' = run.result->'output'->'record'->>'record_id'
+            WHERE run.tenant_id = %s
+              AND run.step = 'sink' AND run.status = 'completed'
+              AND run.result->'output'->'record'->>'storage_path' LIKE %s
+            LIMIT 2
             """,
             (TENANT_ID, f"%{source_key}"),
         )
-        row = await cursor.fetchone()
-    if row is None:
-        raise AssertionError("Completed sink result is missing")
-    sink_result = require_mapping(row[1], "completed sink result")
-    result_id = sink_result.get("event_id")
-    if not isinstance(result_id, str):
-        raise AssertionError("Completed sink result lacks an event ID")
-    correlation_id = UUID(str(row[2]))
+        rows = await cursor.fetchall()
+    if len(rows) != 1:
+        raise AssertionError("Completed sink lineage is missing or ambiguous")
+    (row,) = rows
+    sink_result = StepResult.model_validate(row[1])
+    record = sink_result.output.get("record")
+    storage_path = (
+        record.get("storage_path") if isinstance(record, dict) else None
+    )
+    if (
+        sink_result.tenant_id != TENANT_ID
+        or sink_result.pipeline != row[0]
+        or sink_result.correlation_id != UUID(str(row[2]))
+        or sink_result.step_type is not StepType.SINK
+        or sink_result.status is not EventStatus.COMPLETED
+        or not isinstance(row[3], str)
+        or not row[3]
+        or not isinstance(storage_path, str)
+        or urlsplit(storage_path).path.removeprefix("/") != source_key
+    ):
+        raise AssertionError(
+            "Completed sink result lacks the expected input scope"
+        )
+    correlation_id = sink_result.correlation_id
     command = PipelineCommand(
         event_id=uuid5(correlation_id, "e2e:causal"),
         correlation_id=correlation_id,
-        causation_id=UUID(result_id),
+        causation_id=sink_result.event_id,
         tenant_id=TENANT_ID,
         entity_id=entity_id,
-        pipeline=str(row[0]),
+        pipeline=sink_result.pipeline,
         step="causal",
         step_type=StepType.CAUSAL,
         resource_class=ResourceClass.CAUSAL,
-        payload={"target": f"entity:{entity_id}"},
+        lineage=row[3],
+        payload={"target": f"entity:{entity_id}", "record": record},
     )
     await asyncio.to_thread(_publish_causal_command, command, trace_id)
     return str(correlation_id)
@@ -803,20 +861,55 @@ async def read_causal_state(entity_id: str) -> dict[str, object] | None:
         run = await run_cursor.fetchone()
         step_cursor = await connection.execute(
             """
-            SELECT status, error FROM pipeline_executions
+            SELECT step, status, error FROM pipeline_executions
             WHERE tenant_id = %s AND step = 'causal'
             ORDER BY created_at DESC LIMIT 1
             """,
             (TENANT_ID,),
         )
         step = await step_cursor.fetchone()
-    if step is not None and step[0] == "failed":
-        raise AssertionError(f"Vision causal command failed: {step[1]}")
+    if step is not None:
+        require_pipeline_execution_not_failed((step,))
     if run is not None and run[0] != "success":
         raise AssertionError(f"Amarth causal run did not succeed: {run[0]}")
-    if run is None or step is None or step[0] != "completed":
+    if run is None or step is None or step[1] != "completed":
         return None
-    return require_mapping(run[1], "Amarth causal result")
+    envelope = require_mapping(run[1], "Amarth causal result envelope")
+    signed = require_mapping(
+        envelope.get("gol_value"), "signed Amarth causal result"
+    )
+    estimate_columns = {
+        "effect_size": "effect_sizes",
+        "confidence_score": "confidence_scores",
+        "time_lag_seconds": "lag_seconds",
+        "p_value": "p_values",
+        "q_value": "q_values",
+        "stability": "stabilities",
+        "supports_counterfactual": "counterfactual_flags",
+    }
+    return {
+        **signed,
+        **{
+            key: int(str(signed[key]))
+            for key in (
+                "causal_links",
+                "validated_effects",
+                "entity_scope_size",
+                "event_scope_size",
+                "observation_count",
+            )
+        },
+        "root_estimates": [
+            dict(zip(estimate_columns, row, strict=True))
+            for row in zip(
+                *(
+                    require_sequence(signed[column], column)
+                    for column in estimate_columns.values()
+                ),
+                strict=True,
+            )
+        ],
+    }
 
 
 async def vision_database_ready() -> bool | None:
@@ -1055,6 +1148,34 @@ async def read_tempo_trace(trace_id: str) -> dict[str, object] | None:
         return None
     response.raise_for_status()
     return require_mapping(response.json(), "Tempo trace")
+
+
+@asynccontextmanager
+async def capture_tempo_failure(trace_id: str) -> AsyncIterator[None]:
+    """Adds bounded error spans while the test's collector is still running."""
+    try:
+        yield
+    except Exception as error:
+
+        async def error_spans() -> tuple[str, ...] | None:
+            trace = await read_tempo_trace(trace_id)
+            return (
+                tempo_error_spans(trace) if trace is not None else ()
+            ) or None
+
+        try:
+            names = await eventually(
+                error_spans, timeout_seconds=15, description="Tempo error spans"
+            )
+        except AssertionError:
+            error.add_note(
+                f"No error spans exported for Tempo trace {trace_id}"
+            )
+        else:
+            error.add_note(
+                f"Tempo trace {trace_id} error spans: {', '.join(names)}"
+            )
+        raise
 
 
 def statuses_by_step(

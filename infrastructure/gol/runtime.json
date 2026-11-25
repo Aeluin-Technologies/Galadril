@@ -1,0 +1,23 @@
+{
+  "issuer": "https://aeluin.gravitalia.com",
+  "metadata_destination": "browser",
+  "metadata_purpose": "ontology_exploration",
+  "source_destination": "registry",
+  "source_purpose": "ontology_authoring",
+  "context_floor": {
+    "classification": "Public",
+    "compartments": [],
+    "destinations": null,
+    "purposes": null
+  },
+  "shared_state_floor": {
+    "classification": "Restricted",
+    "compartments": [
+      "Legal",
+      "Mailbox"
+    ],
+    "destinations": null,
+    "purposes": null
+  },
+  "ingress_floors": {}
+}

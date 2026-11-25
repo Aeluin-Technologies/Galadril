@@ -1,0 +1,84 @@
+"""Checks the real E2E DAG without importing model or Docker runtimes."""
+
+import re
+
+import pytest
+from galadril_pipeline.config import PipelineConfig
+from galadril_pipeline.routing import PipelineRouteTable
+from pipeline_definition import pipeline_fixture
+
+
+def test_empirical_pipeline_routes_are_streaming_safe() -> None:
+    """Both sources compile without an implicit streaming join."""
+    routes = PipelineRouteTable(
+        PipelineConfig.model_validate(pipeline_fixture("tenant", "pipeline"))
+    )
+    assert routes.entry_steps("e2e_text") == ("infer",)
+    assert routes.entry_steps("e2e_empirical") == ("empirical_infer",)
+    assert routes.route("empirical_resolve").dependencies == (
+        "empirical_infer",
+    )
+
+
+@pytest.mark.parametrize("size", [24, 205])
+def test_each_trial_cohort_matches_the_published_intake_source(
+    size: int,
+) -> None:
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    source = next(
+        source for source in config.sources if source.id == "e2e_empirical"
+    )
+    assert re.fullmatch(
+        source.match_pattern, f"tenant/raw/trial/{'a' * 32}/trial-{size}.csv"
+    )
+
+
+def test_every_pipeline_publication_names_its_bound_gol_contract() -> None:
+    """Kafka dispatch cannot infer a transfer contract from a model name."""
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    for step in config.pipeline:
+        assert step.params.model_dump().get("gol_transfer_symbol_key") in {
+            "e2e.lifecycle::E2EEntity",
+            "e2e.lifecycle::E2EObservation",
+        }
+
+
+def test_resolvers_name_their_gol_state_contract() -> None:
+    """The resolver cannot infer a state contract from a Kafka transfer key."""
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    resolvers = [step for step in config.pipeline if step.type == "resolve"]
+    assert len(resolvers) == 2
+    for step in resolvers:
+        assert (
+            step.params.model_dump().get("gol_state_symbol_key")
+            == "e2e.lifecycle::IdentityPrototype"
+        )
+
+
+def test_on_demand_causal_step_has_no_streaming_input() -> None:
+    """The lifecycle dispatches causal work explicitly after collecting data."""
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    causal = next(step for step in config.pipeline if step.step == "causal")
+    parameters = causal.params.model_dump()
+    assert parameters.get("trigger") == "on_demand"
+    assert parameters.get("k_max") == 0
+    assert parameters.get("gol_state_symbol_key") == "e2e.lifecycle::CausalRun"
+    assert (
+        parameters.get("gol_derived_symbol_key") == "e2e.lifecycle::CausalLink"
+    )
+    assert parameters.get("gol_required_symbols") == [
+        "e2e.lifecycle::ObservationState"
+    ]
+    assert not causal.input_from
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

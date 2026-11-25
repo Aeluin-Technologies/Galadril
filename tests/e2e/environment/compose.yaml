@@ -229,7 +229,7 @@ services:
       - |
         mc alias set local http://rustfs:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc ready local
-        mc mb --ignore-existing local/lake local/models local/staging
+        mc mb --ignore-existing local/lake local/models local/staging local/ontology-artifacts
         mc event add --ignore-existing local/lake arn:rustfs:sqs:us-east-1:primary:webhook --event put
 
   lakefs:
@@ -295,6 +295,9 @@ services:
     pull_policy: never
     network_mode: service:api-proxy
     environment:
+      REGISTRY_GATEWAY_KEY_PATH: /run/registry-secrets/gateway-key
+      GOL_ARTIFACT_BUCKET: ontology-artifacts
+      GOL_AUTHORITY_CONFIG_PATH: /etc/galadril/gol-authorities.json
       REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
@@ -310,6 +313,10 @@ services:
       - type: volume
         source: e2e-application
         target: /etc/galadril
+        read_only: true
+      - type: volume
+        source: e2e-registry-secrets
+        target: /run/registry-secrets
         read_only: true
     depends_on:
       lakefs:
@@ -373,8 +380,14 @@ services:
     pull_policy: never
     network_mode: service:api-proxy
     environment:
+      GOL_WORKER_KEY_PATH: /run/gol-worker-secrets/worker-key
       UTILS_SERVICE_URL: !reset null
       UTILS_SERVICE_KEY_FILE: !reset null
+      REGISTRY_GATEWAY_KEY_PATH: /run/registry-secrets/gateway-key
+      GOL_ARTIFACT_BUCKET: ontology-artifacts
+      GOL_AUTHORITY_CONFIG_PATH: /e2e/gol-authorities.json
+      GOL_RUNTIME_CONFIG_PATH: /e2e/gol-runtime.json
+      GOL_EFFECT_KEY_PATH: /run/secrets/gol-effect-key
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       SCRIBE__ENABLED: "true"
       PENGOLO_DOCUMENT_VAULT_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -385,6 +398,18 @@ services:
       OTEL_TRACES_SAMPLER: always_on
       DEPLOYMENT_ENVIRONMENT: test
     volumes: !override
+      - type: volume
+        source: e2e-worker-secrets
+        target: /run/gol-worker-secrets
+        read_only: true
+      - type: volume
+        source: e2e-registry-secrets
+        target: /run/registry-secrets
+        read_only: true
+      - type: volume
+        source: e2e-gol-secrets
+        target: /run/secrets
+        read_only: true
       - type: volume
         source: e2e-application
         target: /e2e
@@ -460,6 +485,7 @@ services:
     shm_size: "6gb"
     network_mode: service:api-proxy
     environment:
+      GOL_WORKER_KEY_PATH: /run/gol-worker-secrets/worker-key
       APP_ENV: development
       LOG_LEVEL: INFO
       VISION_BOOTSTRAP_PATH: /e2e/connectors.yaml
@@ -485,6 +511,10 @@ services:
       - --role
       - all
     volumes: !override
+      - type: volume
+        source: e2e-worker-secrets
+        target: /run/gol-worker-secrets
+        read_only: true
       - type: volume
         source: e2e-application
         target: /e2e
@@ -523,6 +553,15 @@ services:
       - 127.0.0.1:15052:50052
 
 volumes:
+  e2e-worker-secrets:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-worker-secrets
+  e2e-registry-secrets:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-registry-secrets
+  e2e-gol-secrets:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-gol-secrets
   e2e-hydra:
     external: true
     name: ${E2E_CONFIG_VOLUME}-hydra

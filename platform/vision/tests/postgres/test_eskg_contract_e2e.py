@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from galadril_ontology import ResourceKind
+from galadril_ontology import GolSymbolKind
 from galadril_vision.common.config import PostgresConnectorConfig
-from galadril_vision.common.eskg import OntologyReference
+from galadril_vision.common.eskg import GolReference
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.common.types import (
     EventRecord,
@@ -28,7 +30,20 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_eskg_structural_contract_on_age() -> None:
+async def test_eskg_structural_contract_on_age(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @asynccontextmanager
+    async def admitted_effect(**kwargs: object) -> AsyncIterator[str]:
+        yield "fixture-receipt"
+
+    # This integration test exercises AGE storage, with a trusted test permit
+    # in place of Gateway. Worker admission is tested independently.
+    for scope in ("protected_gol_effect", "protected_gol_state_effect"):
+        monkeypatch.setattr(
+            f"galadril_vision.connectors.postgres.graph.{scope}",
+            admitted_effect,
+        )
     container = PostgresContainer(
         "ghcr.io/aeluin-technologies/galadril-database:latest",
         username="postgres",
@@ -67,15 +82,21 @@ async def test_eskg_structural_contract_on_age() -> None:
                 and "document_evidence" in str(index[0])
             )
         store = GraphStore(client, config)
-        reference = OntologyReference(
+        reference = GolReference(
             tenant_id="tenant-a",
             ontology_id="operations",
-            revision_id="a" * 32,
-            resource_id="object.person",
-            resource_kind=ResourceKind.OBJECT_TYPE,
+            ontology_version="1.0.0",
+            source_revision="a" * 32,
+            generation_id="c" * 32,
+            symbol_key="operations::Person",
+            symbol_kind=GolSymbolKind.ENTITY,
         )
         entity = GraphVertex(
-            "evt_entity", "Entity", "tenant-a", ontology_ref=reference
+            "evt_entity",
+            "Entity",
+            "tenant-a",
+            properties={"gol_value": {"name": "Fixture"}},
+            ontology_ref=reference,
         )
         event = EventRecord(
             event_id="opaque-event",
@@ -129,7 +150,7 @@ async def test_eskg_structural_contract_on_age() -> None:
                 replace(
                     entity,
                     ontology_ref=reference.model_copy(
-                        update={"revision_id": "b" * 32}
+                        update={"generation_id": "b" * 32}
                     ),
                 )
             )

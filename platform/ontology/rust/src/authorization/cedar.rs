@@ -76,7 +76,7 @@ fn generate(project: &Project, input: &CedarInput) -> Result<String, Issue> {
         None,
     )?;
     let mut types = BTreeSet::new();
-    let mut actions = BTreeSet::new();
+    let mut actions = BTreeMap::<&EntityUid, BTreeSet<&EntityTypeName>>::new();
     for (owner, resource) in &input.resources {
         let target = Reference::Symbol(owner.clone());
         let definition = declaration(project, owner)
@@ -124,20 +124,29 @@ fn generate(project: &Project, input: &CedarInput) -> Result<String, Issue> {
                 resource.entity_type.basename()
             ));
         for action in &resource.actions {
-            if action.type_name().basename() != "Action" ||
-                !actions.insert(action)
-            {
+            if action.type_name().basename() != "Action" {
                 return Err(Issue::new(
                     IssueKind::InvalidCedarSchema,
                     Some(target),
-                    "A Cedar action must belong to exactly one approved resource",
+                    "A Cedar action must use the Action entity type",
                 ));
             }
-            namespaces.entry(action.type_name().namespace()).or_default().push(format!(
-                "action \"{}\" appliesTo {{ principal: [{}], resource: [{}], context: {context} }};",
-                action.id().escaped(), input.principal, resource.entity_type,
-            ));
+            actions
+                .entry(action)
+                .or_default()
+                .insert(&resource.entity_type);
         }
+    }
+    for (action, resources) in actions {
+        let resources = resources
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        namespaces.entry(action.type_name().namespace()).or_default().push(format!(
+            "action \"{}\" appliesTo {{ principal: [{}], resource: [{resources}], context: {context} }};",
+            action.id().escaped(), input.principal,
+        ));
     }
     let mut source = String::new();
     for (namespace, statements) in namespaces {

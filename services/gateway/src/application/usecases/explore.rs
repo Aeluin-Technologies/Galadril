@@ -7,6 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use super::gol::redact_worker_provenance;
 use crate::application::ports::entity_state_store::EntityStateStore;
 use crate::application::ports::relations_store::{
     GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph, RelationsStore,
@@ -141,7 +142,7 @@ impl ExploreService {
             if ok && source_visible {
                 out.push(SearchHit {
                     entity_id: row.entity_id,
-                    metadata: row.metadata,
+                    metadata: redact_worker_provenance(row.metadata),
                 });
             }
         }
@@ -258,7 +259,7 @@ impl ExploreService {
                         None
                     },
                     properties: if administrator {
-                        n.properties
+                        redact_worker_provenance(n.properties)
                     } else {
                         serde_json::json!({})
                     },
@@ -279,7 +280,7 @@ impl ExploreService {
                     to_id: e.to_id,
                     label: e.label,
                     properties: if administrator {
-                        e.properties
+                        redact_worker_provenance(e.properties)
                     } else {
                         serde_json::json!({})
                     },
@@ -318,7 +319,7 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::application::ports::relations_store::OntologyReference;
+    use crate::application::ports::relations_store::GolReference;
 
     struct MixedGraph;
 
@@ -337,14 +338,16 @@ mod tests {
                     GraphNode {
                         id: "evt_entity-1".into(),
                         kind: GraphNodeKind::Entity,
-                        ontology_ref: Some(OntologyReference {
+                        ontology_ref: Some(GolReference {
                             tenant_id: "tenant-a".into(),
-                            ontology_id: "operations".into(),
-                            revision_id: "a".repeat(32),
-                            resource_id: "object.person".into(),
-                            resource_kind: "object_type".into(),
+                            ontology_id: "operations.people".into(),
+                            ontology_version: "1.0.0".into(),
+                            source_revision: "a".repeat(32),
+                            generation_id: "b".repeat(32),
+                            symbol_key: "operations.people::Person".into(),
+                            symbol_kind: "entity".into(),
                         }),
-                        properties: serde_json::json!({"label":"private"}),
+                        properties: serde_json::json!({"label":"private", "gol_receipt":"private lineage"}),
                     },
                     GraphNode {
                         id: "visible-event".into(),
@@ -364,7 +367,7 @@ mod tests {
                         from_id: "evt_entity-1".into(),
                         to_id: "visible-event".into(),
                         label: "OBSERVED".into(),
-                        properties: serde_json::json!({"confidence":0.9}),
+                        properties: serde_json::json!({"confidence":0.9, "gol_receipt":"private lineage"}),
                     },
                     GraphEdge {
                         from_id: "evt_entity-1".into(),
@@ -503,6 +506,10 @@ mod tests {
             .await?;
         assert_eq!(admin_graph.nodes.len(), 2);
         assert_eq!(admin_graph.edges.len(), 1);
+        assert_eq!(
+            admin_graph.edges.first().map(|edge| &edge.properties),
+            Some(&serde_json::json!({"confidence": 0.9}))
+        );
         assert!(
             admin_graph
                 .nodes
@@ -523,8 +530,8 @@ mod tests {
                 .iter()
                 .find(|node| node.kind == GraphNodeKind::Entity)
                 .and_then(|node| node.ontology_ref.as_ref())
-                .map(|reference| reference.resource_id.as_str()),
-            Some("object.person")
+                .map(|reference| reference.symbol_key.as_str()),
+            Some("operations.people::Person")
         );
         assert_eq!(
             admin_graph

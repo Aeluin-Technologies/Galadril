@@ -7,6 +7,74 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_test(
+    name = "gol_upload_test",
+    srcs = [
+        "tests/gol_upload_test.rs",
+        "tests/support/gol_upload.rs",
+        "src/application/ports/upload_store.rs",
+        "src/application/ports/audit_store.rs",
+        "src/application/ports/user_directory.rs",
+        "src/application/usecases/audit.rs",
+        "src/application/usecases/identity.rs",
+        "src/application/usecases/uploads.rs",
+        "src/application/test_support.rs",
+        "src/domain/storage/key.rs",
+    ],
+    crate_root = "tests/gol_upload_test.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = crate_deps(["anyhow", "sanitize-filename", "serde_json", "tokio", "tracing", "urlencoding", "uuid"]),
+)
+
+rust_test(
+    name = "gol_effect_scope_test",
+    srcs = ["tests/gol_effect_scope.rs", "src/application/usecases/gol/effect_scope.rs"],
+    crate_root = "tests/gol_effect_scope.rs",
+    deps = crate_deps(["anyhow", "tokio", "uuid"]),
+)
+
+rust_test(
+    name = "gol_http_test",
+    srcs = ["tests/gol_http.rs", "src/adapters/inbound/gol/wire.rs"],
+    crate_root = "tests/gol_http.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = crate_deps(["axum", "futures", "reqwest", "serde", "serde_json", "tokio"]),
+)
+
+rust_test(
+    name = "gol_receipts_test",
+    srcs = ["tests/gol_receipts.rs", "src/application/usecases/gol/receipts.rs"],
+    crate_root = "tests/gol_receipts.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = ["//platform/ontology/rust:ontology"] + crate_deps(["anyhow", "base64", "ring", "serde", "serde_json", "sha2", "uuid"]),
+)
+
+rust_test(
+    name = "gol_reference_test",
+    srcs = ["tests/gol_reference.rs", "src/application/ports/relations_store.rs"],
+    crate_root = "tests/gol_reference.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = ["//platform/ontology/rust:ontology", "//platform/registry"] + crate_deps(["anyhow", "serde", "serde_json"]),
+)
+
+rust_test(
+    name = "gol_admission_test",
+    srcs = ["tests/gol_admission.rs", "src/application/usecases/gol/admission.rs"],
+    crate_root = "tests/gol_admission.rs",
+    deps = ["//platform/ontology/rust:ontology"] + crate_deps(["anyhow", "cedar-policy", "tracing", "uuid"]),
+)
+
+rust_test(
+    name = "gol_permissions_test",
+    srcs = [
+        "src/application/usecases/gol/spicedb.rs",
+        "src/application/usecases/relationship_retry.rs",
+        "tests/gol_permissions.rs",
+    ],
+    crate_root = "tests/gol_permissions.rs",
+    deps = ["//platform/ontology/rust:ontology", "//platform/registry"] + crate_deps(["anyhow", "loth", "sha2", "tokio", "tonic", "tracing"]),
+)
+
+rust_test(
     name = "mcp_workspace_test",
     srcs = ["tests/mcp_workspace.rs", "src/domain/mcp_workspace.rs"],
     crate_root = "tests/mcp_workspace.rs",
@@ -157,6 +225,7 @@ rust_binary(
         normal = True,
     ) + [
         "//platform/document-compiler",
+        "//platform/ontology/rust:ontology",
         "//platform/registry",
         "//platform/telemetry",
     ],
@@ -166,6 +235,9 @@ rust_test(
     name = "gateway_test",
     size = "large",
     compile_data = [
+        "tests/gol_control_plane.rs",
+        "tests/support/gol_upload.rs",
+        "tests/gol_clearance.rs",
         "//front/dashboard:navigation_catalog",
         "//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json",
         "//front/dashboard:administration_graphql_contract",

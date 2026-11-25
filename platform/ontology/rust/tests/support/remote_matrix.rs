@@ -12,7 +12,7 @@ use galadril_ontology::archive::remote::{
 };
 use galadril_ontology::archive::{ArchiveReader, Direction, compile_archive};
 use galadril_ontology::authorization::{
-    Consistency, Operation, authorize, compile,
+    Consistency, Decision, Denial, Operation, authorize, compile,
 };
 
 use super::{
@@ -22,6 +22,89 @@ use super::{
 
 const TENANT: &str = "tenant_a";
 const STREAM: &str = "remote.fixture";
+
+#[tokio::test]
+#[ignore = "runs pinned RustFS to verify atomic publication provenance"]
+async fn docker_atomic_provenance_and_logical_tenant_namespaces() -> TestResult
+{
+    use std::collections::BTreeMap;
+
+    use galadril_ontology::archive::remote::PublicationProvenance;
+    let storage = rustfs::start().await?;
+    let project = project(0, false)?;
+    let artifact = compile_archive(&project, &environment(&project)?)?;
+    let store = RemoteStore::connect_namespace(
+        storage.client.clone(),
+        rustfs::BUCKET,
+        "123e4567-e89b-12d3-a456-426614174000",
+        "tenant_namespace".parse()?,
+        "example.ontology".parse()?,
+        RemoteOptions {
+            reader_window: Duration::from_secs(3),
+            ..RemoteOptions::default()
+        },
+    )
+    .await?;
+    let provenance = PublicationProvenance {
+        source_revision: "lakefs_revision_a".into(),
+        dependencies: BTreeMap::new(),
+        candidates: project.symbols().keys().cloned().collect(),
+        modules: artifact.versions().ontologies.clone(),
+    };
+    let first = store
+        .publish_with_provenance(&artifact, None, provenance.clone())
+        .await?;
+    let snapshot = store.open_generation(first).await?;
+    assert_eq!(snapshot.provenance(), Some(&provenance));
+    assert!(snapshot.is_live());
+    tokio::time::sleep(Duration::from_millis(3_050)).await;
+    assert!(!snapshot.is_live());
+    let renewed = store.open_generation(first).await?;
+    assert!(renewed.is_live());
+    assert_eq!(renewed.generation(), first);
+    assert_eq!(renewed.provenance(), Some(&provenance));
+    let second_provenance = PublicationProvenance {
+        source_revision: "lakefs_revision_b".into(),
+        ..provenance.clone()
+    };
+    let second = store
+        .publish_with_provenance(
+            &artifact,
+            Some(first),
+            second_provenance.clone(),
+        )
+        .await?;
+    assert!(store.open_generation(first).await.is_err());
+    assert_eq!(snapshot.generation(), first);
+    assert_eq!(snapshot.provenance(), Some(&provenance));
+    assert_eq!(
+        store.open_generation(second).await?.provenance(),
+        Some(&second_provenance)
+    );
+    assert!(store.retire(first).await.is_err());
+    assert_eq!(store.active().await?, Some(second));
+    let stale = store
+        .stage_with_provenance(
+            &artifact,
+            Some(second),
+            second_provenance.clone(),
+        )
+        .await?;
+    store.retire(second).await?;
+    assert!(matches!(stale.activate().await, Err(RemoteError::Conflict)));
+    assert_eq!(store.active().await?, None);
+    let stale_initial = store
+        .stage_with_provenance(&artifact, None, second_provenance)
+        .await?;
+    store.deactivate(None).await?;
+    assert!(matches!(
+        stale_initial.activate().await,
+        Err(RemoteError::Conflict)
+    ));
+    assert_eq!(store.active().await?, None);
+    assert!(store.open().await.is_err());
+    Ok(())
+}
 
 fn artifact_key(generation: Generation) -> String {
     format!("gol/v1/{TENANT}/{STREAM}/artifacts/{generation}.golc")
@@ -91,6 +174,11 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
 
     let before = store.metrics();
     let remote = store.open().await?;
+    assert!(remote.is_live());
+    assert_eq!(
+        remote.authorize_checked(&title, &owner, &spice).await?,
+        Decision::Allow
+    );
     let projection = remote
         .read(&title, &owner, &spice)
         .await
@@ -104,6 +192,19 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
     let warm = store.metrics();
     assert_eq!(warm.requests, cold.requests);
     assert!(warm.ram_hits > cold.ram_hits);
+
+    let excluded = Runtime {
+        subject: "excluded",
+        ..owner.clone()
+    };
+    assert_eq!(
+        remote.authorize_checked(&title, &excluded, &spice).await?,
+        Decision::Deny(Denial::Relationship)
+    );
+    assert_eq!(
+        remote.authorize(&title, &excluded, &spice).await,
+        Decision::Deny(Denial::Runtime)
+    );
 
     for (name, context, expected) in [
         (
@@ -362,6 +463,16 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
             .contains(&artifact_key(generation))
     );
     tokio::time::sleep(Duration::from_millis(6_050)).await;
+    assert!(!left.is_live());
+    assert!(!right.is_live());
+    assert_eq!(
+        left.authorize_checked(&title, &owner, &spice).await,
+        Err(RemoteError::Expired)
+    );
+    assert!(matches!(
+        store.open_generation(generation).await,
+        Err(RemoteError::Conflict)
+    ));
     assert!(left.read(&title, &owner, &spice).await.is_none());
     assert!(right.read(&title, &owner, &spice).await.is_none());
     assert_eq!(cleanup.sweep().await?, 3);
@@ -372,6 +483,7 @@ async fn docker_rustfs_spicedb_remote_snapshots_and_retirement() -> TestResult
 
     let restarted = connect(&storage, options).await?;
     let reopened = restarted.open().await?;
+    assert!(reopened.is_live());
     assert_eq!(reopened.generation(), active);
     assert_eq!(
         reopened

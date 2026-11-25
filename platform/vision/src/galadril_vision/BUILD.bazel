@@ -33,6 +33,8 @@ py_binary(
     main = "main.py",
     visibility = ["//visibility:public"],
     deps = [
+        "@pip//licorne",  # keep: loaded dynamically only in resolving actors
+
         ":galadril_vision",
         "//platform/vision/src/galadril_vision/common",
         "//platform/registry/python/galadril_registry_api",

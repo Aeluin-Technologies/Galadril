@@ -104,6 +104,10 @@ fn policy_json(set: &PolicySet) -> Result<serde_json::Value, WireError> {
 }
 
 impl ArchivedAuthority {
+    pub(crate) fn versions(&self) -> &Versions {
+        &self.0.versions
+    }
+
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, WireError> {
         let record: AuthorityRecord = crate::archive::decode(bytes)?;
         let fragments = record

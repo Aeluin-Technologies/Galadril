@@ -23,6 +23,9 @@ use crate::application::ports::pengolo_store::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
+use crate::application::usecases::causal::{
+    CausalService, EVIDENCE_TYPE, causal_evidence_visible,
+};
 use crate::application::usecases::identity::IdentityService;
 use crate::domain::capabilities::{
     CapabilityCatalog, CapabilityKind, Privacy,
@@ -176,6 +179,7 @@ pub struct PengoloService {
     access: Arc<dyn AccessStore>,
     signals: WorkspaceSignals,
     documents: Option<Arc<super::documents::DocumentRetrieval>>,
+    causal: Option<Arc<CausalService>>,
     chatgpt_callback: Option<String>,
 }
 
@@ -609,6 +613,7 @@ impl PengoloService {
             access,
             signals: WorkspaceSignals::new(),
             documents: None,
+            causal: None,
             chatgpt_callback: None,
         }
     }
@@ -623,6 +628,14 @@ impl PengoloService {
 
     pub fn with_chatgpt(mut self, callback: Option<String>) -> Self {
         self.chatgpt_callback = callback;
+        self
+    }
+
+    pub(crate) fn with_causal_evidence(
+        mut self,
+        causal: Arc<CausalService>,
+    ) -> Self {
+        self.causal = Some(causal);
         self
     }
 
@@ -1502,6 +1515,19 @@ impl PengoloService {
         retain_deleted: bool,
     ) -> Result<bool> {
         for source in sources {
+            if source.resource_type == EVIDENCE_TYPE {
+                if !causal_evidence_visible(
+                    self.causal.as_deref(),
+                    (actor.tenant, actor.user),
+                    actor.context,
+                    source,
+                )
+                .await?
+                {
+                    return Ok(false);
+                }
+                continue;
+            }
             if source.resource_type == "pengolo_chat" {
                 let Some(chat) = self
                     .store

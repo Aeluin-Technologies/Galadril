@@ -6,8 +6,11 @@ import asyncio
 import io
 import json
 import os
+import re
+import secrets
 import signal
 import tarfile
+from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -29,18 +32,68 @@ _AVRO_SCHEMA_NAMES = (
     "transaction.avsc",
     "video.avsc",
 )
-PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
+# The two empirical cohorts run through the same authorizing worker pipeline.
+EMPIRICAL_STATE_TIMEOUT_SECONDS = 2 * 60 * 60.0
+PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 5 * 60 * 60.0
 _CONFIG_CATEGORIES = (
     "application",
     "observability",
     "database",
     "proxy",
     "hydra",
+    "gol-secrets",
+    "registry-secrets",
+    "worker-secrets",
 )
 
 
 class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
+
+
+def _pipeline_failure_events(logs: str) -> str:
+    """Preserves failure stages when metrics crowd out the final collector tail."""
+    events = {
+        "gol.publication.denied",
+        "gol.worker.dependency.denied",
+        "gol.worker.effect.denied",
+        "gol.worker.invariant.denied",
+        "gol.worker.metadata.withheld",
+        "gol.worker.open.denied",
+        "gol.worker.resume.denied",
+        "gol.worker.write_contract.denied",
+        "identity.candidate_search.failed",
+        "pipeline.command.deferred",
+        "pipeline.command.failed",
+        "pipeline.gol.failed",
+        "pipeline.gol.rpc.failed",
+        "pipeline.publication.failed",
+        "ray.actor.task.failed",
+    }
+    details = re.compile(
+        r"-> (phase|reason|error_type|step|topic|status|archive_error|export_error): Str\(([\w.()-]{1,64})\)",
+        re.ASCII,
+    )
+    names = re.compile(
+        r"(?:EventName: ([\w.]+)|-> event\.name: Str\(([\w.]+)\))", re.ASCII
+    )
+    recent: deque[str] = deque(maxlen=24)
+    for record in re.split(
+        r"^.*\|\s*LogRecord #\d+[ \t]*$", logs, flags=re.MULTILINE
+    ):
+        event = None
+        attributes: list[str] = []
+        for line in record.splitlines():
+            message = line.partition("|")[2].strip()
+            if name := names.fullmatch(message):
+                candidate = name.group(1) or name.group(2)
+                if candidate in events:
+                    event = candidate
+            elif detail := details.fullmatch(message):
+                attributes.append(f"{detail.group(1)}={detail.group(2)}")
+        if event is not None:
+            recent.append(" ".join((event, *attributes)))
+    return "\n".join(recent)
 
 
 def image_loader_command(loader: Path) -> tuple[str, str]:
@@ -82,6 +135,31 @@ def configuration_archive() -> bytes:
                 )
                 + relative_path,
             )
+        _add_archive_file(
+            archive,
+            runfile("tests/e2e/fixtures/gol-authorities.json"),
+            "application/gol-authorities.json",
+        )
+        _add_archive_file(
+            archive,
+            runfile("tests/e2e/fixtures/gol-runtime.json"),
+            "application/gol-runtime.json",
+        )
+        worker_key = secrets.token_bytes(32)
+        worker_metadata = tarfile.TarInfo("worker-secrets/worker-key")
+        worker_metadata.size = len(worker_key)
+        worker_metadata.mode = 0o444
+        archive.addfile(worker_metadata, io.BytesIO(worker_key))
+        gateway_key = secrets.token_bytes(32)
+        gateway_metadata = tarfile.TarInfo("registry-secrets/gateway-key")
+        gateway_metadata.size = len(gateway_key)
+        gateway_metadata.mode = 0o444
+        archive.addfile(gateway_metadata, io.BytesIO(gateway_key))
+        effect_key = secrets.token_bytes(32)
+        effect_metadata = tarfile.TarInfo("gol-secrets/gol-effect-key")
+        effect_metadata.size = len(effect_key)
+        effect_metadata.mode = 0o444
+        archive.addfile(effect_metadata, io.BytesIO(effect_key))
         _add_archive_file(
             archive,
             runfile("infrastructure/observability/tempo.yaml"),
@@ -339,7 +417,7 @@ class ComposeEnvironment:
                 "sh",
                 "-ec",
                 "tar -xf - -C /bundle; "
-                "for category in application observability database proxy hydra; do "
+                "for category in application observability database proxy hydra gol-secrets registry-secrets worker-secrets; do "
                 'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
             input_bytes=configuration_archive(),
@@ -441,20 +519,21 @@ class ComposeEnvironment:
         )
 
     async def vision_waiting_for_publication(self) -> bool | None:
-        """Requires an OTLP waiting event from the worker before provisioning."""
+        """Observes the worker waiting without depending on the collector tail."""
         await self.assert_vision_did_not_restart()
         logs = await _run(
-            (
-                *self._command,
-                "logs",
-                "--no-color",
-                "--tail",
-                "2000",
-                "otel-collector",
-            ),
+            (*self._command, "logs", "--no-color", "--tail", "50", "vision"),
             environment=self._environment,
         )
-        return True if "pipeline.publication.pending" in logs else None
+        event = '{"event.name":"pipeline.publication.pending"}'
+        return next(
+            (
+                True
+                for line in logs.splitlines()
+                if line.partition("|")[2].strip() == event
+            ),
+            None,
+        )
 
     async def logs(self) -> str:
         """Returns bounded service state and logs for a failed test."""
@@ -621,21 +700,23 @@ class ComposeEnvironment:
             check=False,
             timeout_seconds=90.0,
         )
-        infrastructure_logs += await _run(
+        collector_logs = await _run(
             (
                 *self._command,
                 "logs",
                 "--no-color",
                 "--tail",
-                "1000",
+                "12000",
                 "otel-collector",
             ),
             environment=self._environment,
             check=False,
             timeout_seconds=90.0,
         )
+        infrastructure_logs += "\n".join(collector_logs.splitlines()[-1000:])
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
+            f"\nPipeline failure events:\n{_pipeline_failure_events(collector_logs)}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"

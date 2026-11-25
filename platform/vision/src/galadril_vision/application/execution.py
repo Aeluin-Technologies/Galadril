@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from galadril_ontology import (
-    OntologyError,
-    OntologyRuntimeManager,
-    OntologySliceRequest,
+    GolError,
+    GolRequest,
+    GolRuntimeManager,
+    GolUnavailable,
+    source_object_id,
 )
-from galadril_pipeline.config import PipelineStep, StepType
+from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue
 
-from galadril_vision.application.errors import CommandProcessingError
+from galadril_vision.application.errors import (
+    CommandFailureReason,
+    CommandProcessingError,
+)
 from galadril_vision.application.ontology import ontology_contract
+
+logger = logging.getLogger(__name__)
 
 
 class StepHandler(Protocol):
@@ -62,7 +70,7 @@ class PipelineExecutor:
         self,
         routes: Sequence[ExecutionRoute],
         *,
-        ontology_runtime: OntologyRuntimeManager | None = None,
+        ontology_runtime: GolRuntimeManager | None = None,
     ) -> None:
         """Rejects ambiguous or incomplete compositions before accepting work."""
         if not routes:
@@ -109,46 +117,59 @@ class PipelineExecutor:
             raise CommandProcessingError(
                 f"Command step type '{command.step_type}' does not match '{binding.step.type}'"
             )
-        parameters = binding.step.params.model_extra or {}
-        # Mail draft/send effects use mailbox authorization, not graph schemas.
-        # An explicit ontology contract still takes precedence for those blocks.
-        mailbox_effect = (
-            binding.step.capability_id
-            in {
-                "utils.algorithm.compose_reply",
-                "utils.output.reply",
-            }
-            and not binding.step.ontology_required
-            and not any(key.startswith("ontology_") for key in parameters)
-        )
-        if (
-            self._ontology_runtime is None
-            or mailbox_effect
-            or binding.step.type
-            in {
-                StepType.FORWARD,
-                StepType.FILTER,
-            }
-        ):
-            return await binding.handler.execute(command, binding.step)
-        request = OntologySliceRequest(
+        if self._ontology_runtime is None:
+            raise CommandProcessingError("GOL runtime admission is required")
+        record = command.payload.get("record")
+        if not isinstance(record, dict):
+            raise CommandProcessingError("GOL source object unavailable")
+        try:
+            source_scope = source_object_id(
+                record.get("storage_path"), command.tenant_id
+            )
+        except ValueError:
+            raise CommandProcessingError(
+                "GOL source object unavailable"
+            ) from None
+        request = GolRequest(
             tenant_id=command.tenant_id,
-            pipeline_id=binding.step.origin.pipeline_id
-            if binding.step.origin
-            else route.pipeline_id,
-            pipeline_revision_id=binding.step.origin.revision_id
-            if binding.step.origin
-            else route.revision_id,
-            block_id=binding.step.origin.block_id
-            if binding.step.origin
-            else command.step,
+            source_object_id=source_scope,
+            pipeline_id=route.pipeline_id,
+            pipeline_revision_id=route.revision_id,
+            block_id=command.step,
         )
+        phase = "runtime_open"
         try:
             async with self._ontology_runtime.bind(
-                request, ontology_contract(binding.step)
+                request,
+                ontology_contract(binding.step),
+                admission=command.admission,
             ):
+                phase = "handler"
                 return await binding.handler.execute(command, binding.step)
-        except OntologyError as error:
+        except GolError as error:
+            if isinstance(error, GolUnavailable):
+                reason = (
+                    CommandFailureReason.GOL_RUNTIME_UNAVAILABLE
+                    if phase == "runtime_open"
+                    else CommandFailureReason.GOL_HANDLER_UNAVAILABLE
+                )
+            else:
+                reason = (
+                    CommandFailureReason.GOL_RUNTIME_OPEN
+                    if phase == "runtime_open"
+                    else CommandFailureReason.GOL_HANDLER
+                )
+            logger.warning(
+                "GOL authorization unavailable for pipeline command",
+                extra={
+                    "event.name": "pipeline.gol.failed",
+                    "phase": phase,
+                    "reason": reason.value,
+                    "error_type": type(error).__name__,
+                    "step": command.step,
+                },
+            )
             raise CommandProcessingError(
-                f"Block ontology unavailable or incompatible: {error}"
-            ) from error
+                "Block GOL authorization is unavailable",
+                reason=reason,
+            ) from None

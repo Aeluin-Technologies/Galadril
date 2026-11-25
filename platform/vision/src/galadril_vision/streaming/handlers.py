@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import structlog
+from galadril_ontology import GolDenied
 from galadril_pipeline.events import (
     EventStatus,
     LineageEvent,
@@ -18,9 +18,14 @@ from galadril_pipeline.events import (
 from galadril_pipeline.routing import PipelineRouteTable
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from galadril_vision.common.schemas import CanonicalRecord, SchemaViolation
+from galadril_vision.application.errors import (
+    CommandFailureReason,
+    CommandProcessingError,
+)
+from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.kafka.schemas import EventNormalizer
 from galadril_vision.pipeline.ledger import ClaimState, ExecutionClaim
+from galadril_vision.streaming.security import PublicationGate
 from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.context import (
     bind_pipeline_context,
@@ -81,6 +86,10 @@ class ExecutionLedger(Protocol):
         self, command: PipelineCommand, result: StepResult
     ) -> None: ...
 
+    async def defer(
+        self, command: PipelineCommand, error: Exception
+    ) -> None: ...
+
     async def fail(
         self, command: PipelineCommand, error: Exception
     ) -> None: ...
@@ -90,6 +99,32 @@ class CommandInProgress(RuntimeError):
     """Signals that a live lease should be redelivered after its owner finishes."""
 
 
+async def _publish_command(
+    publisher: Publisher,
+    gate: PublicationGate | None,
+    scope: PipelineCommand,
+    command: PipelineCommand,
+    topic: str,
+) -> PipelineCommand:
+    """Releases a routed command with the calculation's durable provenance."""
+    if gate is None:
+        raise GolDenied("GOL publication unavailable")
+    async with gate.protect(scope, handoff=command) as lineage:
+        if not lineage:
+            raise GolDenied("GOL command lineage unavailable")
+        released = command.model_copy(
+            update={"admission": None, "lineage": lineage}
+        )
+        await publisher.publish(
+            released.model_dump(mode="json"),
+            topic,
+            key=str(released.event_id),
+            correlation_id=str(released.correlation_id),
+            no_confirm=False,
+        )
+    return released
+
+
 class IngressHandler:
     """Normalizes validated Avro records into deterministic entry commands."""
 
@@ -97,6 +132,7 @@ class IngressHandler:
         "_metrics",
         "_pipeline",
         "_publisher",
+        "_publication_gate",
         "_routes",
         "_topics",
         "_tenant",
@@ -111,6 +147,7 @@ class IngressHandler:
         publisher: Publisher,
         topics: TopicLayout,
         metrics: PipelineMetrics,
+        publication_gate: PublicationGate | None = None,
     ) -> None:
         self._pipeline = pipeline
         self._tenant = tenant_id
@@ -118,6 +155,7 @@ class IngressHandler:
         self._publisher = publisher
         self._topics = topics
         self._metrics = metrics
+        self._publication_gate = publication_gate
 
     async def handle(
         self, envelope: AvroEnvelope
@@ -152,33 +190,42 @@ class IngressHandler:
         except Exception as error:
             return await self.reject(envelope, error, started_at=started)
 
-        with bind_pipeline_context(
-            pipeline=self._pipeline,
-            step="ingress",
-            entity_id=record.record_id,
-        ):
-            for command in commands:
-                await self._publisher.publish(
-                    command.model_dump(mode="json"),
-                    self._topics.commands_for(command.resource_class),
-                    key=str(command.event_id),
-                    correlation_id=str(command.correlation_id),
-                    no_confirm=False,
+        published: list[PipelineCommand] = []
+        try:
+            with bind_pipeline_context(
+                pipeline=self._pipeline,
+                step="ingress",
+                entity_id=record.record_id,
+            ):
+                for command in commands:
+                    published.append(
+                        await _publish_command(
+                            self._publisher,
+                            self._publication_gate,
+                            command,
+                            command,
+                            self._topics.commands_for(command.resource_class),
+                        )
+                    )
+                    await self._publish_lineage(command, EventStatus.ACCEPTED)
+                logger.info(
+                    "ingress_record_accepted",
+                    source_id=envelope.source_id,
+                    topic=envelope.topic,
+                    commands_published=len(commands),
                 )
-                await self._publish_lineage(command, EventStatus.ACCEPTED)
-            logger.info(
-                "ingress_record_accepted",
-                source_id=envelope.source_id,
-                topic=envelope.topic,
-                commands_published=len(commands),
-            )
+        except GolDenied:
+            logger.warning("gol.publication.denied", operation="ingress")
+            # The broker can redeliver the unchanged source. Each replay
+            # still needs a fresh transfer decision for its deterministic IDs.
+            raise
         self._metrics.message_completed(
             pipeline=self._pipeline,
             step="ingress",
             outcome="accepted",
             duration_seconds=time.perf_counter() - started,
         )
-        return commands
+        return tuple(published)
 
     async def reject(
         self,
@@ -187,19 +234,8 @@ class IngressHandler:
         *,
         started_at: float | None = None,
     ) -> tuple[PipelineCommand, ...]:
-        """Publishes one confirmed quarantine record for invalid ingress."""
-        violation = SchemaViolation(
-            reason=str(error),
-            record_id=_record_id(envelope.payload),
-            topic=envelope.topic,
-            raw=envelope.payload,
-        )
-        await self._publisher.publish(
-            violation.model_dump(mode="json"),
-            self._topics.invalid,
-            key=violation.record_id,
-            no_confirm=False,
-        )
+        """Without a verified scope, malformed ingress has no permitted output sink."""
+        del error
         self._metrics.message_completed(
             pipeline=self._pipeline,
             step="ingress",
@@ -207,14 +243,30 @@ class IngressHandler:
             duration_seconds=time.perf_counter()
             - (started_at or time.perf_counter()),
         )
-        logger.warning(
-            "ingress_record_rejected",
-            pipeline=self._pipeline,
-            step="ingress",
-            entity_id=violation.record_id,
-            reason=violation.reason,
-        )
+        logger.warning("ingress_record_rejected", outcome="unavailable")
         return ()
+
+    async def _publish(
+        self,
+        command: PipelineCommand,
+        message: object,
+        topic: str,
+        *,
+        key: bytes | str | None = None,
+        correlation_id: str | None = None,
+        no_confirm: bool = False,
+    ) -> None:
+        """Keeps broker dispatch adjacent to its noncached release decision."""
+        if self._publication_gate is None:
+            raise GolDenied("GOL publication unavailable")
+        async with self._publication_gate.protect(command):
+            await self._publisher.publish(
+                message,
+                topic,
+                key=key,
+                correlation_id=correlation_id,
+                no_confirm=no_confirm,
+            )
 
     def _commands(
         self,
@@ -257,6 +309,7 @@ class IngressHandler:
                     correlation_id=correlation_id,
                     causation_id=correlation_id,
                     tenant_id=record.tenant_id,
+                    admission=record.admission,
                     entity_id=record.record_id,
                     pipeline=self._pipeline,
                     step=route.step,
@@ -273,7 +326,8 @@ class IngressHandler:
     ) -> None:
         """Emits an append-only accepted transition with the active trace ID."""
         lineage = _lineage(command, status)
-        await self._publisher.publish(
+        await self._publish(
+            command,
             lineage.model_dump(mode="json"),
             self._topics.lineage,
             key=str(lineage.event_id),
@@ -290,6 +344,7 @@ class CommandHandler:
         "_ledger",
         "_metrics",
         "_publisher",
+        "_publication_gate",
         "_routes",
         "_topics",
     )
@@ -303,6 +358,7 @@ class CommandHandler:
         ledger: ExecutionLedger,
         topics: TopicLayout,
         metrics: PipelineMetrics,
+        publication_gate: PublicationGate | None = None,
     ) -> None:
         self._routes = routes
         self._publisher = publisher
@@ -310,8 +366,61 @@ class CommandHandler:
         self._ledger = ledger
         self._topics = topics
         self._metrics = metrics
+        self._publication_gate = publication_gate
 
     async def handle(self, command: PipelineCommand) -> StepResult | None:
+        """Denied releases never publish errors containing the rejected payload."""
+        try:
+            if self._publication_gate is None:
+                raise GolDenied("GOL publication unavailable")
+            if command.lineage is not None:
+                admission = await self._publication_gate.resume(command)
+                command = command.model_copy(update={"admission": admission})
+            await self._publication_gate.authorize_state(command)
+            return await self._handle(command)
+        except GolDenied:
+            logger.warning("gol.publication.denied", operation="command")
+            # The consumer must retain delivery when a live release check
+            # fails. Replays reuse the durable result without repeating I/O.
+            raise
+
+    async def _publish(
+        self,
+        command: PipelineCommand,
+        message: object,
+        topic: str,
+        *,
+        key: bytes | str | None = None,
+        correlation_id: str | None = None,
+        no_confirm: bool = False,
+        status: EventStatus | None = None,
+    ) -> None:
+        """Keeps broker dispatch adjacent to its noncached release decision."""
+        phase = "authorize"
+        try:
+            if self._publication_gate is None:
+                raise GolDenied("GOL publication unavailable")
+            async with self._publication_gate.protect(command):
+                phase = "broker"
+                await self._publisher.publish(
+                    message,
+                    topic,
+                    key=key,
+                    correlation_id=correlation_id,
+                    no_confirm=no_confirm,
+                )
+                phase = "complete_effect"
+        except Exception as error:
+            logger.warning(
+                "pipeline_publication_failed",
+                phase=phase,
+                topic=topic,
+                status=status.value if status is not None else None,
+                error_type=type(error).__name__,
+            )
+            raise
+
+    async def _handle(self, command: PipelineCommand) -> StepResult | None:
         """Completes one at-least-once command and publishes its durable successors."""
         started_at = time.perf_counter()
         with bind_pipeline_context(
@@ -332,6 +441,7 @@ class CommandHandler:
                     raise RuntimeError(
                         "Completed execution is missing its result"
                     )
+                _require_result_scope(command, claim.result)
                 await self._publish_successors(command, claim.result)
                 logger.info(
                     "pipeline_command_replayed",
@@ -346,30 +456,58 @@ class CommandHandler:
                 attempt=command.attempt,
                 resource_class=command.resource_class.value,
             )
-            await self._publish_lineage(command, EventStatus.RUNNING)
+            try:
+                await self._publish_lineage(command, EventStatus.RUNNING)
+            except Exception as error:
+                # Dispatch has not started, so redelivery can reclaim this lease.
+                logger.warning(
+                    "pipeline_command_deferred",
+                    event_id=str(command.event_id),
+                    attempt=command.attempt,
+                    error_type=type(error).__name__,
+                    phase="running_lineage",
+                )
+                await self._ledger.defer(
+                    command,
+                    RuntimeError(
+                        CommandFailureReason.RUNNING_LINEAGE.public_message()
+                    ),
+                )
+                raise
+            reason = CommandFailureReason.WORKER_EXECUTION
             try:
                 result = await self._dispatcher.dispatch(command)
+                reason = CommandFailureReason.WORKER_RESULT
+                _require_result_scope(command, result)
                 self._routes.successors(command.step, result.output)
+                reason = CommandFailureReason.LEDGER_COMPLETION
                 await self._ledger.complete(command, result)
-                await self._publish_successors(command, result)
             except Exception as error:
-                await self._ledger.fail(command, error)
-                await self._handle_failure(command, error)
+                if isinstance(error, CommandProcessingError) and isinstance(
+                    error.reason, CommandFailureReason
+                ):
+                    reason = error.reason
+                logger.error(
+                    "pipeline_command_failed",
+                    event_id=str(command.event_id),
+                    attempt=command.attempt,
+                    error_type=type(error).__name__,
+                    outcome="unavailable",
+                    reason=reason.value,
+                )
+                await self._ledger.fail(
+                    command, RuntimeError(reason.public_message())
+                )
+                await self._handle_failure(command, reason)
                 self._metrics.message_completed(
                     pipeline=command.pipeline,
                     step=command.step,
                     outcome="failed",
                     duration_seconds=time.perf_counter() - started_at,
                 )
-                logger.error(
-                    "pipeline_command_failed",
-                    event_id=str(command.event_id),
-                    attempt=command.attempt,
-                    error_type=type(error).__name__,
-                    error=str(error),
-                )
                 return None
 
+            await self._publish_successors(command, result)
             self._metrics.message_completed(
                 pipeline=command.pipeline,
                 step=command.step,
@@ -389,12 +527,14 @@ class CommandHandler:
         self, command: PipelineCommand, result: StepResult
     ) -> None:
         """Publishes deterministic downstream commands and terminal visibility events."""
-        await self._publisher.publish(
+        await self._publish(
+            command,
             result.model_dump(mode="json"),
             self._topics.results,
             key=str(result.event_id),
             correlation_id=str(command.correlation_id),
             no_confirm=False,
+            status=result.status,
         )
         await self._publish_lineage(
             command, EventStatus.COMPLETED, result=result
@@ -417,16 +557,16 @@ class CommandHandler:
                     "parent_result_id": str(result.event_id),
                 },
             )
-            await self._publisher.publish(
-                downstream.model_dump(mode="json"),
+            await _publish_command(
+                self._publisher,
+                self._publication_gate,
+                command,
+                downstream,
                 self._topics.commands_for(route.resource_class),
-                key=str(downstream.event_id),
-                correlation_id=str(command.correlation_id),
-                no_confirm=False,
             )
 
     async def _handle_failure(
-        self, command: PipelineCommand, error: Exception
+        self, command: PipelineCommand, reason: CommandFailureReason
     ) -> None:
         """Publishes bounded retries or a terminal dead-letter event."""
         route = self._routes.route(command.step)
@@ -437,7 +577,8 @@ class CommandHandler:
                     "occurred_at": utc_now(),
                 }
             )
-            await self._publisher.publish(
+            await self._publish(
+                command,
                 retry.model_dump(mode="json"),
                 self._topics.commands_for(command.resource_class),
                 key=str(command.event_id),
@@ -457,13 +598,15 @@ class CommandHandler:
             step=command.step,
             step_type=command.step_type,
             resource_class=command.resource_class,
+            admission=command.admission,
             status=EventStatus.FAILED,
             attempt=command.attempt,
             duration_seconds=0.0,
-            error_type=type(error).__name__,
-            error_message=str(error),
+            error_type="PipelineExecutionError",
+            error_message=reason.public_message(),
         )
-        await self._publisher.publish(
+        await self._publish(
+            command,
             failure.model_dump(mode="json"),
             self._topics.dead_letter,
             key=str(command.event_id),
@@ -481,12 +624,14 @@ class CommandHandler:
     ) -> None:
         """Publishes deterministic command state changes for lineage consumers."""
         lineage = _lineage(command, status, result=result)
-        await self._publisher.publish(
+        await self._publish(
+            command,
             lineage.model_dump(mode="json"),
             self._topics.lineage,
             key=str(lineage.event_id),
             correlation_id=str(command.correlation_id),
             no_confirm=False,
+            status=status,
         )
 
 
@@ -529,15 +674,19 @@ def _lineage(
     )
 
 
-def _record_id(payload: Mapping[str, JsonValue]) -> str | None:
-    """Extracts a safe record ID for invalid-event partitioning and logs."""
-    observation = payload.get("observation")
-    if isinstance(observation, dict):
-        observation_id = observation.get("observation_id")
-        if isinstance(observation_id, str) and observation_id:
-            return observation_id
-    value = payload.get("id")
-    return value if isinstance(value, str) and value else None
+def _require_result_scope(command: PipelineCommand, result: StepResult) -> None:
+    """A cached value is usable only under its original immutable execution scope."""
+    if (
+        result.command_id != command.event_id
+        or result.tenant_id != command.tenant_id
+        or result.pipeline != command.pipeline
+        or result.step != command.step
+        or result.step_type != command.step_type
+        or result.resource_class != command.resource_class
+        or result.correlation_id != command.correlation_id
+        or result.admission != command.admission
+    ):
+        raise GolDenied("GOL cached result unavailable")
 
 
 def _record_correlation_id(record: CanonicalRecord, source_id: str) -> UUID:

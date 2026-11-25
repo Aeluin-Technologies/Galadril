@@ -78,7 +78,7 @@ services:
       - |
         mc alias set local http://rustfs:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc ready local
-        mc mb --ignore-existing local/lake local/models local/staging
+        mc mb --ignore-existing local/lake local/models local/staging local/ontology-artifacts
         mc event add --ignore-existing local/lake arn:rustfs:sqs:us-east-1:primary:webhook --event put
 
   lakefs:

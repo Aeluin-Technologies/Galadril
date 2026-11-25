@@ -270,5 +270,16 @@ class TestHelpersModule:
         }
 
 
+def test_extraction_preserves_explicit_gol_business_values() -> None:
+    prediction = {
+        "embedding": [0.1, 0.2],
+        "gol_symbol_key": "e2e.lifecycle::E2EEntity",
+        "gol_value": {"label": "sample", "confidence": 0.9},
+    }
+    items = _extract_embedding_items(prediction, "fixture")
+    assert items[0]["gol_symbol_key"] == prediction["gol_symbol_key"]
+    assert items[0]["gol_value"] == prediction["gol_value"]
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

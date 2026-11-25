@@ -118,6 +118,29 @@ async def test_postgres_claim_replays_completed_result() -> None:
 
 
 @pytest.mark.anyio
+async def test_postgres_defers_before_dispatch_without_recording_failure() -> (
+    None
+):
+    """Releases the lease while retaining the last safe publication diagnostic."""
+    client, connection = _postgres_mocks()
+    command = _command()
+    await PostgresExecutionLedger(client).defer(
+        command,
+        RuntimeError("Pipeline execution unavailable (running_lineage)"),
+    )
+    args = connection.execute.await_args
+    assert args is not None
+    sql, parameters = args.args
+    assert "SET error = %s, lease_expires_at = NOW()" in sql
+    assert "status = 'running' AND attempt = %s" in sql
+    assert parameters == (
+        "Pipeline execution unavailable (running_lineage)",
+        command.idempotency_key,
+        command.attempt,
+    )
+
+
+@pytest.mark.anyio
 async def test_postgres_complete_detects_lost_lease() -> None:
     """Prevents a stale worker from overwriting a lease owned elsewhere."""
     client, connection = _postgres_mocks()

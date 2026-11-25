@@ -2,13 +2,38 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
 import pytest
+from galadril_ontology import GolDenied
 from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
 from galadril_vision.adapters.routing import RegexRouter, SlmRouter
+
+
+@pytest.fixture(autouse=True)
+def _unit_release_policy(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Positive transport unit tests supply an explicit fake release policy."""
+    if (
+        request.node.name
+        == "test_slm_without_trusted_transfer_cannot_send_private_content"
+    ):
+        yield
+        return
+
+    @asynccontextmanager
+    async def scope(**kwargs: object) -> AsyncIterator[None]:
+        yield
+
+    with patch(
+        "galadril_vision.adapters.routing.protected_gol_effect",
+        side_effect=scope,
+    ):
+        yield
 
 
 def step(strategy: str = "regex") -> PipelineStep:
@@ -22,6 +47,7 @@ def step(strategy: str = "regex") -> PipelineStep:
             "branches": {"legal": ["law"], "general": ["archive"]},
             "params": {
                 "field": "record.text",
+                "gol_transfer_symbol_key": "communication.mail::Message",
                 **(
                     {
                         "pattern": r"dossier (?P<case>\d+)",
@@ -314,3 +340,40 @@ def test_business_conditions_require_both_recipient_and_subject_without_payload_
         asyncio.run(handler.execute(event, definition))["filter_accepted"]
         is False
     )
+
+
+def test_slm_without_trusted_transfer_cannot_send_private_content() -> None:
+    async def run() -> None:
+        calls: list[bytes] = []
+
+        def response(request: httpx.Request) -> httpx.Response:
+            calls.append(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "branch": "legal",
+                    "model_alias": "local",
+                    "fallback": False,
+                },
+            )
+
+        definition = step("slm")
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(response)
+        ) as client:
+            with pytest.raises(GolDenied):
+                await SlmRouter(
+                    definition, "http://scribe", client=client
+                ).execute(command("private-document"), definition)
+        assert calls == []
+
+    asyncio.run(run())
+
+
+def test_explicit_gol_routes_are_distinct_from_algorithm_options() -> None:
+    definition = step()
+    definition.params.model_extra["gol_transfer_symbol_key"] = (
+        "communication.mail::Message"
+    )
+    result = asyncio.run(RegexRouter(definition).execute(command(), definition))
+    assert result["branch"] == "legal"

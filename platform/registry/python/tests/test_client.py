@@ -85,33 +85,18 @@ class RegistryClientTenantTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await client.list_tenants()
 
-    def test_ontology_authoring_fields_remain_optional_on_the_wire(
-        self,
-    ) -> None:
-        request = registry_pb2.PutOntologyRequest(
-            tenant_id="tenant_a", ontology_id="people"
-        )
-        self.assertFalse(request.HasField("authoring_command_json"))
-        request.authoring_command_json = b'{"operation":"create_branch"}'
-        decoded = registry_pb2.PutOntologyRequest.FromString(
-            request.SerializeToString()
-        )
-        self.assertEqual(
-            decoded.authoring_command_json, request.authoring_command_json
-        )
-        page = registry_pb2.ListOntologyHistoryResponse(
-            items=[
-                registry_pb2.OntologyHistoryEntry(
-                    revision_id="a" * 20, branch="main"
-                )
-            ],
-            next_revision_id="b" * 20,
-        )
-        restored = registry_pb2.ListOntologyHistoryResponse.FromString(
-            page.SerializeToString()
-        )
-        self.assertEqual(restored.items[0].branch, "main")
-        self.assertTrue(restored.HasField("next_revision_id"))
+    async def test_gol_binding_transports_only_pins_and_logical_candidates(self) -> None:
+        channel = FakeChannel([registry_pb2.GolBinding(
+            pipeline_id="mail",block_id="extract",ontology_id="communication.mail",
+            generation="a"*32,source_revision="b"*40,symbols=["communication.mail::Message"],
+        ).SerializeToString()])
+        with patch("grpc.aio.insecure_channel",return_value=channel):
+            client=RegistryClient(RegistryConfig())
+        binding=await client.get_gol_binding("tenant_a","mail","c"*40,"extract")
+        self.assertEqual(binding.symbols,("communication.mail::Message",))
+        self.assertEqual(binding.generation,"a"*32)
+        self.assertFalse(hasattr(binding,"ontology_json"))
+        self.assertEqual(channel.calls,["/galadril.registry.v1.Registry/GetGolBinding"])
 
     async def test_empty_validation_is_rejected_locally(self) -> None:
         channel = FakeChannel([])

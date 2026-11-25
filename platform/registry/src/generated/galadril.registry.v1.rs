@@ -171,190 +171,207 @@ pub struct GetRuntimePipelineRequest {
     #[prost(string, tag = "3")]
     pub revision_id: ::prost::alloc::string::String,
 }
+/// Source contents are available only through source-authoring permissions.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyRevision {
+pub struct GolFile {
     #[prost(string, tag = "1")]
-    pub ontology_id: ::prost::alloc::string::String,
+    pub path: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
-    pub display_name: ::prost::alloc::string::String,
+    pub text: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GolDiagnostic {
+    #[prost(string, tag = "1")]
+    pub code: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub message: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
-    pub revision_id: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "4")]
-    pub ontology_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(string, tag = "5")]
-    pub author: ::prost::alloc::string::String,
+    pub path: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "4")]
+    pub start: u64,
+    #[prost(uint64, tag = "5")]
+    pub end: u64,
     #[prost(string, tag = "6")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(int64, tag = "7")]
-    pub created_at_ms: i64,
-    #[prost(bytes = "vec", tag = "8")]
-    pub authoring_json: ::prost::alloc::vec::Vec<u8>,
+    pub severity: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PutOntologyRequest {
+pub struct GolDependency {
     #[prost(string, tag = "1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
     pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub generation: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
+    pub source_revision: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GolSummary {
+    #[prost(string, tag = "1")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
     pub display_name: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "4")]
-    pub ontology_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(string, tag = "5")]
-    pub author: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, optional, tag = "4")]
+    pub active_generation: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "5")]
+    pub active_source_revision: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, tag = "6")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(string, optional, tag = "7")]
-    pub expected_revision_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(bool, tag = "8")]
-    pub create_only: bool,
-    #[prost(bytes = "vec", optional, tag = "9")]
-    pub authoring_command_json: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
+    pub status: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GolWorkspace {
+    #[prost(message, optional, tag = "1")]
+    pub summary: ::core::option::Option<GolSummary>,
+    #[prost(message, repeated, tag = "2")]
+    pub files: ::prost::alloc::vec::Vec<GolFile>,
+    #[prost(message, repeated, tag = "3")]
+    pub diagnostics: ::prost::alloc::vec::Vec<GolDiagnostic>,
+    #[prost(message, repeated, tag = "4")]
+    pub dependencies: ::prost::alloc::vec::Vec<GolDependency>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GolValidation {
+    #[prost(string, tag = "1")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub diagnostics: ::prost::alloc::vec::Vec<GolDiagnostic>,
+    #[prost(message, repeated, tag = "5")]
+    pub dependencies: ::prost::alloc::vec::Vec<GolDependency>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOntologyRequest {
+pub struct GolPublication {
+    #[prost(string, tag = "1")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub generation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SaveGolOntologyRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub ontology_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
-    pub revision_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyPublication {
-    #[prost(string, tag = "1")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
     pub display_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub publication_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub revision_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub files: ::prost::alloc::vec::Vec<GolFile>,
     #[prost(string, tag = "5")]
-    pub lifecycle: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "6")]
-    pub metadata_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(string, tag = "7")]
-    pub base_version: ::prost::alloc::string::String,
-    #[prost(string, tag = "8")]
-    pub base_hash: ::prost::alloc::string::String,
-    #[prost(string, tag = "9")]
-    pub effective_hash: ::prost::alloc::string::String,
-    #[prost(string, tag = "10")]
     pub author: ::prost::alloc::string::String,
-    #[prost(string, tag = "11")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(int64, tag = "12")]
-    pub published_at_ms: i64,
-    #[prost(int64, optional, tag = "13")]
-    pub retired_at_ms: ::core::option::Option<i64>,
+    #[prost(string, optional, tag = "6")]
+    pub expected_revision: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PublishOntologyRequest {
+pub struct GetGolWorkspaceRequest {
+    #[prost(string, tag = "1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, optional, tag = "3")]
+    pub source_revision: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ValidateGolOntologyRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub ontology_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
-    pub display_name: ::prost::alloc::string::String,
+    pub source_revision: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
-    pub publication_id: ::prost::alloc::string::String,
+    pub plan_pin: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "5")]
+    pub approved_owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PublishGolOntologyRequest {
+    #[prost(string, tag = "1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, optional, tag = "4")]
+    pub expected_generation: ::core::option::Option<::prost::alloc::string::String>,
+    /// Authenticated actor supplied only by Gateway, never browser input.
     #[prost(string, tag = "5")]
-    pub revision_id: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "6")]
-    pub metadata_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bool, tag = "7")]
-    pub create_only: bool,
+    pub author_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub plan_pin: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "7")]
+    pub approved_owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RetireOntologyRequest {
+pub struct PreviewGolDependenciesRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub ontology_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
-    pub publication_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub revision_id: ::prost::alloc::string::String,
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "4")]
+    pub approved_owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GolDependencyPreview {
+    #[prost(string, repeated, tag = "1")]
+    pub required_owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "2")]
+    pub plan_pin: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(message, repeated, tag = "3")]
+    pub dependencies: ::prost::alloc::vec::Vec<GolDependency>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RetireOntologyResponse {
+pub struct DeleteGolOntologyRequest {
     #[prost(string, tag = "1")]
-    pub head_revision_id: ::prost::alloc::string::String,
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub ontology_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub expected_revision: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub author: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListOntologiesRequest {
+pub struct DeleteGolOntologyResponse {
+    #[prost(string, tag = "1")]
+    pub revision: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListGolOntologiesRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(uint32, tag = "2")]
     pub limit: u32,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyCatalogEntry {
-    #[prost(string, tag = "1")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub display_name: ::prost::alloc::string::String,
-    #[prost(message, optional, tag = "3")]
-    pub production_publication: ::core::option::Option<OntologyPublication>,
-}
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListOntologiesResponse {
+pub struct ListGolOntologiesResponse {
     #[prost(message, repeated, tag = "1")]
-    pub ontologies: ::prost::alloc::vec::Vec<OntologyCatalogEntry>,
+    pub ontologies: ::prost::alloc::vec::Vec<GolSummary>,
 }
+/// Generation and source pins are captured atomically with pipeline authoring.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListOntologyHistoryRequest {
-    #[prost(string, tag = "1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "3")]
-    pub limit: u32,
-    #[prost(string, optional, tag = "4")]
-    pub after_revision_id: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyHistoryEntry {
-    #[prost(string, tag = "1")]
-    pub revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub author: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub branch: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub operation: ::prost::alloc::string::String,
-    #[prost(int64, tag = "6")]
-    pub created_at_ms: i64,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListOntologyHistoryResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub items: ::prost::alloc::vec::Vec<OntologyHistoryEntry>,
-    #[prost(string, optional, tag = "2")]
-    pub next_revision_id: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologyBinding {
+pub struct GolBinding {
     #[prost(string, tag = "1")]
     pub pipeline_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub block_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub ontology_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag = "4")]
-    pub resource_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag = "5")]
-    pub resource_kinds: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag = "6")]
-    pub include_dependencies: bool,
-    #[prost(bytes = "vec", tag = "7")]
-    pub metadata_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(int64, tag = "8")]
+    #[prost(string, tag = "4")]
+    pub generation: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub source_revision: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "6")]
+    pub symbols: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(int64, tag = "7")]
     pub updated_at_ms: i64,
-    #[prost(string, tag = "9")]
+    #[prost(string, tag = "8")]
     pub head_revision_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -362,7 +379,7 @@ pub struct PutBindingRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "2")]
-    pub binding: ::core::option::Option<OntologyBinding>,
+    pub binding: ::core::option::Option<GolBinding>,
     #[prost(string, tag = "3")]
     pub expected_revision_id: ::prost::alloc::string::String,
 }
@@ -380,10 +397,10 @@ pub struct ListBindingsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListBindingsResponse {
     #[prost(message, repeated, tag = "1")]
-    pub bindings: ::prost::alloc::vec::Vec<OntologyBinding>,
+    pub bindings: ::prost::alloc::vec::Vec<GolBinding>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOntologySliceRequest {
+pub struct GetGolBindingRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
@@ -392,97 +409,6 @@ pub struct GetOntologySliceRequest {
     pub pipeline_revision_id: ::prost::alloc::string::String,
     #[prost(string, tag = "4")]
     pub block_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OntologySlice {
-    #[prost(string, tag = "1")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub publication_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub revision_id: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "4")]
-    pub ontology_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "5")]
-    pub publication_metadata_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "6")]
-    pub binding_metadata_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(int64, tag = "7")]
-    pub published_at_ms: i64,
-    #[prost(string, tag = "8")]
-    pub base_version: ::prost::alloc::string::String,
-    #[prost(string, tag = "9")]
-    pub base_hash: ::prost::alloc::string::String,
-    #[prost(string, tag = "10")]
-    pub effective_hash: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DiffOntologyRequest {
-    #[prost(string, tag = "1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub base_revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub target_revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub ontology_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SemanticChange {
-    #[prost(string, tag = "1")]
-    pub resource_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub operation: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag = "3")]
-    pub path: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bytes = "vec", tag = "4")]
-    pub before_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "5")]
-    pub after_json: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SemanticDiff {
-    #[prost(message, repeated, tag = "1")]
-    pub changes: ::prost::alloc::vec::Vec<SemanticChange>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct MergeOntologyRequest {
-    #[prost(string, tag = "1")]
-    pub tenant_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub ontology_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub base_revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub left_revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub right_revision_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "6")]
-    pub author: ::prost::alloc::string::String,
-    #[prost(string, tag = "7")]
-    pub message: ::prost::alloc::string::String,
-    #[prost(string, tag = "8")]
-    pub expected_revision_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct MergeConflict {
-    #[prost(string, tag = "1")]
-    pub resource_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag = "2")]
-    pub path: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bytes = "vec", tag = "3")]
-    pub base_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "4")]
-    pub left_json: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "5")]
-    pub right_json: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct OntologyMerge {
-    #[prost(message, optional, tag = "1")]
-    pub revision: ::core::option::Option<OntologyRevision>,
-    #[prost(message, repeated, tag = "2")]
-    pub conflicts: ::prost::alloc::vec::Vec<MergeConflict>,
 }
 /// Generated client implementations.
 pub mod registry_client {
@@ -871,13 +797,10 @@ pub mod registry_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn put_ontology(
+        pub async fn save_gol_ontology(
             &mut self,
-            request: impl tonic::IntoRequest<super::PutOntologyRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OntologyRevision>,
-            tonic::Status,
-        > {
+            request: impl tonic::IntoRequest<super::SaveGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolWorkspace>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -888,70 +811,19 @@ pub mod registry_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/PutOntology",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("galadril.registry.v1.Registry", "PutOntology"));
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn get_ontology(
-            &mut self,
-            request: impl tonic::IntoRequest<super::GetOntologyRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OntologyRevision>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/GetOntology",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("galadril.registry.v1.Registry", "GetOntology"));
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn publish_ontology(
-            &mut self,
-            request: impl tonic::IntoRequest<super::PublishOntologyRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OntologyPublication>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/PublishOntology",
+                "/galadril.registry.v1.Registry/SaveGolOntology",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "PublishOntology"),
+                    GrpcMethod::new("galadril.registry.v1.Registry", "SaveGolOntology"),
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn retire_ontology(
+        pub async fn get_gol_workspace(
             &mut self,
-            request: impl tonic::IntoRequest<super::RetireOntologyRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RetireOntologyResponse>,
-            tonic::Status,
-        > {
+            request: impl tonic::IntoRequest<super::GetGolWorkspaceRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolWorkspace>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -962,20 +834,21 @@ pub mod registry_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/RetireOntology",
+                "/galadril.registry.v1.Registry/GetGolWorkspace",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "RetireOntology"),
+                    GrpcMethod::new("galadril.registry.v1.Registry", "GetGolWorkspace"),
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn list_ontologies(
+        /// Syntax-only import planning; only Gateway may approve source owners.
+        pub async fn preview_gol_dependencies(
             &mut self,
-            request: impl tonic::IntoRequest<super::ListOntologiesRequest>,
+            request: impl tonic::IntoRequest<super::PreviewGolDependenciesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::ListOntologiesResponse>,
+            tonic::Response<super::GolDependencyPreview>,
             tonic::Status,
         > {
             self.inner
@@ -988,51 +861,126 @@ pub mod registry_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/ListOntologies",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "ListOntologies"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn list_ontology_history(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ListOntologyHistoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOntologyHistoryResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/ListOntologyHistory",
+                "/galadril.registry.v1.Registry/PreviewGolDependencies",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
                         "galadril.registry.v1.Registry",
-                        "ListOntologyHistory",
+                        "PreviewGolDependencies",
                     ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn validate_gol_ontology(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ValidateGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolValidation>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/galadril.registry.v1.Registry/ValidateGolOntology",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "galadril.registry.v1.Registry",
+                        "ValidateGolOntology",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn publish_gol_ontology(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PublishGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolPublication>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/galadril.registry.v1.Registry/PublishGolOntology",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "galadril.registry.v1.Registry",
+                        "PublishGolOntology",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn delete_gol_ontology(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DeleteGolOntologyRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DeleteGolOntologyResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/galadril.registry.v1.Registry/DeleteGolOntology",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("galadril.registry.v1.Registry", "DeleteGolOntology"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn list_gol_ontologies(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListGolOntologiesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListGolOntologiesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/galadril.registry.v1.Registry/ListGolOntologies",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("galadril.registry.v1.Registry", "ListGolOntologies"),
                 );
             self.inner.unary(req, path, codec).await
         }
         pub async fn put_binding(
             &mut self,
             request: impl tonic::IntoRequest<super::PutBindingRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OntologyBinding>,
-            tonic::Status,
-        > {
+        ) -> std::result::Result<tonic::Response<super::GolBinding>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -1076,10 +1024,11 @@ pub mod registry_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn get_ontology_slice(
+        /// Trusted runtime mapping only; metadata disclosure is gated by Gateway.
+        pub async fn get_gol_binding(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetOntologySliceRequest>,
-        ) -> std::result::Result<tonic::Response<super::OntologySlice>, tonic::Status> {
+            request: impl tonic::IntoRequest<super::GetGolBindingRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolBinding>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -1090,58 +1039,12 @@ pub mod registry_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/GetOntologySlice",
+                "/galadril.registry.v1.Registry/GetGolBinding",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "GetOntologySlice"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn diff_ontology(
-            &mut self,
-            request: impl tonic::IntoRequest<super::DiffOntologyRequest>,
-        ) -> std::result::Result<tonic::Response<super::SemanticDiff>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/DiffOntology",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "DiffOntology"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn merge_ontology(
-            &mut self,
-            request: impl tonic::IntoRequest<super::MergeOntologyRequest>,
-        ) -> std::result::Result<tonic::Response<super::OntologyMerge>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/galadril.registry.v1.Registry/MergeOntology",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("galadril.registry.v1.Registry", "MergeOntology"),
+                    GrpcMethod::new("galadril.registry.v1.Registry", "GetGolBinding"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -1231,52 +1134,48 @@ pub mod registry_server {
             &self,
             request: tonic::Request<super::GetRuntimePipelineRequest>,
         ) -> std::result::Result<tonic::Response<super::Pipeline>, tonic::Status>;
-        async fn put_ontology(
+        async fn save_gol_ontology(
             &self,
-            request: tonic::Request<super::PutOntologyRequest>,
+            request: tonic::Request<super::SaveGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolWorkspace>, tonic::Status>;
+        async fn get_gol_workspace(
+            &self,
+            request: tonic::Request<super::GetGolWorkspaceRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolWorkspace>, tonic::Status>;
+        /// Syntax-only import planning; only Gateway may approve source owners.
+        async fn preview_gol_dependencies(
+            &self,
+            request: tonic::Request<super::PreviewGolDependenciesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::OntologyRevision>,
+            tonic::Response<super::GolDependencyPreview>,
             tonic::Status,
         >;
-        async fn get_ontology(
+        async fn validate_gol_ontology(
             &self,
-            request: tonic::Request<super::GetOntologyRequest>,
+            request: tonic::Request<super::ValidateGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolValidation>, tonic::Status>;
+        async fn publish_gol_ontology(
+            &self,
+            request: tonic::Request<super::PublishGolOntologyRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolPublication>, tonic::Status>;
+        async fn delete_gol_ontology(
+            &self,
+            request: tonic::Request<super::DeleteGolOntologyRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::OntologyRevision>,
+            tonic::Response<super::DeleteGolOntologyResponse>,
             tonic::Status,
         >;
-        async fn publish_ontology(
+        async fn list_gol_ontologies(
             &self,
-            request: tonic::Request<super::PublishOntologyRequest>,
+            request: tonic::Request<super::ListGolOntologiesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::OntologyPublication>,
-            tonic::Status,
-        >;
-        async fn retire_ontology(
-            &self,
-            request: tonic::Request<super::RetireOntologyRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::RetireOntologyResponse>,
-            tonic::Status,
-        >;
-        async fn list_ontologies(
-            &self,
-            request: tonic::Request<super::ListOntologiesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOntologiesResponse>,
-            tonic::Status,
-        >;
-        async fn list_ontology_history(
-            &self,
-            request: tonic::Request<super::ListOntologyHistoryRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListOntologyHistoryResponse>,
+            tonic::Response<super::ListGolOntologiesResponse>,
             tonic::Status,
         >;
         async fn put_binding(
             &self,
             request: tonic::Request<super::PutBindingRequest>,
-        ) -> std::result::Result<tonic::Response<super::OntologyBinding>, tonic::Status>;
+        ) -> std::result::Result<tonic::Response<super::GolBinding>, tonic::Status>;
         async fn list_bindings(
             &self,
             request: tonic::Request<super::ListBindingsRequest>,
@@ -1284,18 +1183,11 @@ pub mod registry_server {
             tonic::Response<super::ListBindingsResponse>,
             tonic::Status,
         >;
-        async fn get_ontology_slice(
+        /// Trusted runtime mapping only; metadata disclosure is gated by Gateway.
+        async fn get_gol_binding(
             &self,
-            request: tonic::Request<super::GetOntologySliceRequest>,
-        ) -> std::result::Result<tonic::Response<super::OntologySlice>, tonic::Status>;
-        async fn diff_ontology(
-            &self,
-            request: tonic::Request<super::DiffOntologyRequest>,
-        ) -> std::result::Result<tonic::Response<super::SemanticDiff>, tonic::Status>;
-        async fn merge_ontology(
-            &self,
-            request: tonic::Request<super::MergeOntologyRequest>,
-        ) -> std::result::Result<tonic::Response<super::OntologyMerge>, tonic::Status>;
+            request: tonic::Request<super::GetGolBindingRequest>,
+        ) -> std::result::Result<tonic::Response<super::GolBinding>, tonic::Status>;
     }
     /// Registry owns ontology and pipeline persistence and semantic validation.
     #[derive(Debug)]
@@ -1915,25 +1807,25 @@ pub mod registry_server {
                     };
                     Box::pin(fut)
                 }
-                "/galadril.registry.v1.Registry/PutOntology" => {
+                "/galadril.registry.v1.Registry/SaveGolOntology" => {
                     #[allow(non_camel_case_types)]
-                    struct PutOntologySvc<T: Registry>(pub Arc<T>);
+                    struct SaveGolOntologySvc<T: Registry>(pub Arc<T>);
                     impl<
                         T: Registry,
-                    > tonic::server::UnaryService<super::PutOntologyRequest>
-                    for PutOntologySvc<T> {
-                        type Response = super::OntologyRevision;
+                    > tonic::server::UnaryService<super::SaveGolOntologyRequest>
+                    for SaveGolOntologySvc<T> {
+                        type Response = super::GolWorkspace;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::PutOntologyRequest>,
+                            request: tonic::Request<super::SaveGolOntologyRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Registry>::put_ontology(&inner, request).await
+                                <T as Registry>::save_gol_ontology(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1944,7 +1836,7 @@ pub mod registry_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = PutOntologySvc(inner);
+                        let method = SaveGolOntologySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -1960,25 +1852,25 @@ pub mod registry_server {
                     };
                     Box::pin(fut)
                 }
-                "/galadril.registry.v1.Registry/GetOntology" => {
+                "/galadril.registry.v1.Registry/GetGolWorkspace" => {
                     #[allow(non_camel_case_types)]
-                    struct GetOntologySvc<T: Registry>(pub Arc<T>);
+                    struct GetGolWorkspaceSvc<T: Registry>(pub Arc<T>);
                     impl<
                         T: Registry,
-                    > tonic::server::UnaryService<super::GetOntologyRequest>
-                    for GetOntologySvc<T> {
-                        type Response = super::OntologyRevision;
+                    > tonic::server::UnaryService<super::GetGolWorkspaceRequest>
+                    for GetGolWorkspaceSvc<T> {
+                        type Response = super::GolWorkspace;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetOntologyRequest>,
+                            request: tonic::Request<super::GetGolWorkspaceRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Registry>::get_ontology(&inner, request).await
+                                <T as Registry>::get_gol_workspace(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -1989,7 +1881,7 @@ pub mod registry_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = GetOntologySvc(inner);
+                        let method = GetGolWorkspaceSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -2005,160 +1897,25 @@ pub mod registry_server {
                     };
                     Box::pin(fut)
                 }
-                "/galadril.registry.v1.Registry/PublishOntology" => {
+                "/galadril.registry.v1.Registry/PreviewGolDependencies" => {
                     #[allow(non_camel_case_types)]
-                    struct PublishOntologySvc<T: Registry>(pub Arc<T>);
+                    struct PreviewGolDependenciesSvc<T: Registry>(pub Arc<T>);
                     impl<
                         T: Registry,
-                    > tonic::server::UnaryService<super::PublishOntologyRequest>
-                    for PublishOntologySvc<T> {
-                        type Response = super::OntologyPublication;
+                    > tonic::server::UnaryService<super::PreviewGolDependenciesRequest>
+                    for PreviewGolDependenciesSvc<T> {
+                        type Response = super::GolDependencyPreview;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::PublishOntologyRequest>,
+                            request: tonic::Request<super::PreviewGolDependenciesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Registry>::publish_ontology(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = PublishOntologySvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/galadril.registry.v1.Registry/RetireOntology" => {
-                    #[allow(non_camel_case_types)]
-                    struct RetireOntologySvc<T: Registry>(pub Arc<T>);
-                    impl<
-                        T: Registry,
-                    > tonic::server::UnaryService<super::RetireOntologyRequest>
-                    for RetireOntologySvc<T> {
-                        type Response = super::RetireOntologyResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::RetireOntologyRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as Registry>::retire_ontology(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = RetireOntologySvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/galadril.registry.v1.Registry/ListOntologies" => {
-                    #[allow(non_camel_case_types)]
-                    struct ListOntologiesSvc<T: Registry>(pub Arc<T>);
-                    impl<
-                        T: Registry,
-                    > tonic::server::UnaryService<super::ListOntologiesRequest>
-                    for ListOntologiesSvc<T> {
-                        type Response = super::ListOntologiesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ListOntologiesRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as Registry>::list_ontologies(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = ListOntologiesSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/galadril.registry.v1.Registry/ListOntologyHistory" => {
-                    #[allow(non_camel_case_types)]
-                    struct ListOntologyHistorySvc<T: Registry>(pub Arc<T>);
-                    impl<
-                        T: Registry,
-                    > tonic::server::UnaryService<super::ListOntologyHistoryRequest>
-                    for ListOntologyHistorySvc<T> {
-                        type Response = super::ListOntologyHistoryResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ListOntologyHistoryRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as Registry>::list_ontology_history(&inner, request)
+                                <T as Registry>::preview_gol_dependencies(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -2170,7 +1927,188 @@ pub mod registry_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = ListOntologyHistorySvc(inner);
+                        let method = PreviewGolDependenciesSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/galadril.registry.v1.Registry/ValidateGolOntology" => {
+                    #[allow(non_camel_case_types)]
+                    struct ValidateGolOntologySvc<T: Registry>(pub Arc<T>);
+                    impl<
+                        T: Registry,
+                    > tonic::server::UnaryService<super::ValidateGolOntologyRequest>
+                    for ValidateGolOntologySvc<T> {
+                        type Response = super::GolValidation;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ValidateGolOntologyRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Registry>::validate_gol_ontology(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ValidateGolOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/galadril.registry.v1.Registry/PublishGolOntology" => {
+                    #[allow(non_camel_case_types)]
+                    struct PublishGolOntologySvc<T: Registry>(pub Arc<T>);
+                    impl<
+                        T: Registry,
+                    > tonic::server::UnaryService<super::PublishGolOntologyRequest>
+                    for PublishGolOntologySvc<T> {
+                        type Response = super::GolPublication;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PublishGolOntologyRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Registry>::publish_gol_ontology(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PublishGolOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/galadril.registry.v1.Registry/DeleteGolOntology" => {
+                    #[allow(non_camel_case_types)]
+                    struct DeleteGolOntologySvc<T: Registry>(pub Arc<T>);
+                    impl<
+                        T: Registry,
+                    > tonic::server::UnaryService<super::DeleteGolOntologyRequest>
+                    for DeleteGolOntologySvc<T> {
+                        type Response = super::DeleteGolOntologyResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DeleteGolOntologyRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Registry>::delete_gol_ontology(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DeleteGolOntologySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/galadril.registry.v1.Registry/ListGolOntologies" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListGolOntologiesSvc<T: Registry>(pub Arc<T>);
+                    impl<
+                        T: Registry,
+                    > tonic::server::UnaryService<super::ListGolOntologiesRequest>
+                    for ListGolOntologiesSvc<T> {
+                        type Response = super::ListGolOntologiesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListGolOntologiesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Registry>::list_gol_ontologies(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListGolOntologiesSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -2193,7 +2131,7 @@ pub mod registry_server {
                         T: Registry,
                     > tonic::server::UnaryService<super::PutBindingRequest>
                     for PutBindingSvc<T> {
-                        type Response = super::OntologyBinding;
+                        type Response = super::GolBinding;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -2276,25 +2214,25 @@ pub mod registry_server {
                     };
                     Box::pin(fut)
                 }
-                "/galadril.registry.v1.Registry/GetOntologySlice" => {
+                "/galadril.registry.v1.Registry/GetGolBinding" => {
                     #[allow(non_camel_case_types)]
-                    struct GetOntologySliceSvc<T: Registry>(pub Arc<T>);
+                    struct GetGolBindingSvc<T: Registry>(pub Arc<T>);
                     impl<
                         T: Registry,
-                    > tonic::server::UnaryService<super::GetOntologySliceRequest>
-                    for GetOntologySliceSvc<T> {
-                        type Response = super::OntologySlice;
+                    > tonic::server::UnaryService<super::GetGolBindingRequest>
+                    for GetGolBindingSvc<T> {
+                        type Response = super::GolBinding;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetOntologySliceRequest>,
+                            request: tonic::Request<super::GetGolBindingRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Registry>::get_ontology_slice(&inner, request).await
+                                <T as Registry>::get_gol_binding(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -2305,97 +2243,7 @@ pub mod registry_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = GetOntologySliceSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/galadril.registry.v1.Registry/DiffOntology" => {
-                    #[allow(non_camel_case_types)]
-                    struct DiffOntologySvc<T: Registry>(pub Arc<T>);
-                    impl<
-                        T: Registry,
-                    > tonic::server::UnaryService<super::DiffOntologyRequest>
-                    for DiffOntologySvc<T> {
-                        type Response = super::SemanticDiff;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::DiffOntologyRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as Registry>::diff_ontology(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = DiffOntologySvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/galadril.registry.v1.Registry/MergeOntology" => {
-                    #[allow(non_camel_case_types)]
-                    struct MergeOntologySvc<T: Registry>(pub Arc<T>);
-                    impl<
-                        T: Registry,
-                    > tonic::server::UnaryService<super::MergeOntologyRequest>
-                    for MergeOntologySvc<T> {
-                        type Response = super::OntologyMerge;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::MergeOntologyRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as Registry>::merge_ontology(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = MergeOntologySvc(inner);
+                        let method = GetGolBindingSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

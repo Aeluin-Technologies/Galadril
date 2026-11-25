@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from galadril_ontology import protected_gol_state_effect
 from pydantic import JsonValue
 
 from galadril_vision.common.config import KafkaConnectorConfig
@@ -42,9 +43,15 @@ class KafkaJsonProducer:
         self, *, topic: str, key: str, payload: dict[str, JsonValue]
     ) -> None:
         """Performs a confirmed publish with automatic W3C header injection."""
-        await self._broker.publish(
-            payload,
-            topic,
-            key=key,
-            no_confirm=False,
-        )
+        async with protected_gol_state_effect(
+            operation="transfer",
+            tenant_id=key.partition(":")[0],
+            destination="kafka",
+            purpose="pipeline_dispatch",
+        ):
+            await self._broker.publish(
+                payload,
+                topic,
+                key=key,
+                no_confirm=False,
+            )

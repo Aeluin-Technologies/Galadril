@@ -262,5 +262,28 @@ def test_official_configuration_files_form_a_valid_pipeline() -> None:
     assert len(pipeline.pipeline) == 4
 
 
+def test_gol_endpoint_comes_from_operator_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOL_GATEWAY_ENDPOINT", "http://gateway:8081")
+    config = VisionConfig.model_construct()
+    assert config.gol_gateway_endpoint == "http://gateway:8081"
+
+
+def test_gol_worker_key_is_an_operator_only_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tenant pipeline documents cannot replace the workload credential path."""
+    monkeypatch.setenv("GOL_WORKER_KEY_PATH", "/run/secrets/gol_worker_key")
+    assert (
+        VisionConfig.model_fields["gol_worker_key_path"].get_default(
+            call_default_factory=True
+        )
+        == "/run/secrets/gol_worker_key"
+    )
+    with pytest.raises(ValueError):
+        VisionConfig.with_pipeline({}, {"gol_worker_key_path": "/tmp/attacker"})
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

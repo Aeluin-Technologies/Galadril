@@ -130,9 +130,13 @@ class E2EDeterministicModel(BaseModel):
                     ),
                     "label": "gateway-e2e-record",
                     "source_field": record.cohort,
+                    "scalar_evidence": {"signal": record.signal},
                     "confidence": record.outcome,
                 }
                 confidence = record.outcome
+        prediction["gol_symbol_key"] = "e2e.lifecycle::E2EEntity"
+        prediction["gol_value"] = {"display_name": prediction["label"]}
+        prediction["gol_event_value"] = {"kind": "Observation"}
         return PredictionResult(
             model_name=self.meta().name,
             model_version=self.meta().version,

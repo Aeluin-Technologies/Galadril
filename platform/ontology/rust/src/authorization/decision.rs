@@ -118,6 +118,8 @@ pub enum Consistency {
     FullyConsistent,
     /// Require a check satisfying the supplied opaque ZedToken.
     AtLeastAsFresh(Box<str>),
+    /// Evaluate one read decision at a revision freshly selected by the host.
+    AtExactSnapshot(Arc<str>),
 }
 
 /// Evidence minted by the trusted runtime after authenticating the principal
@@ -324,8 +326,11 @@ async fn check(
     {
         return Err(Denial::Resource);
     }
-    if matches!(&evidence.consistency, Consistency::AtLeastAsFresh(token) if token.is_empty())
-    {
+    if match &evidence.consistency {
+        Consistency::AtLeastAsFresh(token) => token.is_empty(),
+        Consistency::AtExactSnapshot(token) => token.is_empty(),
+        Consistency::FullyConsistent => false,
+    } {
         return Err(Denial::Freshness);
     }
     let sink = authority

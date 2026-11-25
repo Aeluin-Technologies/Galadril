@@ -29,6 +29,28 @@ def test_command_round_trip_preserves_identity() -> None:
     assert restored.idempotency_key == f"{command.event_id}:vision:infer"
 
 
+def test_admission_is_bounded_and_never_inferred_from_attributes() -> None:
+    """Keeps host-issued authority separate from untrusted pipeline metadata."""
+    common = {
+        "correlation_id": uuid4(),
+        "pipeline": "vision",
+        "step": "infer",
+        "step_type": StepType.INFERENCE,
+        "resource_class": ResourceClass.GPU,
+    }
+    command = PipelineCommand(**common, admission="opaque-host-admission")
+    restored = PipelineCommand.model_validate_json(command.model_dump_json())
+    assert restored.admission == "opaque-host-admission"
+    assert "opaque-host-admission" not in repr(command)
+    assert (
+        PipelineCommand(**common, attributes={"admission": "forged"}).admission
+        is None
+    )
+    for invalid in ("", " ", "x" * 4097):
+        with pytest.raises(ValidationError):
+            PipelineCommand(**common, admission=invalid)
+
+
 def test_command_rejects_naive_timestamp_and_unknown_fields() -> None:
     """Prevents ambiguous timestamps and accidental contract drift."""
     common = {
@@ -44,3 +66,27 @@ def test_command_rejects_naive_timestamp_and_unknown_fields() -> None:
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         PipelineCommand(**common, undocumented=True)
+
+
+def test_invalid_command_keeps_the_lineage_proof_out_of_validation_errors() -> (
+    None
+):
+    """Malformed broker data must not expose the worker's proof in a traceback."""
+    proof = "private-lineage-proof"
+    with pytest.raises(ValidationError) as error:
+        PipelineCommand.model_validate(
+            {
+                "correlation_id": uuid4(),
+                "pipeline": "vision",
+                "step": "infer",
+                "step_type": StepType.INFERENCE,
+                "resource_class": ResourceClass.GPU,
+                "lineage": {"value": proof},
+            }
+        )
+    assert "lineage" in str(error.value)
+    assert proof not in str(error.value)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

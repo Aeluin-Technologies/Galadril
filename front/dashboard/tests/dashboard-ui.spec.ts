@@ -2035,6 +2035,7 @@ test("Pengolo keeps document redaction in the conversation tools", async ({
 });
 
 test("active chats have one uniform fill", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const record = chatFixture("fixture");
   await mockDashboard(page, [], {
     activeChat: record,

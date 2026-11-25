@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import sys
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import orjson
 import pytest
+from galadril_ontology import GolDenied, GolEffect
 from galadril_vision.common.config import IdentityResolutionConfig
-from galadril_vision.identity.licorne import (
+from galadril_vision.identity.contracts import (
     CandidateEvidence,
-    LicorneActorRuntime,
     ResolutionRequest,
     SpatialEvidence,
+)
+from galadril_vision.identity.licorne import (
+    LicorneActorRuntime,
     _bounded_probability,
     _CalibratedPostgresProvider,
     _load_licorne,
@@ -214,11 +221,39 @@ def test_provider_preserves_identity_kind_and_emits_finite_evidence() -> None:
     candidates = provider.generate_candidates([observation], object())
     factors = provider.emit_factors([observation], candidates, object())
 
-    assert candidates[0][0].identity_id == 42
+    assert candidates[0][0].key == "person-linked"
     assert candidates[0][1].key == "person-host"
     assert factors[0].cardinalities == [4]
     assert len(factors[0].contributions or []) == 2
     assert factors[0].log_potentials[0] > factors[0].log_potentials[1]
+
+
+@pytest.mark.anyio
+async def test_native_state_is_not_reused_between_calculations() -> None:
+    """Native caches must not retain evidence omitted by a later projection."""
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=_licorne(),
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-a",
+        observation_key="first",
+        source="source",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.9,
+        candidates=(),
+    )
+    first = await runtime.resolve(request)
+    assert runtime._resolver is None
+    assert not runtime._providers
+    second = await runtime.resolve(
+        replace(request, tenant_id="tenant-b", observation_key="second")
+    )
+    assert first.entity_id != second.entity_id
+    assert runtime._resolver is None
+    assert not runtime._providers
+    await runtime.close()
 
 
 @pytest.mark.anyio
@@ -242,8 +277,13 @@ async def test_actor_runtime_correlates_native_decision_and_h3_cell() -> None:
     decision = await runtime.resolve(request)
     await runtime.close()
 
-    assert decision.entity_id == "licorne_0000000000000007"
-    assert decision.licorne_identity_id == 7
+    expected_id = (
+        _stable_u64(request.tenant_id, request.observation_key)
+        & ((1 << 63) - 1)
+        or 1
+    )
+    assert decision.entity_id == f"licorne_{expected_id:016x}"
+    assert decision.licorne_identity_id == expected_id
     assert decision.selected_probability == 0.91
     assert decision.h3_cell is not None
     assert decision.final_version == 13
@@ -302,5 +342,140 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.mark.anyio
+async def test_missing_state_admission_does_not_initialize_native_ledger() -> (
+    None
+):
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=_licorne(),
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-1",
+        observation_key="observation",
+        source="sensor",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.8,
+        candidates=(),
+    )
+    try:
+        with pytest.raises(GolDenied):
+            await runtime.resolve(request)
+        assert runtime._resolver is None
+        assert not runtime._providers
+    finally:
+        await runtime.close()
+
+
+@asynccontextmanager
+async def _unit_batch(
+    effects: tuple[GolEffect, ...], **_kwargs: object
+) -> AsyncIterator[tuple[str, ...]]:
+    """The native unit adapter exercises I/O ordering independently of policy engines."""
+    yield tuple("unit-receipt" for _ in effects)
+
+
+def _unit_state_effect(**kwargs: object) -> GolEffect:
+    return GolEffect.model_validate(
+        {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"tenant_id", "derived"}
+        }
+        | {"target": "tests.scope::Value"}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _admitted_sql_transport(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keeps SQL-shape assertions separate from the real denial boundary tests."""
+    if (
+        request.node.name
+        == "test_missing_state_admission_does_not_initialize_native_ledger"
+    ):
+        yield
+        return
+    with (
+        patch(
+            "galadril_vision.identity.licorne.protected_gol_effects",
+            new=_unit_batch,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.make_gol_state_effect",
+            new=_unit_state_effect,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.scoped_instance_id",
+            side_effect=lambda local: local,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.anyio
+async def test_native_ledger_io_and_results_remain_inside_the_live_effect_scope() -> (
+    None
+):
+    """Native background polling cannot outlive the admitted calculation."""
+    held = False
+
+    @asynccontextmanager
+    async def scope(
+        *_args: object, **_kwargs: object
+    ) -> AsyncIterator[tuple[str, ...]]:
+        nonlocal held
+        held = True
+        try:
+            yield ("read-receipt", "write-receipt")
+        finally:
+            held = False
+
+    class Resolver(_AsyncResolver):
+        def register_tenant(self, tenant_id: str, **kwargs: object) -> None:
+            assert held, "Native ledger escaped its live permit"
+            super().register_tenant(tenant_id, **kwargs)
+
+        async def next_result(self) -> _Batch:
+            assert held, "Native result escaped its live permit"
+            return await super().next_result()
+
+    module = _licorne()
+    module.AsyncResolver = Resolver
+    runtime = LicorneActorRuntime(
+        IdentityResolutionConfig(result_timeout_seconds=1.0),
+        licorne_module=module,
+    )
+    request = ResolutionRequest(
+        tenant_id="tenant-a",
+        observation_key="record",
+        source="source",
+        modality="text",
+        event_time_micros=1,
+        pipeline_probability=0.9,
+        candidates=(),
+    )
+    with (
+        patch(
+            "galadril_vision.identity.licorne.protected_gol_effects",
+            new=scope,
+            create=True,
+        ),
+        patch(
+            "galadril_vision.identity.licorne.make_gol_state_effect",
+            return_value=object(),
+            create=True,
+        ),
+    ):
+        try:
+            await runtime.resolve(request)
+            assert runtime._pump is None or runtime._pump.done()
+        finally:
+            await runtime.close()
+    assert not held
+
+
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+    raise SystemExit(
+        pytest.main([__file__, "--import-mode=importlib", *sys.argv[1:]])
+    )
