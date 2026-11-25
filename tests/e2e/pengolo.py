@@ -1075,10 +1075,10 @@ async def exercise_pengolo(
                 "causal_entity_id": causal,
                 "question": "Live browser evidence",
                 "pengolo": True,
+                "calculator_only": True,
                 "slow": True,
             }
         ),
-        str(state.state_value.get("label", state.entity_id)),
         administrator=administrator,
     )
     print(

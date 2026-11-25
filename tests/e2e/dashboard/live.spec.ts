@@ -9,7 +9,6 @@ interface Fixture {
   administratorCookies: Parameters<BrowserContext["addCookies"]>[0];
   memberId: string;
   prompt: string;
-  search: string;
 }
 const fixture = JSON.parse(
   readFileSync("live-fixture.json", "utf8"),
@@ -61,7 +60,7 @@ async function expectCompletedGeneration(
           throw new Error("Invalid Gateway conversation title");
         title = state.title;
         expect(state).toHaveProperty("activeGeneration");
-        if (state.activeGeneration !== null) return false;
+        if (state.activeGeneration !== null) return "active";
         const messages = object(state.messages).items;
         if (!Array.isArray(messages))
           throw new Error("Invalid Gateway messages");
@@ -70,11 +69,11 @@ async function expectCompletedGeneration(
         status = String(message.status);
         if (typeof message.generationId === "string")
           generationId = message.generationId;
-        return ["completed", "failed", "cancelled"].includes(status);
+        return status;
       },
       { timeout: remaining, intervals: [100, 250, 500] },
     )
-    .toBe(true);
+    .toMatch(/^(completed|failed|cancelled)$/);
   expect(
     status,
     `Generation ${generationId || "unknown"} ended with ${status}`,
@@ -154,9 +153,11 @@ test("real Pengolo generation survives browser reload", async ({
   await page.reload();
   await expect(page).toHaveURL(id);
   await expectCompletedGeneration(page, context, deadline);
-  await expect(
-    page.getByRole("article", { name: "Pengolo response" }),
-  ).toContainText('"reasoning_effort":"medium"', {
+  const replayed = page.getByRole("article", { name: "Pengolo response" });
+  await expect(replayed).toContainText('"reasoning_effort":"medium"', {
+    timeout: Math.max(1, deadline - Date.now()),
+  });
+  await expect(replayed).toContainText('"run_python":2', {
     timeout: Math.max(1, deadline - Date.now()),
   });
   await expect(
@@ -253,12 +254,9 @@ test("real Pengolo generation survives browser reload", async ({
   await expect(page.locator(".p-composer .p-file-chips")).toContainText(
     "Shared evidence.txt",
   );
-  const sharedPlan: unknown = JSON.parse(fixture.prompt);
-  if (typeof sharedPlan !== "object" || sharedPlan === null)
-    throw new Error("Invalid fixture plan");
   await page
     .getByLabel("Message Pengolo", { exact: true })
-    .fill(JSON.stringify({ ...sharedPlan, calculator_only: true }));
+    .fill(fixture.prompt);
   const sharedDeadline = Date.now() + 90_000;
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
