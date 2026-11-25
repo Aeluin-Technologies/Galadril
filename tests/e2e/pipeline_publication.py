@@ -179,6 +179,11 @@ async def provision_pipeline(
     spicedb = scenario.spicedb
     uploader_token = scenario.uploader_token
     outsider_token = scenario.outsider_token
+    await eventually(
+        lambda: gateway.gol_authoring_ready(uploader_token),
+        timeout_seconds=90.0,
+        description="Registry catalog and fixture ontology creation grant",
+    )
     print("E2E stage: publishing ontology", flush=True)
     await publish_gol_source(gateway, uploader_token, ONTOLOGY_ID, _ontology())
     if review is not None:

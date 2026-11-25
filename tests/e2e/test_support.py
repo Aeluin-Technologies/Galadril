@@ -601,7 +601,7 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     assert lifecycle is not None
     assert "vision = True" in lifecycle.group("attributes")
     assert 'timeout = "eternal"' in macro
-    assert "DOCKER_E2E_TEST_EXEC_PROPERTIES if streaming" in macro
+    assert "exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES," in macro
     assert '"test.EstimatedComputeUnits": "6"' in testing
     empirical_timeout = e2e_environment.EMPIRICAL_STATE_TIMEOUT_SECONDS
     assert empirical_timeout >= 2 * 60 * 60
@@ -1877,3 +1877,31 @@ def test_gateway_readiness_waits_for_the_scribe_model_catalog(
                 assert await gateway.ready("fixture-token") is expected
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("payload", "ready"),
+    [
+        ({"golOntologies": [], "golOntologyCanManage": True}, True),
+        ({"golOntologies": [], "golOntologyCanManage": False}, None),
+        ({"golOntologies": None, "golOntologyCanManage": True}, None),
+    ],
+)
+def test_gol_readiness_checks_registry_and_creation_grants(
+    payload: dict[str, object], ready: bool | None
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        query = json.loads(request.content)["query"]
+        assert "golOntologies" in query
+        assert "golOntologyCanManage(action: CREATE)" in query
+        return httpx.Response(200, json={"data": payload})
+
+    async def exercise() -> bool | None:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond)
+        ) as client:
+            gateway = object.__new__(e2e_clients.GatewayClient)
+            gateway._client = client
+            return await gateway.gol_authoring_ready("fixture-token")
+
+    assert asyncio.run(exercise()) is ready

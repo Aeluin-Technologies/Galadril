@@ -1,7 +1,7 @@
 """Defines the per-scenario runfiles and Docker isolation contract."""
 
 load("@rules_python//python:defs.bzl", "py_test")
-load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES", "DOCKER_TEST_EXEC_PROPERTIES")
+load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES")
 
 def pipeline_e2e_test(name, src, deps, data = [], intake = False, scribe = False, vision = False, tags = []):
     """Declares only the images the scenario can start."""
@@ -30,7 +30,8 @@ def pipeline_e2e_test(name, src, deps, data = [], intake = False, scribe = False
         data = [":compose_runtime_configuration"] + [":load_" + image for image in images] + streaming_data + data,
         deps = [":e2e_environment", "@pip//pytest"] + deps,
         env = {"GALADRIL_E2E_IMAGES": " ".join(images)},
-        exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES if streaming else DOCKER_TEST_EXEC_PROPERTIES,
+        # Kratos and Studio still need their cold-start budget without Vision.
+        exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
         legacy_create_init = False,
         tags = [
             "exclusive-if-local",

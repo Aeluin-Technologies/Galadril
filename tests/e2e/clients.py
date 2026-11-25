@@ -256,6 +256,21 @@ class GatewayClient:
             else None
         )
 
+    async def gol_authoring_ready(self, token: str) -> bool | None:
+        """Waits for the Registry catalog and the actor's live creation grant."""
+        data = await self.execute(
+            token,
+            "query { golOntologies(limit: 1) { ontologyId } golOntologyCanManage(action: CREATE) }",
+        )
+        return (
+            True
+            if (
+                isinstance(data.get("golOntologies"), list)
+                and data.get("golOntologyCanManage") is True
+            )
+            else None
+        )
+
 
 def _serialize(message: object) -> bytes:
     """Serializes generated protobufs behind a stable grpcio callback."""
