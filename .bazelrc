@@ -65,7 +65,7 @@ test:ci-presubmit --test_tag_filters=-periodic,-benchmark
 test:ci-validation --test_tag_filters=integration,-benchmark
 test:ci-validation --nocache_test_results
 test:ci-benchmark --nocache_test_results
-coverage:ci-coverage --test_tag_filters=-integration,-requires-docker,-benchmark
+coverage:ci-coverage --test_tag_filters=-integration,-requires-docker,-benchmark,-image-layout
 
 # Only matters for tests that actually execute locally.
 test:ci --local_test_jobs=HOST_CPUS*0.75

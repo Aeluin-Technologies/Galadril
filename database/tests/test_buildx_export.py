@@ -23,7 +23,17 @@ case "$output" in
 esac
 mkdir -p "$output/blobs/sha256"
 printf '%s' '{"manifests":[]}' > "$output/index.json"
-if [ "${FAIL_BUILD:-false}" = true ]; then exit 42; fi
+case "$FAILURE" in
+    permanent) exit 42 ;;
+    reset|repeated-reset)
+        if [[ "$FAILURE" == repeated-reset ]] || [[ "$(grep -c '^build$' "$CALLS")" == 1 ]]; then
+            touch "$output/partial"
+            echo 'ERROR: failed to build: failed to solve: failed to compute cache key: failed to copy: read tcp: connection reset by peer' >&2
+            exit 42
+        fi
+        test ! -e "$output/partial"
+        ;;
+esac
 printf '%s' 'image-and-attestations' > "$output/blobs/sha256/test"
 """
 
@@ -42,7 +52,7 @@ class BuildxExportTest(unittest.TestCase):
         )
 
     def invoke(
-        self, *, fail: bool
+        self, *, failure: str = ""
     ) -> tuple[int, str, dict[str, str], str, bool]:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -77,7 +87,7 @@ class BuildxExportTest(unittest.TestCase):
                     TMPDIR=str(scratch),
                     WORKSPACE=str(workspace),
                     CALLS=str(calls),
-                    FAIL_BUILD=str(fail).lower(),
+                    FAILURE=failure,
                 ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -102,9 +112,7 @@ class BuildxExportTest(unittest.TestCase):
     def test_oci_export_uses_scratch_and_publishes_the_complete_layout(
         self,
     ) -> None:
-        code, diagnostics, contents, calls, scratch_remaining = self.invoke(
-            fail=False
-        )
+        code, diagnostics, contents, calls, scratch_remaining = self.invoke()
         self.assertEqual(code, 0, diagnostics)
         self.assertEqual(
             contents,
@@ -116,11 +124,33 @@ class BuildxExportTest(unittest.TestCase):
         self.assertEqual(calls.splitlines(), ["create", "build", "rm"])
         self.assertFalse(scratch_remaining)
 
+    def test_registry_reset_reuses_builder_and_discards_partial_export(
+        self,
+    ) -> None:
+        code, diagnostics, contents, calls, scratch_remaining = self.invoke(
+            failure="reset"
+        )
+        self.assertEqual(code, 0, diagnostics)
+        self.assertNotIn("partial", contents)
+        self.assertEqual(calls.splitlines(), ["create", "build", "build", "rm"])
+        self.assertFalse(scratch_remaining)
+
+    def test_registry_resets_exhaust_a_bounded_retry_budget(self) -> None:
+        code, diagnostics, contents, calls, scratch_remaining = self.invoke(
+            failure="repeated-reset"
+        )
+        self.assertEqual(code, 42, diagnostics)
+        self.assertEqual(contents, {})
+        self.assertEqual(
+            calls.splitlines(), ["create", "build", "build", "build", "rm"]
+        )
+        self.assertFalse(scratch_remaining)
+
     def test_failed_export_cleans_up_and_does_not_publish_partial_output(
         self,
     ) -> None:
         code, diagnostics, contents, calls, scratch_remaining = self.invoke(
-            fail=True
+            failure="permanent"
         )
         self.assertEqual(code, 42, diagnostics)
         self.assertEqual(contents, {})

@@ -40,7 +40,7 @@ jobs:
 
       - name: Run tests
         run: |
-          bazel test //... $BAZEL_FLAGS --config=ci-test --config=ci-presubmit \
+          bazel test //... $BAZEL_FLAGS --config=ci-test --config=ci-presubmit --keep_going \
             --execution_log_compact_file="$RUNNER_TEMP/presubmit.exec.zst"
 
       - name: Login to GHCR
