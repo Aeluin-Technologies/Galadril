@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import httpx
-from environment import ComposeEnvironment, _run
+from environment import CONFIGURATION_IMAGE, ComposeEnvironment, _run
 
 from infrastructure.envoy.testing import identity_files
 
@@ -40,7 +40,7 @@ class ProxyStartupTest(unittest.IsolatedAsyncioTestCase):
                     "run",
                     "--rm",
                     *mounts,
-                    "busybox:1.37.0-musl",
+                    CONFIGURATION_IMAGE,
                     "sh",
                     "-ec",
                     "test -s /config/application/connectors.yaml; "

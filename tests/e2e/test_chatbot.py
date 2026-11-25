@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 import httpx
 import pengolo
+import pengolo_library
 import pytest
 from aiohttp import WSMsgType, test_utils, web
 from assertions import require_mapping
@@ -16,7 +17,7 @@ from chatbot import (
     decode_generation,
 )
 from clients import GatewayClient
-from pengolo import _mutation as pengolo_mutation
+from pengolo_library import _mutation as pengolo_mutation
 
 
 @pytest.mark.parametrize(
@@ -439,7 +440,9 @@ def test_pengolo_mutation_preserves_boolean_acknowledgements(
         assert actor == "fixture-uploader"
         return "fixture-token"
 
-    monkeypatch.setattr("pengolo.authenticated_token", authenticated_token)
+    monkeypatch.setattr(
+        pengolo_library, "authenticated_token", authenticated_token
+    )
     result = asyncio.run(
         pengolo_mutation(
             MutationGateway(),
@@ -474,10 +477,12 @@ def test_pengolo_object_mutations_reject_scalar_responses(
     def authenticated_token(actor: str) -> str:
         return "fixture-token"
 
-    monkeypatch.setattr("pengolo.authenticated_token", authenticated_token)
+    monkeypatch.setattr(
+        pengolo_library, "authenticated_token", authenticated_token
+    )
     with pytest.raises(AssertionError, match="must be an object"):
         asyncio.run(
-            pengolo._object_mutation(
+            pengolo_library._object_mutation(
                 MutationGateway(), "finishPengoloUpload", {"id": "file-id"}
             )
         )

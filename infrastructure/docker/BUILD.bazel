@@ -68,3 +68,24 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "pipeline_e2e_configuration",
+    srcs = [
+        "auth.yaml",
+        "broker.yaml",
+        "dashboard.yaml",
+        "database.yaml",
+        "init-scripts/01-init-spicedb.sh",
+        "init-scripts/02-init-galadril-roles.sh",
+        "init-scripts/03-init-auth.sh",
+        "local-auth.yaml",
+        "mcp.yaml",
+        "observability.yaml",
+        "proxy.yaml",
+        "s3-notifications.yaml",
+        "s3.yaml",
+        "streaming.yaml",
+    ],
+    visibility = ["//tests/e2e:__pkg__"],
+)

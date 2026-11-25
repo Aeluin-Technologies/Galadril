@@ -584,7 +584,7 @@ def test_e2e_runs_workspace_tools_through_the_real_mcp_without_a_native_fallback
     source = E2E_COMPOSE.read_text()
     assert "image: local/galadril-mcp:e2e" in source
     assert "SCRIBE_WORKSPACE_MCP_URL: !reset" not in source
-    assert "tests/e2e/load_mcp.sh" in Path(e2e_environment.__file__).read_text()
+    assert "mcp:\n        condition: service_started" in source
 
 
 def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
@@ -592,17 +592,16 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     build = runfile("tests/e2e/BUILD.bazel").read_text(encoding="utf-8")
     testing = runfile("build/testing.bzl").read_text(encoding="utf-8")
 
+    macro = runfile("tests/e2e/pipeline_test.bzl").read_text(encoding="utf-8")
     lifecycle = re.search(
-        r'py_test\(\s*name = "pipeline_lifecycle_test",(?P<attributes>.*?)\n\)',
+        r'pipeline_e2e_test\(\s*name = "pipeline_lifecycle_test",(?P<attributes>.*?)\n\)',
         build,
         re.DOTALL,
     )
     assert lifecycle is not None
-    assert 'timeout = "eternal"' in lifecycle.group("attributes")
-    assert (
-        "exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES"
-        in lifecycle.group("attributes")
-    )
+    assert "vision = True" in lifecycle.group("attributes")
+    assert 'timeout = "eternal"' in macro
+    assert "DOCKER_E2E_TEST_EXEC_PROPERTIES if streaming" in macro
     assert '"test.EstimatedComputeUnits": "6"' in testing
     empirical_timeout = e2e_environment.EMPIRICAL_STATE_TIMEOUT_SECONDS
     assert empirical_timeout >= 2 * 60 * 60
@@ -996,6 +995,11 @@ def test_application_image_loads_have_a_dedicated_deadline(
     monkeypatch.setattr(e2e_environment, "_run", record_run)
     monkeypatch.setattr(e2e_environment, "runfile", Path)
 
+    monkeypatch.setenv(
+        "GALADRIL_E2E_IMAGES",
+        "gateway intake registry vision scribe mcp chat_model studio",
+    )
+
     async def exercise() -> None:
         await ComposeEnvironment().load_images()
 
@@ -1010,6 +1014,38 @@ def test_application_image_loads_have_a_dedicated_deadline(
         600.0,
         600.0,
     ]
+
+
+def test_control_plane_imports_and_starts_only_declared_application_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps control-plane tests independent of worker and assistant images."""
+    commands: list[tuple[str, ...]] = []
+
+    async def record_run(command: tuple[str, ...], **_kwargs: object) -> str:
+        commands.append(command)
+        return ""
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+    monkeypatch.setattr(e2e_environment, "runfile", Path)
+    monkeypatch.setenv("GALADRIL_E2E_IMAGES", "gateway registry studio")
+
+    async def exercise() -> None:
+        environment = ComposeEnvironment()
+        await environment.load_images()
+        await environment.start_core()
+
+    asyncio.run(exercise())
+    assert [
+        Path(command[1]).stem
+        for command in commands
+        if command[0] == "/bin/bash"
+    ] == [
+        "load_gateway",
+        "load_registry",
+        "load_studio",
+    ]
+    assert commands[-1][-4:] == ("gateway", "hydra", "kratos", "studio")
 
 
 def test_compose_startup_includes_cold_image_pull_budget(

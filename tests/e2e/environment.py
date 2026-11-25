@@ -14,6 +14,8 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from time import monotonic
+from uuid import uuid4
 
 from assertions import require_mapping
 
@@ -44,6 +46,12 @@ _CONFIG_CATEGORIES = (
     "gol-secrets",
     "registry-secrets",
     "worker-secrets",
+)
+
+
+CONFIGURATION_IMAGE = (
+    "busybox:1.37.0-musl@sha256:"
+    "f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478"
 )
 
 
@@ -117,7 +125,7 @@ def _add_archive_file(
     archive.addfile(metadata, io.BytesIO(content))
 
 
-def configuration_archive() -> bytes:
+def configuration_archive(*, streaming: bool = True) -> bytes:
     """Packages isolated configuration volumes without daemon host paths."""
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w") as archive:
@@ -210,20 +218,21 @@ def configuration_archive() -> bytes:
         archive.addfile(metadata, io.BytesIO(ca))
         _add_archive_file(
             archive,
-            runfile("tests/e2e/fixtures/e2e_inference_model.py"),
-            "application/site-packages/e2e_inference_model.py",
-        )
-        _add_archive_file(
-            archive,
             runfile("schemas/spicedb/schema.zed"),
             "application/spicedb/schema.zed",
         )
-        for schema_name in _AVRO_SCHEMA_NAMES:
+        if streaming:
             _add_archive_file(
                 archive,
-                runfile(f"schemas/avro/{schema_name}"),
-                f"application/avro/{schema_name}",
+                runfile("tests/e2e/fixtures/e2e_inference_model.py"),
+                "application/site-packages/e2e_inference_model.py",
             )
+            for schema_name in _AVRO_SCHEMA_NAMES:
+                _add_archive_file(
+                    archive,
+                    runfile(f"schemas/avro/{schema_name}"),
+                    f"application/avro/{schema_name}",
+                )
         for source_path, destination in (
             (
                 "database/docker-entrypoint-initdb.d/003-install-extensions.sh",
@@ -337,11 +346,12 @@ async def _run(
 class ComposeEnvironment:
     """Loads current-source images and owns an isolated Compose project."""
 
-    __slots__ = ("_command", "_config_volume", "_environment")
+    __slots__ = ("_command", "_config_volume", "_environment", "_images")
 
     def __init__(self) -> None:
         compose_file = runfile("tests/e2e/environment/compose.yaml")
-        project = f"galadril-e2e-{os.getpid()}"
+        project = f"galadril-e2e-{uuid4().hex}"
+        self._images = tuple(os.environ.get("GALADRIL_E2E_IMAGES", "").split())
         self._config_volume = f"{project}-config"
         self._command = (
             str(runfile("infrastructure/docker/docker-compose")),
@@ -352,6 +362,9 @@ class ComposeEnvironment:
         )
         self._environment = {
             "COMPOSE_PROJECT_NAME": project,
+            "E2E_SCRIBE_ENABLED": "true"
+            if "scribe" in self._images
+            else "false",
             "E2E_CONFIG_VOLUME": self._config_volume,
             "GALADRIL_AUTH_PASSWORD": "e2e-auth-only",
             "HYDRA_DATABASE_PASSWORD": "e2e-hydra-only",
@@ -373,22 +386,20 @@ class ComposeEnvironment:
 
     async def load_images(self) -> None:
         """Loads the application images and bounded inference protocol fixture."""
-        for target, timeout_seconds in (
-            ("tests/e2e/load_gateway.sh", 600.0),
-            ("tests/e2e/load_intake.sh", 600.0),
-            ("tests/e2e/load_registry.sh", 600.0),
-            ("tests/e2e/load_vision.sh", 1200.0),
-            ("tests/e2e/load_scribe.sh", 600.0),
-            ("tests/e2e/load_mcp.sh", 600.0),
-            ("tests/e2e/load_chat_model.sh", 600.0),
-            ("tests/e2e/load_studio.sh", 600.0),
-        ):
+        for service in self._images:
+            target = f"tests/e2e/load_{service}.sh"
+            timeout_seconds = 1200.0 if service == "vision" else 600.0
+            started = monotonic()
             print(f"E2E stage: loading {target}", flush=True)
             print(
                 await _run(
                     image_loader_command(runfile(target)),
                     timeout_seconds=timeout_seconds,
                 ),
+                flush=True,
+            )
+            print(
+                f"E2E image import: {service} elapsed={monotonic() - started:.2f}s",
                 flush=True,
             )
 
@@ -413,18 +424,22 @@ class ComposeEnvironment:
                 *mounts,
                 "--tmpfs",
                 "/bundle",
-                "busybox:1.37.0-musl",
+                CONFIGURATION_IMAGE,
                 "sh",
                 "-ec",
                 "tar -xf - -C /bundle; "
                 "for category in application observability database proxy hydra gol-secrets registry-secrets worker-secrets; do "
                 'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
-            input_bytes=configuration_archive(),
+            input_bytes=configuration_archive(
+                streaming=any(
+                    service in self._images for service in ("vision", "intake")
+                )
+            ),
         )
 
     async def start_core(self) -> None:
-        """Starts infrastructure plus Gateway, Registry, and Intake."""
+        """Starts the control plane and the selected scenario entry points."""
         print("E2E stage: starting Registry and SpiceDB", flush=True)
         await _run(
             (
@@ -438,18 +453,19 @@ class ComposeEnvironment:
             environment=self._environment,
             timeout_seconds=1200.0,
         )
-        print("E2E stage: starting Gateway and Intake", flush=True)
+        services = ("gateway", "hydra", "kratos", "studio") + tuple(
+            service
+            for service in ("intake", "scribe")
+            if service in self._images
+        )
+        print(f"E2E stage: starting {', '.join(services)}", flush=True)
         await _run(
             (
                 *self._command,
                 "up",
                 "--detach",
                 "--wait",
-                "gateway",
-                "intake",
-                "hydra",
-                "kratos",
-                "studio",
+                *services,
             ),
             environment=self._environment,
             timeout_seconds=1200.0,
@@ -493,6 +509,8 @@ class ComposeEnvironment:
 
     async def start_vision(self) -> None:
         """Starts Vision before provisioning to exercise publication waiting."""
+        if "vision" not in self._images:
+            raise AssertionError("Vision must be declared in the Bazel runtime")
         print("E2E stage: starting Vision", flush=True)
         await _run(
             (*self._command, "up", "--detach", "vision"),

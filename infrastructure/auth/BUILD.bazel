@@ -6,3 +6,9 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "pipeline_e2e_configuration",
+    srcs = ["hydra.yaml", "identity.schema.json", "kratos.yaml"],
+    visibility = ["//tests/e2e:__pkg__"],
+)

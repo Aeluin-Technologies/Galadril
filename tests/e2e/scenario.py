@@ -8,9 +8,10 @@ import json
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from empirical_data import RetailRow, TrialRow
+if TYPE_CHECKING:
+    from empirical_data import RetailRow, TrialRow
 
 DataType = Literal["sales", "returns"]
 ADMIN = "e2e-admin"

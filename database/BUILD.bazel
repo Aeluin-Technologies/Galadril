@@ -126,3 +126,12 @@ expand_template(
     ],
     visibility = ["//database/tests:__pkg__"],
 )
+
+filegroup(
+    name = "pipeline_e2e_initialization",
+    srcs = [
+        "docker-entrypoint-initdb.d/003-install-extensions.sh",
+        "docker-entrypoint-initdb.d/004-create-galadril-app.sh",
+    ],
+    visibility = ["//tests/e2e:__pkg__"],
+)

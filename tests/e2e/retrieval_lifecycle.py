@@ -18,7 +18,7 @@ from clients import (
 )
 from hotpot_benchmark import evaluate_hotpot, load_hotpot
 from official_memory import compare_memory, load_memory
-from pengolo import _mutation, _upload
+from pengolo_library import _mutation, _upload
 from retrieval_benchmark import Benchmark, recall_at
 from upstream_retrieval import compare_upstream
 
