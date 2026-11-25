@@ -191,11 +191,19 @@ async def _completed(
     *,
     actor: str = UPLOADER_ID,
     temporary: bool = False,
-) -> dict[str, object] | None:
+) -> dict[str, object]:
     page = await _events(gateway, identifier, actor=actor, temporary=temporary)
-    if page.get("status") in {"failed", "cancelled"}:
-        raise GenerationFailure(f"Pengolo generation is terminal: {page}")
-    return page if page.get("status") == "completed" else None
+    status = page.get("status")
+    if status == "completed":
+        return page
+    count = len(require_sequence(page.get("events"), "Pengolo events"))
+    if status in {"failed", "cancelled"}:
+        raise GenerationFailure(
+            f"Pengolo generation {status} after {count} events"
+        )
+    if status in {"pending", "running"}:
+        raise RuntimeError(f"Pengolo generation {status}, events={count}")
+    raise GenerationFailure("Pengolo returned an unknown generation status")
 
 
 def _graph_unavailable(page: Mapping[str, object]) -> bool | None:
@@ -778,17 +786,15 @@ async def exercise_pengolo(
         },
         "key",
     )
-    plan = json.dumps(
-        {
-            "entity_id": state.entity_id,
-            "causal_entity_id": causal,
-            "question": "Review the operational evidence",
-            "pengolo": True,
-        }
-    )
+    plan = {
+        "entity_id": state.entity_id,
+        "causal_entity_id": causal,
+        "question": "Review the operational evidence",
+        "pengolo": True,
+    }
     base: dict[str, object] = {
         "idempotencyKey": str(uuid.uuid4()),
-        "prompt": plan,
+        "prompt": json.dumps(plan),
         "modelAlias": "fixture",
         "graphContext": {"kind": "entity", "id": state.entity_id},
     }
@@ -883,13 +889,20 @@ async def exercise_pengolo(
         )
         >= 2
     )
-    first = await _object_mutation(gateway, "sendPengolo", base)
-    retry = await _object_mutation(gateway, "sendPengolo", base)
+    # The chatbot phase already exercises graph search and causal retrieval.
+    replay_request = {
+        **base,
+        "prompt": json.dumps({**plan, "calculator_only": True}),
+    }
+    first = await _object_mutation(gateway, "sendPengolo", replay_request)
+    retry = await _object_mutation(gateway, "sendPengolo", replay_request)
     assert _text(_object(first.get("chat")), "id") == _text(
         _object(retry.get("chat")), "id"
     )
-    await _denied(gateway, "sendPengolo", {**base, "prompt": "Changed payload"})
-    await _denied(gateway, "sendPengolo", base, actor=OUTSIDER_ID)
+    await _denied(
+        gateway, "sendPengolo", {**replay_request, "prompt": "Changed payload"}
+    )
+    await _denied(gateway, "sendPengolo", replay_request, actor=OUTSIDER_ID)
     generation_id = _text(_object(first.get("generation")), "id")
     # There is deliberately no subscription while the model continues running.
     page = await eventually(
@@ -919,6 +932,7 @@ async def exercise_pengolo(
     )
     assert metadata.get("reasoning_effort") == "medium"
     assert metadata.get("graph_context_received") is True
+    assert _object(answer).get("run_python") == 2
     chat_id = _text(_object(first.get("chat")), "id")
     chat = _object(
         (
@@ -980,7 +994,7 @@ async def exercise_pengolo(
         gateway,
         "sendPengolo",
         {
-            **base,
+            **replay_request,
             "idempotencyKey": str(uuid.uuid4()),
             "temporary": True,
             "withLibrary": True,
@@ -1000,7 +1014,11 @@ async def exercise_pengolo(
     transient = await _object_mutation(
         gateway,
         "sendPengolo",
-        {**base, "idempotencyKey": str(uuid.uuid4()), "temporary": True},
+        {
+            **replay_request,
+            "idempotencyKey": str(uuid.uuid4()),
+            "temporary": True,
+        },
     )
     temporary_chat = _text(_object(transient.get("chat")), "id")
     temporary_id = _text(_object(transient.get("generation")), "id")
