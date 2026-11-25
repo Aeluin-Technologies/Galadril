@@ -791,6 +791,25 @@ def test_eventually_propagates_terminal_pipeline_failure() -> None:
     asyncio.run(exercise())
 
 
+def test_eventually_keeps_progress_when_the_final_read_hits_the_deadline() -> (
+    None
+):
+    calls = 0
+
+    async def probe() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("observed generation running")
+        await asyncio.Event().wait()
+
+    with pytest.raises(AssertionError, match="observed generation running"):
+        asyncio.run(
+            eventually(probe, timeout_seconds=0.9, description="generation")
+        )
+    assert calls == 2
+
+
 def test_pipeline_failure_preserves_step_and_error() -> None:
     """Makes terminal actor failures actionable instead of timing out opaquely."""
     with pytest.raises(
@@ -816,12 +835,17 @@ def test_pipeline_failure_preserves_step_and_error() -> None:
             [None, ("causal", "failed", "effect denied")],
             "causal",
         ),
+        (
+            lambda: e2e_clients.read_trial_states(24),
+            [(0,), ("empirical_resolve", "failed", "effect denied")],
+            "empirical_resolve",
+        ),
     ],
 )
 def test_causal_observations_propagate_durable_failure(
     monkeypatch: pytest.MonkeyPatch,
     probe: Callable[[], Awaitable[object]],
-    rows: list[tuple[str, str, str] | None],
+    rows: list[tuple[object, ...] | None],
     step: str,
 ) -> None:
     """Separates a failed command from an incomplete causal observation."""
@@ -840,7 +864,7 @@ def test_causal_observations_propagate_durable_failure(
         async def fetchall(self) -> list[tuple[str, ...]]:
             return []
 
-        async def fetchone(self) -> tuple[str, str, str] | None:
+        async def fetchone(self) -> tuple[object, ...] | None:
             return next(responses)
 
     async def connect(*_: object) -> Connection:

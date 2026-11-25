@@ -21,22 +21,31 @@ async def eventually[T](
     deadline = time.monotonic() + timeout_seconds
     last_error: Exception | None = None
     while (remaining := deadline - time.monotonic()) > 0:
+        timeout = asyncio.timeout(remaining)
         try:
-            result = await asyncio.wait_for(operation(), timeout=remaining)
+            async with timeout:
+                result = await operation()
             # Empty pages and zero counts can be completed observations.
             if result is not None and result is not False:
                 return result
         except abort_on:
             raise
         except TimeoutError as error:
+            if timeout.expired() and last_error is not None:
+                break
             last_error = error
-            break
+            if timeout.expired():
+                break
         except Exception as error:
             last_error = error
         remaining = deadline - time.monotonic()
         if remaining > 0:
             await asyncio.sleep(min(0.5, remaining))
-    suffix = f"; last error: {last_error}" if last_error is not None else ""
+    suffix = (
+        f"; last error: {str(last_error) or type(last_error).__name__}"
+        if last_error is not None
+        else ""
+    )
     raise AssertionError(f"Timed out waiting for {description}{suffix}")
 
 

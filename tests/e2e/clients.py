@@ -590,6 +590,59 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
     )
 
 
+async def read_trial_states(
+    expected: int,
+) -> tuple[tuple[str, str, str, Mapping[str, object]], ...]:
+    """Reports a failed empirical command before waiting for its derived state."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT entity_id, event_id, state_value->>'source_field', state_value
+            FROM entity_states
+            WHERE tenant_id = %s AND state_value->>'label' = 'trial-participant'
+            """,
+            (TENANT_ID,),
+        )
+        rows = await cursor.fetchall()
+        outbox = await connection.execute(
+            "SELECT COUNT(*) FROM authz_outbox WHERE tenant_id = %s",
+            (TENANT_ID,),
+        )
+        outbox_row = await outbox.fetchone()
+        failures = await connection.execute(
+            """
+            SELECT step, status, error
+            FROM pipeline_executions
+            WHERE tenant_id = %s AND pipeline LIKE %s AND status = 'failed'
+              AND step IN ('empirical_infer', 'empirical_resolve', 'empirical_sink')
+            ORDER BY created_at
+            LIMIT 1
+            """,
+            (TENANT_ID, f"%/{PIPELINE_ID}/%"),
+        )
+        failure = await failures.fetchone()
+    if failure is not None:
+        require_pipeline_execution_not_failed((failure,))
+    if len(rows) > expected:
+        raise PipelineExecutionError("Vision duplicated randomized-trial rows")
+    if len(rows) < expected or outbox_row is None or int(outbox_row[0]) != 0:
+        pending = int(outbox_row[0]) if outbox_row is not None else -1
+        raise RuntimeError(
+            f"Trial progress: states={len(rows)}/{expected}, authz_outbox={pending}"
+        )
+    return tuple(
+        (
+            str(entity),
+            str(event),
+            str(source),
+            require_mapping(state, "trial state"),
+        )
+        for entity, event, source, state in rows
+    )
+
+
 async def read_causal_cohort() -> str | None:
     """Waits for resolved cohorts within Amarth's closed one-second buckets."""
     async with await psycopg.AsyncConnection.connect(

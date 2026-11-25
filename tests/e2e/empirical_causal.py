@@ -4,62 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
 from time import monotonic
 
 import networkx as nx
 import pandas as pd
-import psycopg
 import pytest
 from amarth.estimation.dowhy import DowhyEstimator
 from assertions import eventually, require_mapping
 from authentication import login_user
 from clients import (
-    POSTGRES_DSN,
     TENANT_ID,
     GatewayClient,
+    PipelineExecutionError,
     SpiceDBProbe,
     canonical_spicedb_object_id,
+    read_trial_states,
     upload_presigned,
 )
 from empirical_data import load_trial_rows, trial_estimate
 from environment import EMPIRICAL_STATE_TIMEOUT_SECONDS
 from scenario import ADMIN, encode_trial_rows
-
-
-async def _persisted_trial(
-    expected: int,
-) -> tuple[tuple[str, str, str, Mapping[str, object]], ...] | None:
-    """Waits for the complete cross-sectional cohort and replicated lineage."""
-    async with await psycopg.AsyncConnection.connect(
-        POSTGRES_DSN
-    ) as connection:
-        cursor = await connection.execute(
-            """
-            SELECT entity_id, event_id, state_value->>'source_field', state_value
-            FROM entity_states
-            WHERE tenant_id = %s AND state_value->>'label' = 'trial-participant'
-            """,
-            (TENANT_ID,),
-        )
-        rows = await cursor.fetchall()
-        outbox = await connection.execute(
-            "SELECT COUNT(*) FROM authz_outbox WHERE tenant_id = %s",
-            (TENANT_ID,),
-        )
-        outbox_row = await outbox.fetchone()
-    if len(rows) < expected or outbox_row is None or int(outbox_row[0]) != 0:
-        return None
-    assert len(rows) == expected, "Vision duplicated randomized-trial rows"
-    return tuple(
-        (
-            str(entity),
-            str(event),
-            str(source),
-            require_mapping(state, "trial state"),
-        )
-        for entity, event, source, state in rows
-    )
 
 
 async def exercise_empirical_causal(
@@ -102,9 +66,10 @@ async def exercise_empirical_causal(
     raw_key = f"{TENANT_ID}/raw/trial/{nonce}/{target}"
     assert promoted.get("completeUpload") == raw_key
     persisted = await eventually(
-        lambda: _persisted_trial(len(rows)),
+        lambda: read_trial_states(len(rows)),
         timeout_seconds=EMPIRICAL_STATE_TIMEOUT_SECONDS,
         description=f"{len(rows)} randomized-trial Vision states and drained authz outbox",
+        abort_on=(PipelineExecutionError,),
     )
     expected = {row.record_id: row for row in rows}
     observed: dict[int, tuple[float, float]] = {}
