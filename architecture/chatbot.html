@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-e2fd6958.js";
+            window.path_to_searchindex_js = "../searchindex-fa33da1d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-cfe238fb.js"></script>
+        <script src="../toc-ced387d4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -253,12 +253,11 @@ Framework payload and exception spans are disabled.</li>
 <li>Historical answers can contain previously authorized evidence. Recheck
 evidence visibility before feeding such history to a new run; until complete
 provenance exists, history sharing is restricted to its original actor.</li>
-<li>Amarth may use every required tenant input, regardless of the requesting
-user’s raw-data visibility. Access to a root causal result follows that
-entity’s view permission. Publish bounded root statistics, without input
-identities, source features, raw observations or the complete causal chain.
-Historical causal results are rechecked against root access independently
-of raw evidence permissions.</li>
+<li>Vision admits each causal observation and preserves its signed GOL
+provenance in the result. Gateway checks the requesting user’s root grant,
+the result fields, the original inputs and the information-flow policy
+before releasing bounded statistics. Conversation provenance references
+the exact result receipt so replay and prompt history use the same checks.</li>
 </ol>
 <h2 id="conversation-transitions"><a class="header" href="#conversation-transitions">Conversation transitions</a></h2>
 <p><code>idle -&gt; pending -&gt; completed | failed</code>. Reservation and user message insertion
@@ -292,7 +291,7 @@ Exercise the framework’s real tool loop with a deterministic test model and re
 PostgreSQL under the application role. Run all tests through Bazel.</p>
 <p>The pipeline lifecycle E2E ends with the real private runtime and an independent
 OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
-check users with and without evidence access, root-only causal access, ABAC,
+check users with full evidence access and root-only grants, ABAC,
 revocation and cursor replay after client disconnection. Model quality and Mac
 performance require separate evaluation using the selected real model.</p>
 <h2 id="specialist-agents-and-local-tools"><a class="header" href="#specialist-agents-and-local-tools">Specialist agents and local tools</a></h2>

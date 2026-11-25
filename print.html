@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-e2fd6958.js";
+            window.path_to_searchindex_js = "searchindex-fa33da1d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-cfe238fb.js"></script>
+        <script src="toc-ced387d4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2499,12 +2499,11 @@ Framework payload and exception spans are disabled.</li>
 <li>Historical answers can contain previously authorized evidence. Recheck
 evidence visibility before feeding such history to a new run; until complete
 provenance exists, history sharing is restricted to its original actor.</li>
-<li>Amarth may use every required tenant input, regardless of the requesting
-user’s raw-data visibility. Access to a root causal result follows that
-entity’s view permission. Publish bounded root statistics, without input
-identities, source features, raw observations or the complete causal chain.
-Historical causal results are rechecked against root access independently
-of raw evidence permissions.</li>
+<li>Vision admits each causal observation and preserves its signed GOL
+provenance in the result. Gateway checks the requesting user’s root grant,
+the result fields, the original inputs and the information-flow policy
+before releasing bounded statistics. Conversation provenance references
+the exact result receipt so replay and prompt history use the same checks.</li>
 </ol>
 <h2 id="conversation-transitions"><a class="header" href="#conversation-transitions">Conversation transitions</a></h2>
 <p><code>idle -&gt; pending -&gt; completed | failed</code>. Reservation and user message insertion
@@ -2538,7 +2537,7 @@ Exercise the framework’s real tool loop with a deterministic test model and re
 PostgreSQL under the application role. Run all tests through Bazel.</p>
 <p>The pipeline lifecycle E2E ends with the real private runtime and an independent
 OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
-check users with and without evidence access, root-only causal access, ABAC,
+check users with full evidence access and root-only grants, ABAC,
 revocation and cursor replay after client disconnection. Model quality and Mac
 performance require separate evaluation using the selected real model.</p>
 <h2 id="specialist-agents-and-local-tools"><a class="header" href="#specialist-agents-and-local-tools">Specialist agents and local tools</a></h2>
@@ -3545,14 +3544,16 @@ BLAS and ONNX pools default to two threads to limit oversubscription. The envelo
 protects the rest of the VM but cannot guarantee that every model combination
 fits. Quantization quality, peak resident memory and latency require the live
 model benchmark on the deployment architecture before changing the default.</p>
-<p>Eru’s <code>OpenInformationPipeline</code> supports open predicates for HippoRAG 2. A Registry
-<code>OntologySlice</code> can accompany private extraction requests; pipeline blocks can also
-use their existing task-bound Registry slice. The policy uses stable <code>link_type</code>
-resource IDs and their <code>source_type</code>/<code>target_type</code> attributes. Endpoint types and
-predicates are validated against that vocabulary after structured generation;
-unlisted or ungrounded triples are rejected. An explicitly empty ontology remains
-closed. Eru consumes authorized Registry projections and never substitutes a
-locally invented ontology or treats extracted names as resolved ESKG identities.</p>
+<p>Eru’s <code>OpenInformationPipeline</code> supports open predicates for HippoRAG 2. A data-only
+GOL authorized projection can accompany private extraction requests; pipeline
+blocks consume the server-admitted generation projection. Binary relation
+vocabulary uses canonical selectors and explicitly named <code>source</code> and <code>target</code>
+roles. N-ary or differently named roles are not inferred from reference order.
+Unlisted or ungrounded triples are rejected after generation. An explicitly empty
+projection remains closed. Python performs no import resolution or semantic GOL
+compilation, and extracted names do not establish ESKG identities. Runtime handles
+and admissions are excluded from extraction payloads; Vision checks transfer
+obligations before inference and write obligations before persistence.</p>
 <p>The first local use downloads public weights; prewarm the cache for offline operation.
 The embedding weights alone require approximately 4 GiB in BF16; provision additional
 memory for loading, activations, extraction and reranking. Prewarm the new
@@ -4261,86 +4262,190 @@ rights on each expansion. Server validation supplies the authoritative expanded
 block count before YAML export. The exported definition preserves references;
 internal forwarding blocks and provenance are never authored by the browser.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="ontology-and-pipeline-registry"><a class="header" href="#ontology-and-pipeline-registry">Ontology and pipeline Registry</a></h1>
-<p>Registry is the single persistence and semantic authority for tenant ontologies,
-pipelines, publications, and pipeline-to-ontology bindings. Gateway and Vision
-use the versioned <code>galadril.registry.v1.Registry</code> gRPC contract. Neither service
-receives lakeFS credentials, repository names, object paths, or storage
-namespaces.</p>
-<p>Registry maps each validated tenant identity to an opaque, server-owned lakeFS
-repository and path. lakeFS stores immutable revisions while S3 remains the
-physical object store. A lakeFS commit ID is returned unchanged as an opaque
-Registry revision ID and is used for optimistic writes, publication pinning,
-and reproducible Vision execution.</p>
-<p>Tenant lifecycle is also owned by Registry. Internal callers may validate
-a bounded, explicitly supplied list against Registry-owned S3 markers. Empty
-validation requests are rejected. A separate paginated <code>ListTenants</code> RPC discovers
-initialized tenants within Registry’s configured storage namespace; proxy policies
-reserve it to Intake and Vision, excluding Gateway and public callers. Shared Rust
-and Python clients own pagination, cursor checks, and tenant identity validation.
-Reads fail closed for missing tenants; artifact insertions
-initialize the server-derived S3 marker and lakeFS repository when necessary.
-The tenant deletion RPC requires an exact repeated tenant ID and exists solely
-for irreversible GDPR erasure of both lakeFS metadata and physical S3 objects.</p>
-<p>The current service deliberately contains no mTLS or application authentication
-implementation. A deployment proxy will authenticate service identities and
-authorize these internal RPCs; Registry still validates every payload and
-storage-derived identity instead of treating the future proxy as input
-validation.</p>
-<h2 id="semantic-ownership"><a class="header" href="#semantic-ownership">Semantic ownership</a></h2>
-<p>For every immutable revision, Registry reconstructs the ontology graph and
-pipeline DAG from the stored artifact state. Its canonical Rust implementation:</p>
-<ul>
-<li>validates resource identities, kinds, owners, links, and value types;</li>
-<li>resolves inheritance, interfaces, references, and dependency closures;</li>
-<li>detects cycles, dangling references, and incompatible inherited properties;</li>
-<li>validates pipeline nodes, edges, step types, and ontology bindings;</li>
-<li>performs resource-aware semantic diffs and three-way merges.</li>
-</ul>
-<p>Inheritance and interface edges form a directed acyclic graph. For example,
-<code>object.pilot</code> may extend <code>object.person</code>: the effective Pilot type inherits
-<code>property.person.name</code> and adds its own
-<code>property.pilot.flight_history</code>. Dependency-closed slices include the selected
-type, its ancestors, and properties owned by each type, so Vision receives the
-complete effective contract without implementing inheritance itself.</p>
-<p>Semantic merges never invoke lakeFS file-level merge. A successful merge is
-validated and committed as a new Registry revision; a conflicting merge returns
-structured conflicts without changing storage. Derived graphs may be cached by
-revision ID, but the cache is disposable because every graph is reconstructible
-from its immutable revision.</p>
-<h2 id="ownership-boundaries"><a class="header" href="#ownership-boundaries">Ownership boundaries</a></h2>
-<p>Gateway authenticates users, applies SpiceDB and Cedar authorization, preserves
-PostgreSQL RLS, and records audit/access events. Audit rows may refer to opaque
-Registry revisions, but PostgreSQL does not persist ontology or pipeline
-artifacts.</p>
-<p>Vision workers discover tenants and deployed pipelines automatically through
-Registry, with optional explicit restrictions for isolated workers. Block-local
-ontology slices remain pinned by tenant, pipeline, block, and immutable pipeline
-revision. They retain the
-FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.</p>
-<h2 id="ontology-collaboration"><a class="header" href="#ontology-collaboration">Ontology collaboration</a></h2>
-<p>Registry records ontology operations in immutable tenant revisions. Draft
-branches fork a named parent and keep a common ancestor for three-way semantic
-merge. A merge updates the parent draft. Only explicit publication activates a
-main revision for runtime use. Branch and history metadata live outside the
-semantic definition, so they do not affect the published content hash.</p>
-<p>Gateway checks the ontology’s view permission for history and revision reads,
-edit permission for branch operations, and delete permission for removal. A
-native ontology can be removed from the catalog and restored as a draft.
-Registry rejects removal of plugin-derived ontologies and models referenced
-by active bindings or another current model. Historical pins remain readable
-by authorized callers. History is paginated per ontology and returns opaque
-revision IDs without exposing lakeFS storage coordinates.</p>
-<p>Deploy the Gateway reader before enabling the Registry writer for the additive
-<code>authoring</code> field in persisted state. Older readers reject unknown state fields.
-Deploy Studio after both services support the collaboration API.</p>
-<h2 id="initialization-boundary"><a class="header" href="#initialization-boundary">Initialization boundary</a></h2>
-<p>This architecture has not been deployed, so there is no legacy data importer
-and Registry contains no legacy database read path. Prototype state is discarded;
-ontologies, pipelines, publications, and bindings are authored afresh through
-Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
-prototype migration is removed; Gateway migrations contain only audit/access
-and unrelated application tables.</p>
+<h1 id="registry-gol-lifecycle"><a class="header" href="#registry-gol-lifecycle">Registry GOL lifecycle</a></h1>
+<p>Registry owns GOL source packages, compilation and activation. A package is
+identified by a qualified primary module name. It may contain companion
+modules, but must declare its primary identity. The authored files are UTF-8
+<code>.gol</code> objects in lakeFS; the catalog stores paths and authoring metadata, not
+another ontology representation. Pipeline definitions and collaboration remain
+independent of this migration.</p>
+<p>Ordinary catalog, pipeline and binding reads open only metadata. Raw sources
+are fetched explicitly for one admitted package at an immutable source
+revision. Pipeline updates retain source objects without restaging them. A
+syntax-only module/import inventory supports dependency deletion guards; it
+never substitutes for the GOL compiler or turns an unfinished draft into a
+validated model.</p>
+<p><code>SaveGolOntology</code> accepts unfinished source text. It enforces relative paths,
+unique filenames, at most 32 files, 1 MiB per source and 4 MiB per assembled
+compilation. Updates require the immutable tenant revision returned by a prior
+read. Source revisions are lakeFS tenant commits: unrelated pipeline edits can
+advance the current revision without changing the GOL text.</p>
+<p>Each write stages on a private lakeFS branch created from the expected immutable
+revision. Its committed state is merged into the tenant branch without a forced
+conflict strategy. A shared write witness changes on every Registry commit,
+including disjoint pipeline/source edits, so concurrent writes conflict rather
+than interleaving their staging areas. Source paths include the fingerprint of
+the complete normalized source package; reading or staging source bytes verifies
+that fingerprint. This keeps the catalog and its <code>.gol</code> objects consistent.
+These operations use the <a href="https://github.com/treeverse/lakeFS/blob/v1.88.0/api/swagger.yml">pinned lakeFS 1.88.0 API</a>.</p>
+<p>Private branches are deleted after success or failure with a bounded cleanup
+request. Cleanup failures are logged separately from the result of an already
+visible commit. An interrupted process can leave an unmerged private branch;
+it does not activate source changes and requires operational cleanup. Tenant
+writes must all pass through Registry for the shared witness to cover them.</p>
+<p><code>ValidateGolOntology</code> invokes the shared GOL parser, semantic analysis and
+security compiler. It returns stable error codes, filenames and half-open UTF-8
+byte spans. No imported text is opened as a local path or fetched from a
+caller-selected URL. Imported modules must have an active publication in the
+same tenant, under their primary module identity. Their immutable source
+revisions and generations are captured explicitly. GOL performs version and
+type checks over the assembled sources.</p>
+<p>The approved module-owner map resolves companion modules to their source
+package. It also prevents one package from redeclaring a module owned by
+another package. Imports are admitted incrementally: Registry parses the
+already authorized source files and requests authorization for the next source
+package before opening it. Gateway applies the conservative source-authoring
+gate to every requested package. Only a complete, immutable dependency plan can
+reach semantic compilation. A changed generation, source revision or authority
+profile invalidates that plan before imported diagnostics are produced. This
+currently requires management access to imported sources; a separate public
+compiled-import contract is not implemented.</p>
+<p>A cyclic publication dependency that reintroduces an older generation of the
+root package is refused with <code>gol::publication_cycle</code>. This is an operational
+publication conflict, not a GOL syntax or type error. Cyclic business relations
+and imports between approved companion modules in one package remain valid.
+Atomic publication across multiple packages is not implemented.</p>
+<p><code>PublishGolOntology</code> compiles that exact source revision into <code>.golc</code>, stages
+and verifies the archive, then activates it with a manifest compare-and-swap.
+The source revision, dependency generations, module versions and private symbol
+candidates are committed in that same manifest update. The RustFS manifest is
+the sole active-generation authority; lakeFS never stores a competing active
+pointer. A failed compiler, unresolved external approval, upload or CAS cannot
+activate a partial generation.</p>
+<p>Before activation, Registry rechecks the authenticated publisher’s current
+SpiceDB permission and provisions only that actor’s reserved <code>__schema</code>
+relationships. These tuples grant metadata access subject to tenant, ontology,
+Cedar and IFC checks. They do not grant instance access or mailbox ownership.
+Failure leaves the staged generation inactive.</p>
+<p>Deletion first removes catalog membership at an optimistic lakeFS commit, then
+deactivates the RustFS generation. Publishers recheck source membership between
+staging and activation. Deactivation fences earlier staged writers, including
+an initial publication whose expected generation is absent. Existing reader
+handles retain their bounded lease; a new reader cannot reopen a retired
+generation and prolong its retention. Pipeline bindings block source deletion.</p>
+<h2 id="approved-host-configuration"><a class="header" href="#approved-host-configuration">Approved host configuration</a></h2>
+<p>Publication requires the backend-only <code>GolAuthorityConfig</code>. Its fields pin the
+relationship schema, object-ID bridge, Cedar schema and policies, operation
+routes, IFC baseline and module floors, sinks, projected Cedar attributes and
+external adapters. Permission names come from the approved relationship schema
+snapshot, including separate permissions such as <code>mailbox_owner</code>; they are not
+inferred as grants from serialization traits or source declarations.
+The shipped sources use local permission names <code>read_access</code> and <code>write_access</code>
+because <code>read</code> and <code>write</code> are reserved effect keywords. Their external SpiceDB
+permissions and Cedar action identifiers remain <code>read</code> and <code>write</code>.</p>
+<p>Source authors cannot submit this configuration. Missing approvals leave
+publication unavailable. There is no generated permit policy, implicit
+clearance grant or fallback from a field permission to generic <code>read</code>.
+Owner-specific Cedar resource types are derived from the complete logical
+symbol identity, while approved action identifiers can be shared by multiple
+resource types.</p>
+<p>The service loads the approved JSON file from <code>GOL_AUTHORITY_CONFIG_PATH</code> and
+uses <code>GOL_ARTIFACT_BUCKET</code> for unversioned compiled artifacts. That bucket must
+be distinct from the lakeFS source bucket. Credentials and storage coordinates
+stay in trusted service configuration.</p>
+<p>GOL source declares the business types, constraints and security obligations.
+The deployment configuration supplies the trusted authorities, context and
+destination ceilings used to check those obligations.</p>
+<p><code>infrastructure/gol</code> contains the explicit deployment profile and fingerprints
+of its relationship schema, bridge, Cedar schema and policies. Its authoring
+floor is distinct from the caller’s clearance. External LLM transfer is limited
+to Internal data for extraction or classification; an internal read never grants that transfer.
+The E2E profile has a different fingerprint and deliberately does not require
+location, because the real test OIDC issuer does not attest it. Production
+requires the trusted location context and denies access when it is absent.</p>
+<h2 id="runtime-boundary"><a class="header" href="#runtime-boundary">Runtime boundary</a></h2>
+<p>Pipeline bindings record an indivisible ontology/source/generation/symbol
+selection at an immutable pipeline revision. Registry checks that each
+binding in a release and its transferred steps points to an active GOLC
+generation with the recorded source provenance. The managed workflow repeats
+that check at deployment. Removing an ontology also checks deployed revisions
+and their transitive references, even after the corresponding draft changes.
+<code>GetRuntimePipeline</code> admits only
+the tenant’s current deployed root revision. A managed pipeline must reach
+deployment before its release is visible through this RPC. A caller selecting
+a draft, a replaced deployment or a deleted root receives <code>NOT_FOUND</code>.</p>
+<p><code>GetGolBinding</code> takes that deployed root and a step ID in its compiled graph.
+Registry resolves transferred steps to their compiler-owned origin and reads
+the exact binding from that origin’s immutable revision. The root keeps this
+pin across child updates. Gateway checks live execution permissions on both
+the root and the binding’s owning pipeline, then uses the common sparse reader
+and compiled security contract to admit metadata and data access. The RPC and
+the manifest candidate list are private backend interfaces.</p>
+<p>Vision sends GOL floating-point values as JSON numbers and integers as exact
+decimal strings. Gateway uses this representation for worker schema projection
+and authorized proposal validation, including for fields inside lists and
+optional types. A worker write uses the instance’s own write authority. It must
+provide all required fields of the canonical GOLC value, including any fields
+outside the requested metadata projection.</p>
+<p>An admitted write batch fixes its effects before the transaction begins.
+The ESKG sink prepares typed proposals for the event, entities, edges, states,
+and embeddings before opening the transaction.</p>
+<p>New effect receipts carry signed worker lineage, including the original actor,
+raw object revision, and immutable pipeline and ontology pins. Receipt version
+3 encodes repeated dependency fields once under the existing 64 KiB transport
+limit. Version 2 receipts still verify their value binding and can inform
+authorized reads. They lack the origin evidence required for re-admission.</p>
+<p>Vision can submit a receipt as lineage on the authenticated worker channel.
+Gateway checks the actor, raw object and pipeline again before issuing a bounded
+admission scoped to the requested command’s published block. The calculation
+starts from the receipt’s IFC label, and opening its contract rechecks the
+signed dependencies. The worker receipt and provenance fields are stripped from
+generic graph and search projections. A durable completed result still requires
+its original live release scope for replay.</p>
+<p>Kafka entry commands and successors carry a signed handoff created inside the
+live <code>pipeline_dispatch</code> release. The proof binds the tenant, source, published
+pipeline, destination block and command ID. The consumer exchanges it for a
+fresh admission before claiming the command, so the queue time doesn’t consume
+the new calculation’s permit. Live authorization still governs the broker
+publish and each effect of the resumed calculation.</p>
+<p>Every GOL RPC additionally requires the Gateway-only credential loaded from
+<code>REGISTRY_GATEWAY_KEY_PATH</code> or the client’s explicit <code>gateway_key_file</code>.
+Missing credentials leave those RPCs unavailable, including on the local
+loopback proxy. Pipeline discovery remains a separate workload capability.
+The deployment mounts the 32-byte credential only into Gateway and Registry;
+the E2E harness generates an isolated key rather than checking one into source
+control. This authenticates the backend channel, while Gateway remains
+responsible for the user and context supplied across it.</p>
+<p>For Docker, provision a 32-byte file at
+<code>GALADRIL_REGISTRY_GATEWAY_KEY_PATH</code> before starting Registry and Gateway. Bind
+mounts refuse to create an absent credential path. Kubernetes expects the
+<code>registry-gateway-key</code> secret with a <code>gateway-key</code> entry, mounted only in those
+two deployments. Runtime effect receipts use a separate <code>gol-effect-key</code> secret;
+an absent effect key disables effects without granting a read bypass. Do not
+reuse either key as a SpiceDB credential.</p>
+<p>The services accept only their documented container mount paths for GOL
+configuration and credentials. Change the host-side mount source to select a
+different file. The mount remains read-only inside the container, including
+for Kubernetes projected volumes that rotate files through symlinks.</p>
+<p>Gateway and Vision additionally share a separate 32-byte workload key via
+<code>GOL_WORKER_KEY_PATH</code>. Docker uses <code>GALADRIL_GOL_WORKER_KEY_PATH</code>; Kubernetes
+expects <code>gol-worker-key</code> with a <code>worker-key</code> entry. Only Gateway and Vision mount
+it. The internal runtime/effect HTTP routes require this credential in addition
+to their workload and computation admission checks. Registry, browser clients
+and plugins never receive it. Production service identity controls remain in
+force; a local loopback address is not treated as proof of workload identity.</p>
+<p>The logical authenticated tenant is distinct from the safe storage namespace.
+Hashing a tenant into an object-key segment never changes the tenant checked
+by the runtime gate.</p>
+<h2 id="explicit-limits"><a class="header" href="#explicit-limits">Explicit limits</a></h2>
+<p>Source and artifact activation span different stores. A source-delete commit
+can succeed before artifact deactivation fails; Registry returns an error and
+the operation must be retried, rather than claiming a completed deletion.
+Publication metadata is bounded by the 64 KiB operational manifest. Oversized
+catalogs fail explicitly instead of silently dropping candidate names.
+Generation leases are bounded; processing must finish within its admitted
+snapshot lifetime. There is no unbounded artifact history, compatibility JSON
+ontology model, parser in Vision, or executable action implementation here.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="gol-canonical-model"><a class="header" href="#gol-canonical-model">GOL canonical model</a></h1>
 <p><code>galadril-ontology</code> is the Cargo library for the Galadril Ontology Language
@@ -4402,7 +4507,7 @@ types belongs to semantic analysis.</p>
 <p>Registry still owns tenant context, immutable revisions, and publication.
 An <code>OntologyVersion</code> is the version declared by GOL, while Registry and ESKG
 pin server-owned immutable revisions in the existing tenant-scoped contract.
-A future integration must map these explicitly. See <a href="#ontology-and-pipeline-registry">Registry</a>
+A future integration must map these explicitly. See <a href="architecture/ontology.html">Registry</a>
 and the <a href="#eskg-graph-contract-v1">ESKG contract</a>.</p>
 <h2 id="external-types-and-security"><a class="header" href="#external-types-and-security">External types and security</a></h2>
 <p>The host explicitly registers an <code>ExternalTypeDescriptor</code> keyed by an exact
@@ -5390,6 +5495,209 @@ Rust formatting, strict all-target/all-feature Clippy, Cargo regression tests
 and parser-free export builds passed. Workspace nightly formatting reports
 pre-existing differences in the Gateway IAM/directory files.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-dashboard-and-public-api"><a class="header" href="#gol-dashboard-and-public-api">GOL dashboard and public API</a></h1>
+<p>The ontology workspace uses GOL source files as its only authoring model. Registry
+owns parsing, semantic validation, security compilation and publication. The
+browser does not deserialize a parallel semantic document or parse YAML.</p>
+<h2 id="authoring-and-disclosure"><a class="header" href="#authoring-and-disclosure">Authoring and disclosure</a></h2>
+<p>Opening an existing ontology first requests the authorized catalog and a compiled
+symbol projection. Full source is requested only by the explicit <strong>Edit GOL</strong>
+action. Its server admission requires the complete source-authoring authority and
+IFC floor; an edit capability hint grants no source access. A source file’s <code>path</code>
+is a logical package name, never an instruction to open a filesystem path.</p>
+<p>The source editor supports multiple files, immutable source revisions, precise
+compiler diagnostics and compare-and-swap saves. Invalid syntax can be saved for
+correction. Validation uses the saved source revision; any subsequent edit
+invalidates the publication review. Publishing reviews the exact validated source
+package and activates a complete generation through Registry. Draft creation and
+publication remain separate operations.</p>
+<p>Compiler diagnostic spans are UTF-8 byte ranges. The browser maps them to complete
+Unicode characters and UTF-16 textarea selections without reinterpreting GOL.</p>
+<h2 id="runtime-exploration"><a class="header" href="#runtime-exploration">Runtime exploration</a></h2>
+<p><code>golOntologySymbols</code> returns <code>{generation, symbols}</code>. Every symbol, property name,
+property type and reference is authorized by the server. The graph draws edges
+only between endpoints present in that projection. JSON Schema previews use its
+exact generation and an explicit selection of authorized properties. The standard,
+OpenAI strict and Outlines profiles reuse the shared projection engine.</p>
+<p>No browser cache grants access. Session changes, access invalidation and KeepAlive
+deactivation cancel requests and discard source, diagnostics, names and schemas.
+Request epochs prevent cancelled responses from restoring stale data. Browser
+error messages exclude dependency details and protected metadata.</p>
+<h2 id="api-contract"><a class="header" href="#api-contract">API contract</a></h2>
+<p>The typed GraphQL queries are <code>golOntologies</code>, <code>golOntologyCanManage</code>,
+<code>golOntologyWorkspace</code>, <code>golOntologySymbols</code> and <code>golOntologySchema</code>. The source
+lifecycle mutations are <code>saveGolOntology</code>, <code>validateGolOntology</code>,
+<code>publishGolOntology</code> and <code>deleteGolOntology</code>. <code>bindGolOntology</code> captures a published
+generation in a pipeline draft; <code>ontologyBindings</code> returns GOL symbol selections
+with generation and source provenance.</p>
+<p>A workspace contains <code>summary</code>, source <code>files</code>, <code>diagnostics</code> and resolved
+<code>dependencies</code>. A summary separates <code>sourceRevision</code> from <code>activeGeneration</code> and
+<code>activeSourceRevision</code>. Validation returns <code>valid</code>, <code>invalid</code> or
+<code>pending_authority</code>; correct syntax alone never proves security approval.</p>
+<h2 id="verification-5"><a class="header" href="#verification-5">Verification</a></h2>
+<p><code>//front/dashboard:ontology_contract_test</code> checks transport validation, source
+preservation, generation pins and Unicode diagnostic positions.
+<code>//front/dashboard:ontology_browser_test</code> uses explicit API fixtures to check UI
+behavior, access cleanup, accessibility and desktop/mobile layouts. Those fixtures
+are UI contract coverage, not interservice evidence.</p>
+<p><code>//tests/e2e:gol_lifecycle_test</code> uses the shipped dashboard, real Gateway, Registry,
+RustFS, lakeFS, Ory and SpiceDB. It exercises invalid imports, source publication,
+generation pinning, authorized JSON Schema, live permission revocation and
+deletion. It never intercepts GraphQL. Docker and deployment security configuration
+are required; a skipped or unavailable environment is not a passing E2E result.</p>
+<p>The source-first editor expresses entities, relations, imports, security contracts,
+actions and other supported GOL syntax. Specialized visual construct editors are
+not additional ontology definitions. Structured JSON remains subject to GOL
+invariant, reference and authorization checks before ingestion.</p>
+<p>The real-service browser profile is explicitly separate from the production
+location policy. Its authority bundle includes the Gateway clock and verified MFA
+facts, and does not declare a location fact: the existing Ory browser flow does
+not issue a trusted <code>region</code> claim. Registry and Gateway use the same test bundle
+and its own authority fingerprint. This test does not establish geolocation
+behavior. The production profile continues to refuse metadata operations when a
+required signed location is absent; missing-context checks remain covered by the
+shared security-engine tests.</p>
+<p>The browser transport currently supplies <code>mfa_verified = false</code> conservatively.
+It does not elevate an assurance claim into a verified MFA fact. Policies that
+require MFA therefore remain unavailable through this transport, including when
+MFA is optional for the tenant. Extending that support requires an explicit
+revocable credential-generation check; the existing session check only requires
+that proof when tenant MFA is mandatory. Background work cannot invent or reuse
+an MFA fact from caller JSON.</p>
+<p>Graph results preserve a <code>GraphGolReference</code> containing <code>tenantId</code>, <code>ontologyId</code>,
+<code>ontologyVersion</code>, <code>sourceRevision</code>, <code>generationId</code>, <code>symbolKey</code> and <code>symbolKind</code>.
+Entity, event and latent-identity nodes reference GOL entities; state and causal
+variable nodes reference an explicit <code>module::Entity.field</code>. These tuples are
+checked lexically at the graph boundary and still require live metadata admission.
+A source revision, a module version and a compiled generation are separate pins.</p>
+<p>New source drafts include explicit <code>access Example</code> contracts using local
+<code>read_access</code> and <code>write_access</code> names bound to the deployment’s external <code>read</code>
+and <code>write</code> permissions. Bare <code>read</code> and <code>write</code> are reserved effect keywords in
+GOL and cannot name local permissions. The starter also declares describe,
+transfer and execute bindings. Registry still checks the complete approved
+profile; these authored declarations grant no relationship or user access.</p>
+<p>Catalog listings and their local search are bounded to 100 authorized summaries;
+there is no invented pagination cursor. A known ontology URL obtains its symbol
+projection directly when its summary falls outside that catalog window. A fallback
+name and generation are displayed only after a nonempty authorized projection.
+This path never loads raw source for a reader.</p>
+<p>A failed source save retains both the local draft and its original comparison
+revision. Refreshing runtime metadata does not rebase the draft. Authors may
+explicitly review the latest protected workspace beside their local sources,
+then keep their draft against that reviewed revision. This action only selects a
+new comparison baseline: a later save still uses compare-and-swap, and validation
+must run again before publication. No ontology branch or merge engine is created.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="runtime-invariant-validation"><a class="header" href="#runtime-invariant-validation">Runtime invariant validation</a></h1>
+<p>The checked expression model lives in <code>galadril_ontology::checked</code>. The semantic
+compiler and syntax operator paths re-export the same types, preserving existing
+callers and expression archive records. Runtime builds with <code>archive</code>, <code>export</code>,
+and <code>remote</code> do not need the parser to validate an admitted proposal.</p>
+<h2 id="contracts-in-compiled-archives"><a class="header" href="#contracts-in-compiled-archives">Contracts in compiled archives</a></h2>
+<p>Each entity, struct, and relation has an explicit <code>v/{owner}</code> contract, including
+owners with no predicates. The contract pins the ontology version and retains
+checked invariant bodies in deterministic definition-name order. Type aliases
+are normalized only in these contracts; the original canonical declarations and
+<code>e/{expression}</code> records retain their identities and encoding.</p>
+<p><code>ArchiveReader::invariant_contract</code> and <code>RemoteArchive::invariant_contract</code> first
+reuse the existing live read/write gate. They check the exact owner and version,
+verify the authenticated block, and bound the byte range before fetching the
+payload. A missing or corrupt contract is unavailable, never an empty invariant
+set. Denial and integrity failure share the same public result. These methods
+return private compiler metadata to trusted validation code; an HTTP or GraphQL
+handler must not expose the contract, predicate names, or paths to clients.</p>
+<h2 id="admitted-facts-and-supported-expressions"><a class="header" href="#admitted-facts-and-supported-expressions">Admitted facts and supported expressions</a></h2>
+<p><code>validation::Bindings</code> supplies facts already verified by the host. Field lookup
+receives the complete sequence of owner-pinned members and the explicit base,
+which distinguishes two occurrences of the same struct and different relation
+roles. Context facts come from a trusted component. The evaluator neither
+traverses references nor performs I/O to obtain missing values.</p>
+<p>The pure evaluator supports Boolean, character, string, exact Rust integer widths,
+finite floating-point values, and nominal enum equality. Integer operations are
+checked, including narrow-width overflow and division by zero. Floating-point
+arithmetic rejects nonfinite results; floating-point ordering is unsupported.
+Both operands of Boolean operations are checked, so a true disjunction cannot
+hide a missing binding or unsupported dependency. Strings and enum variants are
+borrowed during evaluation.</p>
+<p>An unresolved reference, direct role, action parameter/result, optional value,
+collection, or external comparison returns a structured rejection. A field
+reached from a role can be supplied by the host using the complete role base and
+path. Serialization does not confer comparison capabilities. The host’s shape
+validator establishes enum membership and admissible JSON representations;
+<code>Contract::check</code> independently requires exact scalar types and enum identities.</p>
+<h2 id="bounds-and-failure-behavior"><a class="header" href="#bounds-and-failure-behavior">Bounds and failure behavior</a></h2>
+<p>The defaults are hard ceilings: 64 KiB encoded payload, 64 nested JSON containers
+and AST/type constructors, 4,096 structural nodes/operators/path members, and
+8,192 evaluation steps. Trusted callers may lower the ceilings. Bounded text
+comparisons also consume execution steps. The JSON container bound can reject
+an expression before it reaches the AST depth bound because enum encodings add
+containers. The official <code>serde_json</code> recursion limit remains enabled.</p>
+<p>Decoding allocates bounded contract storage. Checking borrows that storage and
+host values without allocating intermediate values. This does not establish a
+real-time latency guarantee for remote reads, external policy engines, host fact
+resolution, or the surrounding application. OTLP tracing records the invariant
+check span without recording values or private predicate names.</p>
+<h2 id="host-obligations"><a class="header" href="#host-obligations">Host obligations</a></h2>
+<p>A passing invariant is not authorization to modify an instance. The host must
+still verify live SpiceDB and Cedar obligations, IFC dependencies and destination
+constraints, tenant and generation pins, reference existence, authorized current
+state, and the atomic effect boundary. A host must refuse missing bindings and
+unsupported capabilities; it cannot convert an unavailable contract into an
+unconditional acceptance.</p>
+<p>These checks prove neither all GOL business rules nor non-interference of every
+Galadril computation. External adapter comparisons, general functions, action
+execution, recursive graph evaluation, and automatic reference traversal remain
+outside this bounded kernel.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gol-worker-effect-boundary"><a class="header" href="#gol-worker-effect-boundary">GOL worker effect boundary</a></h1>
+<p>Gateway admits a calculation only after authenticated upload authorization. Its
+input is bound to the final immutable raw-object key, the staged ETag and trusted
+S3 metadata. The source channel’s deployment floor initializes <code>current_label</code>;
+IAM clearance is only its ceiling. Missing channel approvals deny admission.
+Interactive MFA is not inferred from device trust or renewed by a worker request.</p>
+<p>An opaque admission retains one computation through fan-out, retries and block
+changes. Registry supplies the exact published pipeline/block binding. An open
+reader keeps its generation; a calculation cannot silently substitute another
+generation of the same package or dependency.</p>
+<h2 id="actual-io"><a class="header" href="#actual-io">Actual I/O</a></h2>
+<p>A worker submits its complete effect batch before opening the transaction or
+external call. Gateway holds the calculation’s exclusion guard from admission
+until completion. Every host path that can observe an input acquires the same
+guard. All batch inputs and outcome labels are joined before checking writes, so
+a later read cannot invalidate an earlier public-write precheck.</p>
+<p>The Python protected scope encloses the actual SQL transaction, Kafka publication
+or HTTP stream. A nested operation can reuse an outer scope only when its entire
+operation, target, destination, purpose, instance and proposed value already occur
+in the admitted batch. It cannot extend that batch or reenter the host lock.</p>
+<p>Failure, cancellation or an expired 30-second permit invalidates the calculation
+before releasing its guard. This does not roll back an effect already committed
+by another system. It prevents an uncertain outcome from continuing in a fresh,
+lower-labeled context. Admissions expire after 15 minutes and are process-local;
+Gateway restarts or routing to a different replica fail closed. Resumable
+cross-replica calculation state is not implemented.</p>
+<h2 id="revocation-and-values"><a class="header" href="#revocation-and-values">Revocation and values</a></h2>
+<p>Every new effect rechecks current IAM, raw-source ownership/version, pipeline
+permission, the complete retained dependency set, and the active GOL security
+contract. A cached or filtered projection cannot erase old dependencies.</p>
+<p>HMAC receipts bind tenant, logical type, instance, generation, source revision,
+complete JSON value, IFC flow and original dependency obligations. They attest
+provenance, never an authorization decision. Reading a receipt still requires
+current permissions and destination checks. The separate deployment signing key
+is required; it is not derived from public ontology fingerprints.</p>
+<p>New instance grants use source-scoped identifiers and an atomic SpiceDB
+<code>MUST_NOT_MATCH</code> precondition. Existing relationships are never touched, including
+when ingestion retries after revocation. Resolved shared identities retain their
+own grants. Typed ingestion values must remain immutable on replay; generic
+instance patching needs authoritative current state and is not implemented here.</p>
+<h2 id="conservative-limits"><a class="header" href="#conservative-limits">Conservative limits</a></h2>
+<p>Cross-owner traversals without authoritative instance bindings, opaque shared
+native state without complete provenance, and executable action requests are
+refused. A source channel or caller assertion cannot reclassify that state.
+Mixed-classification compound writes can be refused after the conservative batch
+join; this boundary does not prove independent dependencies between those writes.</p>
+<p>This documents the worker boundary, not completion of all service migration.
+The final workspace build and interservice E2E acceptance remain separate checks.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pipeline-and-ontology-workspaces"><a class="header" href="#pipeline-and-ontology-workspaces">Pipeline and ontology workspaces</a></h1>
 <p>The application shell owns the viewport. Workspaces constrain their flex/grid
 children with <code>min-height: 0</code> and scroll inside their content panels; the document
@@ -5425,26 +5733,21 @@ revision is rejected rather than substituted with main.</p>
 and the per-change review progression in
 <a href="https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/reviewing-proposed-changes-in-a-pull-request">GitHub’s review workflow</a>.
 Exact configuration remains available under advanced details.</p>
-<h2 id="ontology-access-and-navigation"><a class="header" href="#ontology-access-and-navigation">Ontology access and navigation</a></h2>
-<p><code>/ontology</code> lists authorized organization ontologies and isolated plugin originals.
-<code>/ontology/new</code> prepares a tenant draft, optionally from a selected package.
-<code>/ontology/edit/[id]</code> opens an existing tenant ontology. The editor’s return link
-points to all ontologies. The email shortcut is labelled “Email ontology” and
-retains its ontology-creation permission check.</p>
-<p>Global search combines its static ontology shortcut with a separate authorized
-ontology catalog request. Dynamic results have bounded canonical internal paths,
-are cancelled when superseded, and are cleared on account, tenant or access
-invalidation. An unavailable graph search does not erase ontology results.
-An unavailable plugin catalog or unrelated pipeline permission does not prevent
-opening an authorized custom ontology. These presentation changes introduce no
-new execution or ontology management permissions.</p>
-<p>Gateway’s Compose default now matches its application default: Scribe is enabled
-unless explicitly disabled. <code>/plugin-ontologies</code> is routed through Gateway’s egress
-proxy and allowed only for Gateway’s authenticated GET catalog policy, including
-the Kubernetes equivalent. POST remains denied. Apply the updated configuration
-and proxy policies to running deployments; editing source does not update existing
-containers.</p>
-<h2 id="verification-scope"><a class="header" href="#verification-scope">Verification scope</a></h2>
+<h2 id="gol-access-and-navigation"><a class="header" href="#gol-access-and-navigation">GOL access and navigation</a></h2>
+<p>The ontology catalog and editor now use the <a href="#gol-dashboard-and-public-api">GOL dashboard contract</a>.
+<code>/ontology</code> lists authorized GOL publications, <code>/ontology/new</code> creates a source
+package and <code>/ontology/edit/[id]</code> explores one compiled generation. Full source
+authoring requires a separate explicit action and server disclosure admission.
+The removed ontology branches, YAML documents and plugin overlays are not retained.</p>
+<p>Global search uses the authorized GOL catalog. Dynamic results have bounded
+canonical internal paths, are cancelled when superseded, and are cleared on
+account, tenant or access invalidation. Unrelated graph-search failures do not
+erase successfully authorized ontology results.</p>
+<h2 id="pipeline-workspace-verification-history"><a class="header" href="#pipeline-workspace-verification-history">Pipeline workspace verification history</a></h2>
+<p>The following measurements predate the GOL replacement. They are historical
+pipeline-workspace evidence and do not validate the current GOL implementation.
+Current GOL test targets and evidence boundaries are documented separately in
+<a href="#gol-dashboard-and-public-api">the GOL dashboard contract</a>.</p>
 <p>BuildBuddy remote execution passed the affected Registry domain/unit tests,
 Compose and Envoy contracts, and the real Envoy proxy integration test. The
 production frontend target <code>//front/dashboard:pipeline_workspace_browser_test</code>
@@ -5490,137 +5793,149 @@ writes add this optional field. Older Registry binaries using strict unknown-fie
 rejection cannot read that new metadata; coordinate the Registry rollout before
 creating new branches. Do not rewrite immutable history to facilitate a downgrade.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="plugin-ontologies-and-tenant-overlays"><a class="header" href="#plugin-ontologies-and-tenant-overlays">Plugin ontologies and tenant overlays</a></h1>
-<p>Plugins ship semantic definitions, not tenant business identities. The Utils
-<code>utils.mail</code> package contains five linked modules: people and addresses, message
-content and signatures, attachments, threads, and messages. Sender, recipient,
-copy and blind-copy relationships initially target the package’s own person type.
-No tenant type is selected by name or imported automatically.</p>
-<h2 id="authoring-and-execution"><a class="header" href="#authoring-and-execution">Authoring and execution</a></h2>
-<p>Open <strong>Ontologies</strong> from the pipeline catalog, or <strong>Email data model</strong> from email
-settings. The workspace separates plugin originals from organization ontologies.
-It provides type search, property tables and a relationship graph using Galadril’s
-amber controls. Users can inspect originals; tenant administrators can create
-their own types and properties, review a plugin overlay, and save a tenant copy.</p>
-<p>To connect recipients to an existing business type, select a published tenant
-ontology and its object type for the recipient relationship. Other roles remain
-isolated unless separately selected. Preview and save both recompute the result
-on the server from the trusted package, exact package version and authorized,
-immutable target revision. Only the selected types and Registry’s dependency
-closure are imported. Unknown slots, non-object targets, collisions, dangling
-references and invalid semantic graphs are rejected without changing storage.</p>
-<p>Saving, publishing and binding are separate actions:</p>
-<ol>
-<li>Save a draft with compare-and-swap against the captured tenant head. A stale
-head fails instead of overwriting another author’s work.</li>
-<li>Publish the reviewed ontology through Registry’s existing production lifecycle.</li>
-<li>Select a pipeline and an executable block. One Registry authoring command saves
-the new <code>ontology_required</code> draft and its semantic selector atomically. Review,
-publish and deploy that draft through the pipeline lifecycle.</li>
-</ol>
-<p>Binding never redeploys a pipeline. Registry publication rejects a required block
-without a binding. A binding rejection, stale revision or failed storage commit
-leaves both the existing definition and its bindings unchanged. Older Registry
-servers reject the new command instead of silently applying half the operation.
-Deployed evidence keeps its original tenant/ontology/revision/resource identity.</p>
-<h2 id="ownership-and-authorization"><a class="header" href="#ownership-and-authorization">Ownership and authorization</a></h2>
-<ul>
-<li>Registry retains validation, snapshots, bindings and publication authority.</li>
-<li>Gateway verifies membership for catalogs and resource visibility for pinned
-reads. Creation requires <code>create_ontology</code> on the tenant, editing requires
-<code>edit</code> on the ontology, and publication requires <code>publish</code>. Binding requires
-pipeline editing and ontology visibility. Every decision uses SpiceDB and Cedar.</li>
-<li>The email shortcut starts a new tenant copy and appears only after its
-<code>create_ontology</code> check succeeds. Failed or unavailable checks keep it hidden;
-the same decision is independently enforced by Gateway writes.</li>
-<li>Save and binding audit events remain distinct from publication events.</li>
-<li>Overlay provenance records plugin/module versions, explicit participant mappings
-and the selected target revision. Original package files are never modified.</li>
-<li>A tenant-local copy does not change another tenant’s same-named ontology.</li>
-<li>Bcc’s <code>mailbox_owner</code> annotation documents intended visibility; it is not an
-authorization policy. Existing mailbox and sending policy checks still apply.</li>
-</ul>
-<h2 id="operational-mail-data"><a class="header" href="#operational-mail-data">Operational mail data</a></h2>
-<p>This feature provides editable semantic definitions and runtime binding. It does
-not automatically extract people, recognize signatures, resolve real identities,
-or materialize all historical mail as ESKG instances. Such extraction must be an
-explicit pipeline operation with its own provenance and authorization checks.</p>
-<p>The email settings view continues to use the mailbox’s operational store for
-pagination, drafts, send state and IMAP/SMTP idempotency. The direct data-model
-link opens the same ontology workspace; there is no second ontology editor.
-Replacing that store with graph-backed message instances would require a separate
-migration, not merely a different frontend query.</p>
-<h2 id="quality-evidence"><a class="header" href="#quality-evidence">Quality evidence</a></h2>
-<p>All Bazel tests and coverage actions use BuildBuddy remote execution, with local
-fallback disabled for mutation runs. Quality tools use an isolated source snapshot
-and existing private tool installation, without adding project dependencies.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Changed function</th><th>Before CC / coverage / CRAP</th><th>After CC / coverage / CRAP</th></tr>
-</thead>
-<tbody>
-<tr><td>Python package validation <code>bounded</code></td><td>11 / 72.2% / 13.6</td><td>4 / 100% / 4.0</td></tr>
-<tr><td><code>_module_resource_ids</code></td><td>Part of <code>bounded</code></td><td>6 / 100% / 6.0</td></tr>
-<tr><td><code>_package_resource_ids</code></td><td>Part of <code>bounded</code></td><td>4 / 100% / 4.0</td></tr>
-<tr><td>Rust <code>materialize</code></td><td>40 / unavailable / unavailable</td><td>10 / 97.1% / about 10.0</td></tr>
-<tr><td><code>package_resources</code></td><td>Part of <code>materialize</code></td><td>9 / 100% / 9.0</td></tr>
-<tr><td><code>target_resources</code></td><td>Part of <code>materialize</code></td><td>6 / 100% / 6.0</td></tr>
-<tr><td><code>rebind_participant</code></td><td>Part of <code>materialize</code></td><td>6 / 100% / 6.0</td></tr>
-<tr><td><code>resource_id</code></td><td>Part of <code>materialize</code></td><td>1 / 100% / 1.0</td></tr>
-<tr><td>Atomic <code>bind_ontology_draft</code></td><td>New</td><td>5 / 100% / 5.0</td></tr>
-<tr><td>Authoring command dispatcher</td><td>36 / unavailable / unavailable</td><td>38 / 100% / 38.0</td></tr>
-</tbody>
-</table>
-</div>
-<p>Coverage comes from the scoped Bazel LCOV reports for <code>ontologies_test</code> and
-<code>registry_test --test_arg=plugin_ontology::tests</code>, mapped to the tested sources.
-The retained <code>materialize</code> score slightly exceeds 10 before rounding: it
-coordinates validation and ownership boundaries, including fallible Rust <code>?</code>
-operations. Keeping those steps together preserves the semantic transaction.
-The existing authoring dispatcher remains above 30: it handles the bounded
-Save/Branch/Proposal/Merge/Approve/Publish/Deploy state machine and now delegates
-binding to the small helper. Its measured complexity increased from 36 to 38;
-the domain suite reports 100% LCOV coverage. This is a retained review exception,
-not a claim that line coverage proves every state-machine path.</p>
-<p>Mutation tests initially found five surviving Python mutations. Exact byte and
-resource boundaries plus malformed-resource cases killed all nine initial sites.
-After separating validation responsibilities, all eight available Python sites
-are killed. The three available Rust sites initially had two survivors: missing
-owned properties and incorrect reference replacement. Tests now assert both, and
-all three mutations are killed. These are completed failing tests, not build or
-infrastructure errors counted as kills. The mutator does not instrument every
-Rust macro guard; the percentages apply only to the selected sites.</p>
-<p>The new atomic binding helper has three additional targeted mutation sites.
-One initially survived because the fixture did not distinguish dependency
-closure from selection of all structural types. A referenced function outside
-that selector now proves the closure is retained; all three sites are killed.
-Seven older dispatcher sites were excluded by the explicit line filter; the
-tool’s <code>UNCOVERED</code> label for these unselected sites is not a coverage result.
-The PostgreSQL rollback scenario uses a real deferred constraint-trigger failure;
-SQL statements themselves are outside this mutator’s operator set.</p>
-<p>Frontend parser, browser, accessibility and responsive tests exercise the user
-flows. Function-level frontend coverage and CRAP remain unavailable: browser
-success alone is not a coverage measurement. The tool aggregates nested Vue
-callbacks under their composable, which must be considered when reading its
-complexity output. Scoped Dryer analysis at similarity 0.8 found no duplication
-candidates in the new ontology validation, materialization and frontend modules;
-this is not a monorepo-wide duplication claim.</p>
-<p>Tool revisions: Crapper <code>6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d</code>, Mutator
-<code>a5a0cb803b66e0cdb8bf471b3b08af701d424a41</code>, Dryer
-<code>66ff6d21a42c04afcad89c78a80066176d1294b0</code>. Mutations use one worker, existing
-coverage and a BuildBuddy-only test adapter, with infrastructure failures reviewed
-separately.</p>
-<p>Targeted BuildBuddy checks passed for Registry, Gateway, the packaged plugin
-bundle, Utils, Vision execution, ontology parsing, pipeline/ontology browser
-scenarios, accessibility, localization, UI type checking, lint and formatting.
-Clippy passed with all targets/features and warnings denied; changed Python
-files passed Ruff. Changed Rust files passed nightly rustfmt checking.</p>
-<p>The whole-workspace Bazel gate and Gazelle runners remain blocked by Linux host
-tool binaries being invoked on macOS (<code>coreutils</code>/runner <code>Exec format error</code>).
-Whole-workspace <code>cargo fmt --check</code> also reports formatting in untouched files.
-These checks are not reported as passing. The full lifecycle E2E run is tracked
-separately; targeted test success does not establish a passing full lifecycle.</p>
+<h1 id="plugin-gol-sources"><a class="header" href="#plugin-gol-sources">Plugin GOL sources</a></h1>
+<p>Law and Utils ship bounded <code>.gol</code> source files. Their manifests contain package
+identity/version, source paths, capability requirements and optional editor binding
+metadata. The catalog transports <code>files: [{path, text}]</code>; it contains no JSON
+ontology graph. Python neither parses GOL nor resolves imports or inheritance.
+Registry uses the shared Rust compiler to validate and publish these sources.
+Imports use explicit module aliases to avoid collisions between local labels and
+imported type names. Local permissions are <code>read_access</code> and <code>write_access</code> because
+<code>read</code> and <code>write</code> are reserved GOL words; their external bindings remain <code>read</code>
+and <code>write</code>.</p>
+<p>The Law modules are <code>law.socle</code>, <code>law.ecritures</code>, <code>law.moyens</code>, <code>law.preuves</code>,
+<code>law.contentieux</code>, <code>law.administratif</code>, <code>law.judiciaire</code> and <code>law.penal</code>. Previously
+inherited fields are explicit declarations in the authored branch sources. They
+do not assert an unsupported GOL subtype relationship. Legal
+fields carry Restricted classification and the Legal compartment. Authenticated
+identities remain external to those business types.</p>
+<p>Utils provides <code>communication.people</code>, <code>communication.content</code>,
+<code>documents.attachments</code>, <code>communication.threads</code> and <code>communication.mail</code>. Its
+Instant import is an explicit registered external contract, <code>gal.time.Instant</code>
+version 1.0.0. Sender/to/cc/bcc mapping slots and address role metadata are plugin
+editor hints, not authorization policies or another ontology model. Changing a
+mapping requires editing and validating GOL through Registry. Bcc visibility must
+also be enforced by the admitted security profile; editor metadata grants no access.</p>
+<p>Capability contracts use canonical selectors such as
+<code>communication.mail::Message</code>. Source-level imports pin module versions. Only
+Registry resolves those imports and records compiled generation dependencies.
+Install and publish Law dependencies before their importing packages. Registry
+returns a dependency-unavailable diagnostic when an approved module/version is
+missing; the Python catalog does not fetch or flatten those modules.</p>
+<p>Installing sources, publishing them, and binding a pipeline block remain separate
+authorized operations. There is no historical JSON overlay materializer.</p>
+<h1 id="runtime-consumption"><a class="header" href="#runtime-consumption">Runtime consumption</a></h1>
+<p>Vision opens <code>/internal/gol/runtime</code> through the configured trusted Gateway
+endpoint. A dedicated opaque admission, minted at an authenticated workload
+boundary, is required in addition to tenant, pipeline revision and block identity.
+Kafka attributes and caller-supplied classifications cannot create admissions.
+Gateway finalization replaces source metadata with <code>authz-gol-admission</code>. Intake
+transports it in the dedicated Avro Authz field; Vision removes it from ordinary
+record payloads and passes it only in the command admission field. Runtime requests
+also bind <code>sourceObjectId</code> to <code>raw:</code> plus the exact S3 key, preserving percent
+encoding. A mismatch with Intake’s trusted resource is rejected. Missing admission
+fails closed. The response contains authorized symbol descriptors
+and JSON Schema projections pinned to one generation, never full source or IR.</p>
+<p>The Python <code>galadril_ontology</code> package contains transport DTOs and an HTTP client.
+It has no semantic ontology model, compiler, import resolver, storage reader, or
+security decision engine. An active scope retains an opaque server calculation;
+a ContextVar is transport plumbing and proves no isolation. The Gateway retains
+IFC provenance across related steps and rechecks live policies before effects.</p>
+<p>ESKG keeps its existing Entity/Event/State and structural relation vocabulary.
+Business classifications record module, exact version, source revision, generation,
+symbol selector and GOL kind. Entity and Event refer to GOL entities; State refers
+to a GOL field. Existing evidence cannot be relabeled by a later generation.
+The database sink requires explicit <code>gol_symbol_key</code>, <code>gol_event_symbol_key</code>,
+<code>gol_edge_symbol_key</code>, <code>gol_entity_state_symbol_key</code>, and <code>gol_embedding_symbol_key</code>
+parameters. Each item supplies an explicit <code>gol_value</code>; the record supplies its
+event <code>gol_value</code>. Utils emits typed Person and Message values alongside ESKG
+metadata. The sink submits every exact value for trusted host validation and fresh
+effect admission before opening its database client. Proposals are bounded to
+128 KiB. Unknown invariants remain a host validation refusal. Generic inference
+adapters must provide an explicit mapping instead of guessing ontology fields.</p>
+<p>Eru derives extraction vocabulary solely from the authorized projection. Binary
+relation extraction uses explicitly named <code>source</code> and <code>target</code> roles; it never
+infers direction from reference order. Unsupported n-ary relations are excluded
+from that binary extraction vocabulary. Scribe receives data-only projections:
+server context handles and admissions never enter model prompts. Evidence memory
+requires transfer permission before inference and write permission before storage.</p>
+<h1 id="verification-boundaries"><a class="header" href="#verification-boundaries">Verification boundaries</a></h1>
+<p>Python unit tests check source transport, bounds, immutable generation references,
+missing admissions, revocation and the absence of sensitive sink effects after a
+refusal. They do not substitute for the shared Rust semantic/security tests or
+interservice tests with the real authorization and storage engines. In particular,
+a JSON Schema or an extraction vocabulary proves neither business invariants nor
+permission to execute an action or ingest a proposed instance.</p>
+<p>Evidence indexing requires <code>gol_derived_symbol_key</code> identifying an authorized
+derived declaration whose value shape is <code>{source_id, facts}</code>. Facts contain
+<code>subject</code>, <code>predicate</code>, and <code>object</code>; the host must validate the declared contract
+and applicable invariants. Missing or incompatible contracts refuse persistence.
+Index metadata retains generation/source/context provenance separately from the
+business value. This does not constitute a transaction spanning Gateway and SQL;
+the server conservatively retains the effect destination label before returning
+a receipt, including failed outcomes.</p>
+<h1 id="effect-and-release-provenance"><a class="header" href="#effect-and-release-provenance">Effect and release provenance</a></h1>
+<p>The Gateway–Vision channel additionally requires an operator-owned 32-byte worker
+credential at <code>GOL_WORKER_KEY_PATH</code>. It is distinct from job admission and receipt
+signing keys. Gateway verifies the unique worker header before parsing a request;
+a browser holding a job handle cannot act as the dispatcher. Plugins and browser
+containers do not receive this file. The Vision client reads the bounded file for
+each call so key rotation is not an indefinite cached grant.</p>
+<p>Every actual write supplies its exact business proposal and logical instance ID.
+An <code>allowed</code> response without a signed receipt is insufficient for persistence.
+ESKG stores <code>gol_value</code> and <code>gol_receipt</code> as system provenance, separate from
+business fields. The signature binds the instance, target, generation, source
+revision, value digest and information-flow restrictions. A receipt establishes
+integrity and provenance; it does not replace fresh authorization. Context handles,
+admissions and receipts must be removed before public serialization or prompts.</p>
+<p>New receipts group field obligations by ontology, instance, revision and
+operation. The signed representation retains every logical dependency and is
+limited to 4,096 dependencies and 64 KiB on the worker transport. Gateway
+continues to read earlier signed receipts and rechecks their original obligations.</p>
+<p>Shared vector, identity and causal state require <code>gol_state_symbol_key</code>; derived
+writes additionally require <code>gol_derived_symbol_key</code>. Missing routes refuse I/O
+before a SQL transaction or native mutation. When native state lacks complete
+permission provenance, a conservative classification floor is necessary but does
+not prove access to the underlying dependencies. Such results must remain
+unreleasable unless the host establishes every required dependency.</p>
+<p>Each pipeline step declares <code>gol_transfer_symbol_key</code> for broker release. Results,
+lineage, successors, retries and dead letters each receive a fresh <code>transfer</code>
+check against destination <code>kafka</code>, purpose <code>pipeline_dispatch</code>, before publication.
+A cached completion retains its original admission and immutable execution tuple;
+authorizing a new filtered projection cannot authorize old cached field contents.
+Gateway must revalidate the calculation’s entire historical dependency set,
+including fields no longer present in a new projection. A refusal after durable
+completion does not turn the operation into a failed execution or rerun its writes.
+Malformed ingress has no verified release scope, so its raw payload and parser
+errors are not copied to a quarantine topic. Cron events without a trusted source
+admission are also refused; a timer is not proof of independent provenance.</p>
+<p>The Gateway decision and SQL/Kafka effect are separate operations. A revocation
+between their completion cannot be made transactionally atomic by this adapter.
+The tests distinguish transport and sink-boundary unit cases from actual
+interservice authorization tests. Native engine and production image verification
+also require hermetic dependency builds; failing dependency construction is not a
+successful E2E test and must be reported separately.</p>
+<h1 id="retained-effect-scopes"><a class="header" href="#retained-effect-scopes">Retained effect scopes</a></h1>
+<p>A permission precheck does not protect a later SQL, HTTP or Kafka operation from
+concurrent changes to the calculation label. Workers use <code>protected_gol_effects</code>
+for one bounded batch, or its single-effect and shared-state helpers. The host
+retains the admission’s exclusion gate from <code>begin</code> until the worker reports
+completion after the actual I/O. Every effect and exact proposed value is checked
+before that batch starts. Required write receipts are returned in the same order.
+An <code>Allow</code> without a permit cannot reach a sink.</p>
+<p>Failure or cancellation reports unsuccessful completion; missing completion and
+permit expiry invalidate the admission before the host releases its gate. No
+client can reset that computation. A nested adapter may reuse only an exact
+previously approved effect, including operation, target, destination, purpose,
+instance, proposal and receipt. It cannot extend a live batch. This exclusion
+boundary protects calculation provenance; it is not a transaction spanning
+SpiceDB, Gateway, PostgreSQL and Kafka.</p>
+<p>New event and evidence-memory identities are scoped to the admitted raw source:
+<code>gol:&lt;sha256(sourceObjectId)&gt;:&lt;sha256(localId)&gt;</code>. Existing resolved entity IDs
+remain unchanged and require existing authority and signed provenance. A missing
+permission cannot be repaired by taking ownership of an existing instance.
+Memory indexing does not prune prior units whose independent deletion obligations
+are not established by the write batch.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="mutation-consistency-boundaries"><a class="header" href="#mutation-consistency-boundaries">Mutation consistency boundaries</a></h1>
 <p>This audit follows the mutation families exposed by Gateway’s GraphQL schema
@@ -5712,13 +6027,13 @@ The AGE label and the API <code>kind</code> are the same structural kind:</p>
 <tr><th>Kind</th><th>Meaning</th><th>Optional ontology resource kind</th></tr>
 </thead>
 <tbody>
-<tr><td><code>Entity</code></td><td>Authoritative identity of an observed physical entity</td><td><code>object_type</code></td></tr>
-<tr><td><code>Event</code></td><td>Immutable observation or occurrence</td><td><code>event_type</code></td></tr>
-<tr><td><code>State</code></td><td>A property observation of an entity at an event time</td><td><code>property</code></td></tr>
-<tr><td><code>LatentIdentity</code></td><td>Unresolved identity hypothesis</td><td><code>object_type</code></td></tr>
+<tr><td><code>Entity</code></td><td>Authoritative identity of an observed physical entity</td><td><code>entity</code></td></tr>
+<tr><td><code>Event</code></td><td>Immutable observation or occurrence</td><td><code>entity</code></td></tr>
+<tr><td><code>State</code></td><td>A property observation of an entity at an event time</td><td><code>field</code></td></tr>
+<tr><td><code>LatentIdentity</code></td><td>Unresolved identity hypothesis</td><td><code>entity</code></td></tr>
 <tr><td><code>Inference</code></td><td>Evidence-backed interpretation</td><td>none</td></tr>
 <tr><td><code>Decision</code></td><td>Identity-resolution decision</td><td>none</td></tr>
-<tr><td><code>CausalVariable</code></td><td>A measured variable used by causal inference</td><td><code>property</code></td></tr>
+<tr><td><code>CausalVariable</code></td><td>A measured variable used by causal inference</td><td><code>field</code></td></tr>
 <tr><td><code>Metric</code></td><td>Operational metric, outside the base ESKG</td><td>none</td></tr>
 </tbody>
 </table>
@@ -5727,19 +6042,31 @@ The AGE label and the API <code>kind</code> are the same structural kind:</p>
 kinds. Extractor strings may be retained as <code>observed_type</code> or <code>event_type</code>;
 they confer no ontology membership. An unclassified instance has no ontology
 reference. <code>Person</code> would describe an object type, not a property.</p>
-<p>An optional <code>ontology_ref</code> is an indivisible record containing <code>tenant_id</code>,
-<code>ontology_id</code>, <code>revision_id</code>, <code>resource_id</code>, and <code>resource_kind</code>. The revision
-is the opaque immutable Registry revision, never a display name, ontology
-version string, pipeline revision, or floating production publication.
-The producer resolves the resource from its active block-local Registry slice,
-checks its resource kind and tenant, and copies the revision from that slice.
-Missing resources, partial references, and incompatible kinds fail closed.
-Reinterpreting evidence under a new revision must not rewrite its old reference.</p>
-<p>The Vision sink accepts <code>ontology_resource_id</code> and
-<code>event_ontology_resource_id</code> parameters; resolved items may additionally carry
-their own <code>ontology_resource_id</code>. These identifiers must be included in the
-sink block’s Registry binding. The sink derives all other reference fields from
-the active slice; callers cannot select a different revision through a payload.</p>
+<p>An optional <code>ontology_ref</code> is an indivisible GOL provenance record containing
+<code>tenant_id</code>, <code>ontology_id</code>, <code>ontology_version</code>, <code>source_revision</code>, <code>generation_id</code>,
+<code>symbol_key</code>, and <code>symbol_kind</code>. The generation pins the compiled artifact;
+module version and source revision are separate identities. Selectors use
+<code>module::Name</code> or <code>module::Name.field</code>. The producer derives all provenance from
+its admitted Gateway descriptor, never a caller-selected revision. Existing
+references remain immutable when a later generation becomes active.</p>
+<p>The Vision sink uses <code>gol_symbol_key</code> and <code>gol_event_symbol_key</code> for the
+business entity and event. It uses <code>gol_edge_symbol_key</code>,
+<code>gol_entity_state_symbol_key</code>, and <code>gol_embedding_symbol_key</code> for the
+relationship, state observation, and embedding projections. Each selector
+must resolve to an admitted symbol in the deployed generation.
+Resolved items may select a different <code>gol_symbol_key</code> only when that exact target
+is in the admitted projection and its live write obligations succeed. GOL entity
+classifications apply to both structural Entity and Event; field classifications
+apply to structural State and CausalVariable. This does not add GOL declarations
+for ESKG’s structural machinery.</p>
+<p>Business values are explicit <code>gol_value</code> objects, separate from structural
+resolution metadata. The sink submits these exact values for host validation; it
+does not infer fields or discard unknown values to fit a schema.</p>
+<p>The sink prepares the event, entity, relationship, state, and embedding
+proposals before acquiring a single Gateway permit. The PostgreSQL transaction,
+including the authorization outbox, runs while that permit is held. A missing
+or revoked admission prevents persistence. The server retains calculation IFC
+provenance across retries and related steps.</p>
 <h2 id="relations"><a class="header" href="#relations">Relations</a></h2>
 <p>Relation labels are a closed structural vocabulary. Direction is significant.
 Both endpoints and the edge belong to the same tenant. A mutation succeeds only
@@ -5795,7 +6122,7 @@ currently exposed; causal and hypothesis provenance need their own policy.</p>
 CausalVariable vertices. State observations remain in TimescaleDB; transition
 and identity-hypothesis graph materialization are not implemented by this change.
 Keeping those roles in the vocabulary does not assert that their facts exist.</p>
-<p>The architecture is not deployed (see <a href="#ontology-and-pipeline-registry">Registry initialization</a>).
+<p>The architecture is not deployed (see <a href="architecture/ontology.html">Registry initialization</a>).
 Prototype graphs with business labels or arbitrary edges are incompatible with
 v1 and must be recreated explicitly from source evidence. Readers do not guess
 structural kinds from old labels, and no automatic destructive reset is run.

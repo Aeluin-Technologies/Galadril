@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-e2fd6958.js";
+            window.path_to_searchindex_js = "../searchindex-fa33da1d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-cfe238fb.js"></script>
+        <script src="../toc-ced387d4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -194,13 +194,13 @@ The AGE label and the API <code>kind</code> are the same structural kind:</p>
 <tr><th>Kind</th><th>Meaning</th><th>Optional ontology resource kind</th></tr>
 </thead>
 <tbody>
-<tr><td><code>Entity</code></td><td>Authoritative identity of an observed physical entity</td><td><code>object_type</code></td></tr>
-<tr><td><code>Event</code></td><td>Immutable observation or occurrence</td><td><code>event_type</code></td></tr>
-<tr><td><code>State</code></td><td>A property observation of an entity at an event time</td><td><code>property</code></td></tr>
-<tr><td><code>LatentIdentity</code></td><td>Unresolved identity hypothesis</td><td><code>object_type</code></td></tr>
+<tr><td><code>Entity</code></td><td>Authoritative identity of an observed physical entity</td><td><code>entity</code></td></tr>
+<tr><td><code>Event</code></td><td>Immutable observation or occurrence</td><td><code>entity</code></td></tr>
+<tr><td><code>State</code></td><td>A property observation of an entity at an event time</td><td><code>field</code></td></tr>
+<tr><td><code>LatentIdentity</code></td><td>Unresolved identity hypothesis</td><td><code>entity</code></td></tr>
 <tr><td><code>Inference</code></td><td>Evidence-backed interpretation</td><td>none</td></tr>
 <tr><td><code>Decision</code></td><td>Identity-resolution decision</td><td>none</td></tr>
-<tr><td><code>CausalVariable</code></td><td>A measured variable used by causal inference</td><td><code>property</code></td></tr>
+<tr><td><code>CausalVariable</code></td><td>A measured variable used by causal inference</td><td><code>field</code></td></tr>
 <tr><td><code>Metric</code></td><td>Operational metric, outside the base ESKG</td><td>none</td></tr>
 </tbody>
 </table>
@@ -209,19 +209,31 @@ The AGE label and the API <code>kind</code> are the same structural kind:</p>
 kinds. Extractor strings may be retained as <code>observed_type</code> or <code>event_type</code>;
 they confer no ontology membership. An unclassified instance has no ontology
 reference. <code>Person</code> would describe an object type, not a property.</p>
-<p>An optional <code>ontology_ref</code> is an indivisible record containing <code>tenant_id</code>,
-<code>ontology_id</code>, <code>revision_id</code>, <code>resource_id</code>, and <code>resource_kind</code>. The revision
-is the opaque immutable Registry revision, never a display name, ontology
-version string, pipeline revision, or floating production publication.
-The producer resolves the resource from its active block-local Registry slice,
-checks its resource kind and tenant, and copies the revision from that slice.
-Missing resources, partial references, and incompatible kinds fail closed.
-Reinterpreting evidence under a new revision must not rewrite its old reference.</p>
-<p>The Vision sink accepts <code>ontology_resource_id</code> and
-<code>event_ontology_resource_id</code> parameters; resolved items may additionally carry
-their own <code>ontology_resource_id</code>. These identifiers must be included in the
-sink block’s Registry binding. The sink derives all other reference fields from
-the active slice; callers cannot select a different revision through a payload.</p>
+<p>An optional <code>ontology_ref</code> is an indivisible GOL provenance record containing
+<code>tenant_id</code>, <code>ontology_id</code>, <code>ontology_version</code>, <code>source_revision</code>, <code>generation_id</code>,
+<code>symbol_key</code>, and <code>symbol_kind</code>. The generation pins the compiled artifact;
+module version and source revision are separate identities. Selectors use
+<code>module::Name</code> or <code>module::Name.field</code>. The producer derives all provenance from
+its admitted Gateway descriptor, never a caller-selected revision. Existing
+references remain immutable when a later generation becomes active.</p>
+<p>The Vision sink uses <code>gol_symbol_key</code> and <code>gol_event_symbol_key</code> for the
+business entity and event. It uses <code>gol_edge_symbol_key</code>,
+<code>gol_entity_state_symbol_key</code>, and <code>gol_embedding_symbol_key</code> for the
+relationship, state observation, and embedding projections. Each selector
+must resolve to an admitted symbol in the deployed generation.
+Resolved items may select a different <code>gol_symbol_key</code> only when that exact target
+is in the admitted projection and its live write obligations succeed. GOL entity
+classifications apply to both structural Entity and Event; field classifications
+apply to structural State and CausalVariable. This does not add GOL declarations
+for ESKG’s structural machinery.</p>
+<p>Business values are explicit <code>gol_value</code> objects, separate from structural
+resolution metadata. The sink submits these exact values for host validation; it
+does not infer fields or discard unknown values to fit a schema.</p>
+<p>The sink prepares the event, entity, relationship, state, and embedding
+proposals before acquiring a single Gateway permit. The PostgreSQL transaction,
+including the authorization outbox, runs while that permit is held. A missing
+or revoked admission prevents persistence. The server retains calculation IFC
+provenance across retries and related steps.</p>
 <h2 id="relations"><a class="header" href="#relations">Relations</a></h2>
 <p>Relation labels are a closed structural vocabulary. Direction is significant.
 Both endpoints and the edge belong to the same tenant. A mutation succeeds only
