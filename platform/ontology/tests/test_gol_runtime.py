@@ -277,6 +277,36 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("protected", " ".join(logs.output))
         self.assertNotIn("private admission", " ".join(logs.output))
 
+    async def test_runtime_open_rechecks_the_same_scope_after_a_503(
+        self,
+    ) -> None:
+        bodies: list[bytes] = []
+
+        def transport(outgoing: httpx.Request) -> httpx.Response:
+            self.assertEqual(outgoing.url.path, "/internal/gol/runtime")
+            bodies.append(outgoing.content)
+            if len(bodies) == 1:
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                json=lease().model_dump(by_alias=True)
+                | {"contextId": "admitted-context"},
+            )
+
+        client = GatewayGolClient(
+            "http://api-proxy:8082", worker_key_path=self.worker_key_path
+        )
+        self.addAsyncCleanup(client.close)
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        )
+        self.assertEqual(
+            await client.open(WorkerCredential.request(), "private admission"),
+            lease(),
+        )
+        first, second = bodies
+        self.assertEqual(first, second)
+
     async def test_new_instance_ids_are_bound_to_the_admitted_source(
         self,
     ) -> None:

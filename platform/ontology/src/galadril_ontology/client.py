@@ -135,9 +135,20 @@ class GatewayGolClient:
         }
         if request.metadata_target is not None:
             scope["metadataTarget"] = request.metadata_target
-        response = await self._post(
-            "/internal/gol/runtime", scope, phase="open"
-        )
+        try:
+            async with asyncio.timeout(35.0):
+                try:
+                    response = await self._post(
+                        "/internal/gol/runtime", scope, phase="open"
+                    )
+                except GolUnavailable:
+                    # The exact admission is rechecked before a worker can run any effect.
+                    response = await self._post(
+                        "/internal/gol/runtime", scope, phase="open"
+                    )
+        except TimeoutError:
+            _log_rpc_failure("open", "overall_deadline")
+            raise GolUnavailable("GOL runtime unavailable") from None
         try:
             return GolLease.model_validate_json(response)
         except ValidationError:
