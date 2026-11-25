@@ -124,8 +124,10 @@ js_test(
     ],
     entry_point = "tests/run-pipeline-ui.ts",
     include_types = True,
+    # The remote workspace target includes these specs in its pinned browser image.
     tags = [
         "local",
+        "manual",
         "no-sandbox",
     ],
 )
