@@ -34,6 +34,7 @@ const pageHtml = renderPage().replace(
 );
 
 test("the static outage page works without JavaScript or upstream assets on desktop and mobile", async () => {
+  const browser = await chromium.launch();
   const server = createServer((_request, response) => {
     response.writeHead(503, {
       "content-type": "text/html; charset=utf-8",
@@ -43,7 +44,6 @@ test("the static outage page works without JavaScript or upstream assets on desk
     response.end(pageHtml);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch();
   try {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
