@@ -41,6 +41,8 @@ py_test(
     data = ["//database:image"],
     legacy_create_init = False,
     main = "test_image.py",
+    # Match the release graph so verification and publishing share OCI actions.
+    stamp = -1,
     # This verifies the release artifact, whose contents never contribute to LCOV.
     tags = ["image-layout"],
 )

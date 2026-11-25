@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).absolute().parent / "buildx_command.sh"
+ARGS = SCRIPT.with_name("buildx_command.args")
 EXPORTER = """#!/bin/bash
 set -euo pipefail
 printf '%s\\n' "$1" >> "$CALLS"
@@ -49,6 +50,13 @@ class BuildxExportTest(unittest.TestCase):
             "image=moby/buildkit@sha256:"
             "b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c",
             script,
+        )
+
+    def test_sbom_scanner_is_an_immutable_action_input(self) -> None:
+        self.assertIn(
+            "--attest=type=sbom,generator=docker/buildkit-syft-scanner@sha256:"
+            "873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315",
+            ARGS.read_text(),
         )
 
     def invoke(

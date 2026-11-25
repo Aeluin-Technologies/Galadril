@@ -61,7 +61,7 @@ test:ci --flaky_test_attempts=1
 test:ci --test_timeout=-1,-1,-1,18900
 
 # Schedule by Bazel test tags; action keys still decide reuse within each lane.
-test:ci-presubmit --test_tag_filters=-periodic,-benchmark
+test:ci-presubmit --test_tag_filters=-periodic,-benchmark,-image-layout
 test:ci-validation --test_tag_filters=integration,-benchmark
 test:ci-validation --nocache_test_results
 test:ci-benchmark --nocache_test_results
