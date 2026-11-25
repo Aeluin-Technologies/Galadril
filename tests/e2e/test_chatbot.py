@@ -210,7 +210,8 @@ def test_pengolo_terminal_failure_aborts_polling(
         gateway = GatewayClient()
         try:
             with pytest.raises(
-                RuntimeError, match="Pengolo generation is terminal"
+                pengolo.GenerationFailure,
+                match=f"Pengolo generation {status} after 0 events",
             ):
                 await pengolo.eventually(
                     lambda: pengolo._completed(
