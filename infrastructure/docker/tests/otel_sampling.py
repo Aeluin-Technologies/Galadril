@@ -104,6 +104,23 @@ def _eventually(
     raise AssertionError(f"Timed out waiting for {path}")
 
 
+def _wait_for_export_failure(health: httpx.Client) -> None:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        response = health.get("/metrics")
+        response.raise_for_status()
+        for sample in response.text.splitlines():
+            if (
+                sample.startswith("otelcol_exporter_send_failed_spans")
+                and float(sample.rsplit(" ", 1)[-1]) > 0
+            ):
+                return
+        time.sleep(0.25)
+    raise AssertionError(
+        "Collector did not account for the failed trace export"
+    )
+
+
 def check_tail_sampling() -> None:
     """Checks cross-request affinity, priority, ordinary sampling, and late spans."""
     services = model("infrastructure/docker/docker-compose.yaml")
@@ -124,6 +141,7 @@ def check_tail_sampling() -> None:
             .with_network(network)
             .with_env("GALADRIL_TRACE_DECISION_WAIT", "2s")
             .with_env("GALADRIL_TRACE_SUCCESS_SAMPLE_PERCENT", "0")
+            .with_env("GALADRIL_TRACE_EXPORT_RETRY_LIMIT", "3s")
             .with_volume_mapping(
                 str(config / "otel-collector.yaml"),
                 "/etc/otelcol-contrib/config.yaml",
@@ -169,3 +187,6 @@ def check_tail_sampling() -> None:
             _eventually(traces, f"/api/traces/{failed}", late)
             for trace_id in (success, denied):
                 assert traces.get(f"/api/traces/{trace_id}").status_code == 404
+            tempo.get_wrapped_container().stop(timeout=1)
+            _send_span(ingest, "06" * 16, root, code="internal")
+            _wait_for_export_failure(health)

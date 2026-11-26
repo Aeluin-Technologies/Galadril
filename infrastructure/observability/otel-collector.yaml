@@ -142,6 +142,13 @@ processors:
 exporters:
   otlp/tempo:
     endpoint: tempo:4317
+    timeout: 3s
+    retry_on_failure:
+      initial_interval: 1s
+      max_interval: 5s
+      max_elapsed_time: ${env:GALADRIL_TRACE_EXPORT_RETRY_LIMIT:-30s}
+    sending_queue:
+      queue_size: 128
     tls:
       insecure: true
   otlphttp/loki:
