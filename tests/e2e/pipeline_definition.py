@@ -11,7 +11,8 @@ def pipeline_fixture(tenant_id: str, pipeline_id: str) -> dict[str, object]:
                 "id": "e2e_text",
                 "topic": "e2e.raw",
                 "match_pattern": (
-                    rf"^{tenant_id}/raw/default/(?:[a-f0-9]{{32}}/)?e2e-record(?:-[0-9]{{2}})?\.txt$"
+                    rf"^{tenant_id}/raw/default/(?:[a-f0-9]{{32}}/)?"
+                    r"(?:e2e-record(?:-[0-9]{2})?|e2e-failing-record)\.txt$"
                 ),
                 "schema_path": "schemas/avro/text.avsc",
                 "parser": "text",

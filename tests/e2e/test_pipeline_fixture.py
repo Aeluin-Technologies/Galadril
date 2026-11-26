@@ -35,6 +35,19 @@ def test_each_trial_cohort_matches_the_published_intake_source(
     )
 
 
+def test_failing_upload_matches_the_tenant_scoped_inference_source() -> None:
+    config = PipelineConfig.model_validate(
+        pipeline_fixture("tenant", "pipeline")
+    )
+    source = next(
+        source for source in config.sources if source.id == "e2e_text"
+    )
+    key = f"raw/default/{'a' * 32}/e2e-failing-record.txt"
+
+    assert re.fullmatch(source.match_pattern, f"tenant/{key}")
+    assert not re.fullmatch(source.match_pattern, f"outsider/{key}")
+
+
 def test_every_pipeline_publication_names_its_bound_gol_contract() -> None:
     """Kafka dispatch cannot infer a transfer contract from a model name."""
     config = PipelineConfig.model_validate(
