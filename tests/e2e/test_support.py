@@ -22,7 +22,12 @@ import clients as e2e_clients
 import environment as e2e_environment
 import httpx
 import pytest
-from assertions import complete_tempo_trace, eventually, tempo_service_names
+from assertions import (
+    complete_tempo_trace,
+    eventually,
+    require_tempo_ray_spans,
+    tempo_service_names,
+)
 from clients import (
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     _vision_consumer_groups_have_members,
@@ -43,6 +48,10 @@ from environment import (
 )
 from galadril_pipeline.config import StepType
 from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
+from galadril_pipeline.telemetry_contract import (
+    SPAN_VISION_STEP_DISPATCH,
+    SPAN_VISION_STEP_EXECUTE,
+)
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
@@ -933,6 +942,51 @@ def test_tempo_trace_waits_for_every_required_service() -> None:
         ]
     }
     assert complete_tempo_trace(complete, required) is complete
+
+
+def test_tempo_trace_requires_the_exact_dispatch_for_each_ray_execution() -> (
+    None
+):
+    """Tempo can expose a worker span before its parent reaches storage."""
+
+    def span(
+        name: str, span_id: str, command_id: str, parent_id: str = ""
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "spanId": span_id,
+            "parentSpanId": parent_id,
+            "attributes": [
+                {
+                    "key": "messaging.message.id",
+                    "value": {"stringValue": command_id},
+                }
+            ],
+        }
+
+    first_dispatch = span(SPAN_VISION_STEP_DISPATCH, "dispatch-1", "one")
+    first_execution = span(
+        SPAN_VISION_STEP_EXECUTE, "execute-1", "one", "dispatch-1"
+    )
+    second_dispatch = span(SPAN_VISION_STEP_DISPATCH, "dispatch-2", "two")
+    second_execution = span(
+        SPAN_VISION_STEP_EXECUTE, "execute-2", "two", "dispatch-2"
+    )
+    wrong_parent = {**second_execution, "parentSpanId": "dispatch-1"}
+    spans = [first_dispatch, first_execution]
+    trace = {"batches": [{"scopeSpans": [{"spans": spans}]}]}
+    expected = frozenset({"one", "two"})
+
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans.append(second_execution)
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans[-1:] = [second_dispatch, wrong_parent]
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans[-1] = second_execution
+    require_tempo_ray_spans(trace, expected)
 
 
 def test_tempo_failure_reports_only_error_span_names() -> None:

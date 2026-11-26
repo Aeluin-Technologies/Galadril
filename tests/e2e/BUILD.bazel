@@ -251,6 +251,7 @@ py_library(
     testonly = True,
     srcs = ["assertions.py"],
     imports = ["."],
+    deps = ["//platform/pipeline/src/galadril_pipeline"],
 )
 
 py_library(

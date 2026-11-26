@@ -10,8 +10,8 @@ from assertions import (
     eventually,
     require_mapping,
     require_sequence,
+    require_tempo_ray_spans,
     tempo_service_names,
-    tempo_spans,
 )
 from clients import (
     OUTSIDER_ID,
@@ -32,8 +32,6 @@ from clients import (
 )
 from galadril_pipeline.telemetry_contract import (
     EVENT_VISION_STEP_FAILED,
-    SPAN_VISION_STEP_DISPATCH,
-    SPAN_VISION_STEP_EXECUTE,
     ErrorCode,
 )
 from gateway_scenario import GatewayScenario, _field, _string
@@ -66,19 +64,17 @@ async def _gateway_search(
 async def _tempo_trace_with_services(
     trace_id: str,
     required_services: frozenset[str],
-    required_spans: frozenset[str] = frozenset(),
+    required_ray_commands: frozenset[str] = frozenset(),
 ) -> dict[str, object] | None:
-    """Returns a trace only after all required service spans are queryable."""
+    """Waits until required service spans and Ray relationships are queryable."""
     trace = await read_tempo_trace(trace_id)
     if trace is not None and (
         missing := required_services - tempo_service_names(trace)
     ):
         raise AssertionError(f"Tempo trace {trace_id} lacks {sorted(missing)}")
     complete = complete_tempo_trace(trace, required_services)
-    if complete is None or not required_spans.issubset(
-        span.get("name") for span in tempo_spans(complete)
-    ):
-        return None
+    if complete is not None and required_ray_commands:
+        require_tempo_ray_spans(complete, required_ray_commands)
     return complete
 
 
@@ -315,34 +311,25 @@ async def assert_ingestion_lineage(state: DerivedPipelineState) -> None:
     }
     assert len(lineage_trace_ids) == 1
     lineage_trace_id = next(iter(lineage_trace_ids))
+    completed_commands = frozenset(
+        _string(event, "command_id")
+        for event in lineage
+        if event.get("status") == "completed"
+    )
+    assert len(completed_commands) == len(_EXPECTED_STEPS)
 
     print("E2E stage: verifying distributed traces", flush=True)
-    lineage_trace = await eventually(
+    await eventually(
         lambda: _tempo_trace_with_services(
             lineage_trace_id,
             frozenset(
                 {"galadril-gateway", "galadril-intake", "galadril-vision"}
             ),
-            frozenset({SPAN_VISION_STEP_DISPATCH, SPAN_VISION_STEP_EXECUTE}),
+            completed_commands,
         ),
         timeout_seconds=60.0,
         description="Intake-to-Vision Tempo trace",
     )
-    assert {"galadril-intake", "galadril-vision"}.issubset(
-        tempo_service_names(lineage_trace)
-    )
-    spans = tempo_spans(lineage_trace)
-    dispatches = {
-        span.get("spanId")
-        for span in spans
-        if span.get("name") == SPAN_VISION_STEP_DISPATCH
-    }
-    assert dispatches
-    executions = [
-        span for span in spans if span.get("name") == SPAN_VISION_STEP_EXECUTE
-    ]
-    assert executions
-    assert all(span.get("parentSpanId") in dispatches for span in executions)
     gateway_trace = await eventually(
         lambda: _tempo_trace_with_services(
             _GATEWAY_TRACE_ID, frozenset({"galadril-gateway"})
