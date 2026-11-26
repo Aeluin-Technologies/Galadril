@@ -1035,7 +1035,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(count_over_time({service_name=\"galadril-gateway\",event_name=\"authorization.check\",decision=\"deny\"}[$__range])) or vector(0)",
+          "expr": "sum(count_over_time({service_name=\"galadril-gateway\"} | event_name=\"galadril.gateway.authorization.check\" | galadril_authorization_decision=\"deny\"[$__range])) or vector(0)",
           "range": true,
           "queryType": "range",
           "datasource": {
