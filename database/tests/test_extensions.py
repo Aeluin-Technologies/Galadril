@@ -252,7 +252,7 @@ class DatabaseExtensionsTest(unittest.TestCase):
                 time.sleep(0.1)
             waiter = sessions.submit(self.sql, scoped + lock + " COMMIT")
             while True:
-                report = json.loads(self.sql(snapshot).splitlines()[-1])
+                report = json.loads(self.sql(snapshot))
                 if report["blocked_sessions"] > 0:
                     break
                 self.assertLess(time.monotonic(), deadline)
