@@ -1373,6 +1373,32 @@ def test_environment_preserves_structured_application_log_bodies() -> None:
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
 
+def test_collector_log_export_has_project_owned_writable_storage() -> None:
+    """Keeps the file exporter readable through Docker's archive API."""
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    _, storage_service, observability = compose.partition(
+        "\n  otel-log-storage:\n"
+    )
+    assert storage_service
+    initializer, collector_service, collector = observability.partition(
+        "\n  otel-collector:\n"
+    )
+    assert collector_service
+    collector = collector.split("\n  registry:\n", 1)[0]
+    assert "chown 10001:10001 /logs" in initializer
+    assert "chmod 0700 /logs" in initializer
+    assert "- otel-logs:/logs" in initializer
+    assert "- otel-logs:/tmp" in collector
+    assert (
+        "otel-log-storage:\n        condition: service_completed_successfully"
+        in collector
+    )
+    assert "\n  otel-logs:\n" in compose
+    assert "path: /tmp/galadril-e2e-logs.jsonl" in E2E_OTEL_COLLECTOR.read_text(
+        encoding="utf-8"
+    )
+
+
 @pytest.mark.parametrize(
     "path",
     (

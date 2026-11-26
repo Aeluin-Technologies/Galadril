@@ -276,6 +276,13 @@ services:
         read_only: true
       - tempo-data:/var/tempo
 
+  otel-log-storage:
+    image: busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478
+    command: ["sh", "-ec", "chown 10001:10001 /logs && chmod 0700 /logs"]
+    network_mode: none
+    volumes:
+      - otel-logs:/logs
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/e2e/otel-collector.yaml"]
@@ -284,8 +291,12 @@ services:
         source: e2e-observability
         target: /e2e
         read_only: true
+      - otel-logs:/tmp
     depends_on:
-      - tempo
+      otel-log-storage:
+        condition: service_completed_successfully
+      tempo:
+        condition: service_started
 
   registry:
     extends:
@@ -582,3 +593,4 @@ volumes:
   postgres-data:
   redpanda-data:
   tempo-data:
+  otel-logs:
