@@ -116,6 +116,26 @@ METRIC_VISION_TASK_COMPLETED: Final = "galadril.vision.task.completed"
 METRIC_VISION_TASK_COMPLETED_UNIT: Final = "{task}"
 
 
+def amarth_effect_estimate_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def gateway_authorization_evaluate_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
 def gol_runtime_bind_attributes(
     *,
     pipeline_revision_id: str,
@@ -139,6 +159,56 @@ def ifc_flow_evaluate_attributes(
     return {
         "galadril.authorization.decision": authorization_decision,
     }
+
+
+def intake_observation_ingest_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def li_eskg_observation_persist_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def plugin_capability_invoke_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def registry_revision_publish_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def scribe_generation_execute_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
 
 
 def vision_step_dispatch_attributes(

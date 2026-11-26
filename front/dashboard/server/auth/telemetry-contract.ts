@@ -116,6 +116,22 @@ export const METRIC_VISION_TASK_ACTIVE_UNIT = "{task}";
 export const METRIC_VISION_TASK_COMPLETED = "galadril.vision.task.completed";
 export const METRIC_VISION_TASK_COMPLETED_UNIT = "{task}";
 
+export type AmarthEffectEstimateAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const amarthEffectEstimateAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
+export type GatewayAuthorizationEvaluateAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const gatewayAuthorizationEvaluateAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
 export type GolRuntimeBindAttributes = {
   "galadril.gol.revision_id"?: string;
   "galadril.golc.version"?: string;
@@ -134,6 +150,46 @@ export type IfcFlowEvaluateAttributes = {
 
 export const ifcFlowEvaluateAttributeKeys = [
   "galadril.authorization.decision",
+] as const;
+
+export type IntakeObservationIngestAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const intakeObservationIngestAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
+export type LiEskgObservationPersistAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const liEskgObservationPersistAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
+export type PluginCapabilityInvokeAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const pluginCapabilityInvokeAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
+export type RegistryRevisionPublishAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const registryRevisionPublishAttributeKeys = [
+  "galadril.error.code",
+] as const;
+
+export type ScribeGenerationExecuteAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const scribeGenerationExecuteAttributeKeys = [
+  "galadril.error.code",
 ] as const;
 
 export type VisionStepDispatchAttributes = {

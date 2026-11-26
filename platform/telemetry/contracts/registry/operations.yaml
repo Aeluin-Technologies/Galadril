@@ -1,80 +1,82 @@
-file_format: definition/2
-attributes:
-  - key: galadril.pipeline.attempt
-    type: int
-    brief: Zero-based attempt number from the command envelope.
-    examples: 0
+file_format: definition/1
+groups:
+  - id: registry.galadril.operations
+    type: attribute_group
+    brief: Canonical Galadril operations attributes.
     stability: stable
-    annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
-  - key: galadril.pipeline.revision_id
-    type: string
-    brief: Immutable registry revision of the admitted pipeline.
-    examples: pipeline-revision-42
-    stability: stable
-    annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
-  - key: galadril.gol.revision_id
-    type: string
-    brief: Immutable identifier of the ontology used for a decision.
-    examples: ontology-revision-42
-    stability: stable
-    annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
-  - key: galadril.golc.version
-    type: string
-    brief: Version of the compiler used for the ontology artifact.
-    examples: "1.0.0"
-    stability: stable
-    annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
-  - key: galadril.vision.resource_class
-    type:
-      members:
-        - {id: cpu, stability: stable, brief: General compute pool.}
-        - {id: gpu, stability: stable, brief: Accelerated compute pool.}
-        - {id: causal, stability: stable, brief: Causal analysis pool.}
-    brief: Scheduler pool of the pipeline step.
-    stability: stable
-    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
-  - key: galadril.vision.outcome
-    type:
-      members:
-        - {id: completed, stability: stable, brief: Processing finished successfully.}
-        - {id: failed, stability: stable, brief: Processing failed.}
-        - {id: cancelled, stability: stable, brief: Dispatch was cancelled.}
-    brief: Terminal result of a processing attempt.
-    stability: stable
-    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
-  - key: galadril.vision.phase
-    type:
-      members:
-        - {id: execute, stability: stable, brief: Execute a command inside the Ray actor.}
-        - {id: dispatch, stability: stable, brief: Dispatch or receive a result from Ray.}
-        - {id: result, stability: stable, brief: Check the result against the command.}
-        - {id: ledger, stability: stable, brief: Persist the terminal execution state.}
-        - {id: running_lineage, stability: stable, brief: Confirm the running lineage event.}
-        - {id: runtime_open, stability: stable, brief: Acquire the GOL execution binding.}
-        - {id: handler, stability: stable, brief: Run the bound GOL handler.}
-    brief: Phase that identified a pipeline failure.
-    stability: stable
-    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
-  - key: galadril.vision.retry_scheduled
-    type: boolean
-    brief: The worker confirmed publication of a subsequent attempt.
-    stability: stable
-    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
-  - key: galadril.authorization.decision
-    type:
-      members:
-        - {id: allow, stability: stable, brief: Authority permits the action.}
-        - {id: deny, stability: stable, brief: Authority rejects the action.}
-        - {id: error, stability: stable, brief: Evaluation could not complete.}
-    brief: Result of an authority evaluation.
-    stability: stable
-    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
-spans:
-  - type: galadril.vision.step.execute
-    requirement_level: recommended
-    kind: consumer
-    name:
-      note: Use the span type as the fixed span name.
+    attributes:
+      - id: galadril.pipeline.attempt
+        type: int
+        brief: Zero-based attempt number from the command envelope.
+        examples: 0
+        stability: stable
+        annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
+      - id: galadril.pipeline.revision_id
+        type: string
+        brief: Immutable registry revision of the admitted pipeline.
+        examples: pipeline-revision-42
+        stability: stable
+        annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
+      - id: galadril.gol.revision_id
+        type: string
+        brief: Immutable identifier of the ontology used for a decision.
+        examples: ontology-revision-42
+        stability: stable
+        annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
+      - id: galadril.golc.version
+        type: string
+        brief: Version of the compiler used for the ontology artifact.
+        examples: "1.0.0"
+        stability: stable
+        annotations: {galadril.cardinality: unbounded, galadril.classification: operational}
+      - id: galadril.vision.resource_class
+        type:
+          members:
+            - {id: cpu, stability: stable, brief: General compute pool.}
+            - {id: gpu, stability: stable, brief: Accelerated compute pool.}
+            - {id: causal, stability: stable, brief: Causal analysis pool.}
+        brief: Scheduler pool of the pipeline step.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+      - id: galadril.vision.outcome
+        type:
+          members:
+            - {id: completed, stability: stable, brief: Processing finished successfully.}
+            - {id: failed, stability: stable, brief: Processing failed.}
+            - {id: cancelled, stability: stable, brief: Dispatch was cancelled.}
+        brief: Terminal result of a processing attempt.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+      - id: galadril.vision.phase
+        type:
+          members:
+            - {id: execute, stability: stable, brief: Execute a command inside the Ray actor.}
+            - {id: dispatch, stability: stable, brief: Dispatch or receive a result from Ray.}
+            - {id: result, stability: stable, brief: Check the result against the command.}
+            - {id: ledger, stability: stable, brief: Persist the terminal execution state.}
+            - {id: running_lineage, stability: stable, brief: Confirm the running lineage event.}
+            - {id: runtime_open, stability: stable, brief: Acquire the GOL execution binding.}
+            - {id: handler, stability: stable, brief: Run the bound GOL handler.}
+        brief: Phase that identified a pipeline failure.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+      - id: galadril.vision.retry_scheduled
+        type: boolean
+        brief: The worker confirmed publication of a subsequent attempt.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+      - id: galadril.authorization.decision
+        type:
+          members:
+            - {id: allow, stability: stable, brief: Authority permits the action.}
+            - {id: deny, stability: stable, brief: Authority rejects the action.}
+            - {id: error, stability: stable, brief: Evaluation could not complete.}
+        brief: Result of an authority evaluation.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+  - id: span.galadril.vision.step.execute
+    type: span
+    span_kind: consumer
     brief: Executes a validated command inside the Ray worker.
     stability: stable
     attributes:
@@ -85,11 +87,9 @@ spans:
         requirement_level: {conditionally_required: If the operation failed.}
       - ref: galadril.error.occurrence_id
         requirement_level: {conditionally_required: If the operation failed.}
-  - type: galadril.vision.step.dispatch
-    requirement_level: recommended
-    kind: producer
-    name:
-      note: Use the span type as the fixed span name.
+  - id: span.galadril.vision.step.dispatch
+    type: span
+    span_kind: producer
     brief: Dispatches an admitted command to an execution pool and awaits its result.
     stability: stable
     attributes:
@@ -100,16 +100,17 @@ spans:
         requirement_level: {conditionally_required: If the operation failed.}
       - ref: galadril.error.occurrence_id
         requirement_level: {conditionally_required: If the operation failed.}
-events:
-  - name: galadril.gol.worker.failed
-    requirement_level: recommended
+  - id: event.galadril.gol.worker.failed
+    type: event
+    name: galadril.gol.worker.failed
     brief: Reports the safe failure returned at the private Gateway worker boundary.
     stability: stable
     attributes:
       - {ref: galadril.error.code, requirement_level: required}
       - {ref: galadril.error.occurrence_id, requirement_level: required}
-  - name: galadril.vision.step.failed
-    requirement_level: recommended
+  - id: event.galadril.vision.step.failed
+    type: event
+    name: galadril.vision.step.failed
     brief: Reports the safe failure identity at the phase observing it.
     stability: stable
     attributes:
@@ -119,8 +120,9 @@ events:
       - {ref: galadril.error.code, requirement_level: required}
       - {ref: galadril.error.occurrence_id, requirement_level: required}
       - {ref: galadril.vision.retry_scheduled, requirement_level: opt_in}
-  - name: galadril.gateway.authorization.check
-    requirement_level: recommended
+  - id: event.galadril.gateway.authorization.check
+    type: event
+    name: galadril.gateway.authorization.check
     brief: Reports the decision of a Gateway authorization evaluation.
     stability: stable
     attributes:
@@ -129,25 +131,27 @@ events:
         requirement_level: {conditionally_required: If evaluation ended in error.}
       - ref: galadril.error.occurrence_id
         requirement_level: {conditionally_required: If evaluation ended in error.}
-metrics:
-  - name: galadril.vision.step.messages
-    requirement_level: recommended
+  - id: metric.galadril.vision.step.messages
+    type: metric
+    metric_name: galadril.vision.step.messages
     instrument: counter
     unit: "{message}"
     brief: Messages processed by Vision.
     stability: stable
     attributes:
       - {ref: galadril.vision.outcome, requirement_level: required}
-  - name: galadril.vision.step.duration
-    requirement_level: recommended
+  - id: metric.galadril.vision.step.duration
+    type: metric
+    metric_name: galadril.vision.step.duration
     instrument: histogram
     unit: s
     brief: End-to-end processing duration of a Vision message.
     stability: stable
     attributes:
       - {ref: galadril.vision.outcome, requirement_level: required}
-  - name: galadril.vision.task.completed
-    requirement_level: recommended
+  - id: metric.galadril.vision.task.completed
+    type: metric
+    metric_name: galadril.vision.task.completed
     instrument: counter
     unit: "{task}"
     brief: Terminal Ray task attempts by pool.
@@ -155,8 +159,9 @@ metrics:
     attributes:
       - {ref: galadril.vision.resource_class, requirement_level: required}
       - {ref: galadril.vision.outcome, requirement_level: required}
-  - name: galadril.vision.task.active
-    requirement_level: recommended
+  - id: metric.galadril.vision.task.active
+    type: metric
+    metric_name: galadril.vision.task.active
     instrument: updowncounter
     unit: "{task}"
     brief: In-flight Ray task attempts by pool.

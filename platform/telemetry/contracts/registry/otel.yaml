@@ -1,3 +1,4 @@
+file_format: definition/1
 imports:
   metrics:
     - http.server.request.duration

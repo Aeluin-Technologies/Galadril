@@ -56,6 +56,9 @@ def {{ identifier(name) }}_attributes(
     {{ identifier(attr.key) }}: {{ pytype(attr) }} | None = None,
 {% endfor %}
 ) -> dict[str, Attribute]:
+{% if optional and not required %}
+    attributes: dict[str, Attribute] = {}
+{% else %}
 {% if optional %}
     attributes: dict[str, Attribute] = {
 {% else %}
@@ -65,6 +68,7 @@ def {{ identifier(name) }}_attributes(
         {{ attr.key | tojson }}: {{ identifier(attr.key) }},
 {% endfor %}
     }
+{% endif %}
 {% for attr in optional %}
 {% set argument = identifier(attr.key) %}
     if {{ argument }} is not None:

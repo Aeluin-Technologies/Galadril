@@ -9,18 +9,17 @@ import yaml
 
 
 class ContractPolicyTest(unittest.TestCase):
+    def test_authored_models_use_a_stable_definition_format(self) -> None:
+        for model in MODELS:
+            if "schema_url" not in model:
+                self.assertEqual(model.get("file_format"), "definition/1")
+
     def test_published_error_codes_and_meanings_are_preserved(self) -> None:
         for code, contract in BASELINE.items():
             self.assertEqual(contract, CATALOG.get(code), code)
 
     def test_codes_are_unique_and_safe_for_each_transport(self) -> None:
-        error_code = next(
-            attribute
-            for doc in MODELS
-            for attribute in doc.get("attributes", [])
-            if attribute["key"] == "galadril.error.code"
-        )
-        members = error_code["type"]["members"]
+        members = ATTRIBUTES["galadril.error.code"]["type"]["members"]
         self.assertEqual(len(members), len(CATALOG))
         self.assertEqual(
             len(members), len({member["id"] for member in members})
@@ -37,34 +36,26 @@ class ContractPolicyTest(unittest.TestCase):
             )
 
     def test_business_span_names_are_static(self) -> None:
-        for doc in MODELS:
-            for span in doc.get("spans", []):
-                self.assertRegex(
-                    span["type"], r"^galadril\.[a-z_]+\.[a-z_]+(?:\.[a-z_]+)?$"
-                )
-                for name in span["name"].get("templates", []):
-                    self.assertEqual(span["type"], name)
+        for span in (group for group in GROUPS if group["type"] == "span"):
+            self.assertRegex(
+                span["id"], r"^span\.galadril\.[a-z_]+\.[a-z_]+(?:\.[a-z_]+)?$"
+            )
+            self.assertNotIn("name", span)
 
     def test_metrics_accept_only_bounded_operational_values(self) -> None:
-        attributes = {
-            attr["key"]: attr
-            for doc in MODELS
-            for attr in doc.get("attributes", [])
-        }
-        for doc in MODELS:
-            for metric in doc.get("metrics", []):
-                for ref in metric["attributes"]:
-                    attribute = attributes[ref["ref"]]
-                    self.assertEqual(
-                        attribute["annotations"]["galadril.cardinality"],
-                        "bounded",
-                    )
-                    self.assertEqual(
-                        attribute["annotations"]["galadril.classification"],
-                        "operational",
-                    )
-                    enum = attribute["type"]["members"]
-                    self.assertLessEqual(len(enum), 32)
+        for metric in (group for group in GROUPS if group["type"] == "metric"):
+            for ref in metric["attributes"]:
+                attribute = ATTRIBUTES[ref["ref"]]
+                self.assertEqual(
+                    attribute["annotations"]["galadril.cardinality"],
+                    "bounded",
+                )
+                self.assertEqual(
+                    attribute["annotations"]["galadril.classification"],
+                    "operational",
+                )
+                enum = attribute["type"]["members"]
+                self.assertLessEqual(len(enum), 32)
 
 
 if __name__ == "__main__":
@@ -75,4 +66,12 @@ if __name__ == "__main__":
         yaml.safe_load(model.read_text())
         for model in sorted(registry.glob("*.yaml"))
     ]
+    GROUPS = [group for model in MODELS for group in model.get("groups", [])]
+    ATTRIBUTES = {
+        attribute["id"]: attribute
+        for group in GROUPS
+        if group["type"] == "attribute_group"
+        for attribute in group.get("attributes", [])
+        if "id" in attribute
+    }
     unittest.main(argv=[sys.argv[0]])

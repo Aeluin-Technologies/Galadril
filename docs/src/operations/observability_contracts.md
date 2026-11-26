@@ -4,7 +4,9 @@ The [Weaver registry][registry] defines Galadril's business telemetry and
 references the official OpenTelemetry conventions for HTTP, RPC, databases,
 messaging, CI and generative AI. Bazel pins Weaver 0.28.0 and the OpenTelemetry
 registry 1.41.0 by archive digest. Weaver resolves the registry offline from
-Bazel inputs. The existing SDKs and OTLP exporter lifecycle handle delivery.
+Bazel inputs. The source definitions use Weaver's stable `definition/1` format.
+Weaver resolves these definitions into the v2 model used by the templates and
+live span matchers. The existing SDKs and OTLP exporter lifecycle handle delivery.
 
 ## Naming and classification
 
@@ -64,7 +66,8 @@ admission or state acquisition. A new execution failure has its own occurrence.
 ## Contributing
 
 1. Reuse an official attribute or signal where available. Define the fixed
-   name, kind, requirement levels and stability in the registry. Describe units
+   name, kind, requirement levels and stability in the registry. A business
+   span uses `id: span.galadril.<domain>.<operation>[.<phase>]`. Describe units
    and finite dimensions for metrics. Classify each Galadril attribute.
 2. Add an error to `registry/errors.yaml` when recovery or handling needs a
    distinct meaning. Keep published meanings and codes stable. Define the

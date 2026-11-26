@@ -59,11 +59,17 @@ export type {{ identifier(name) | pascal_case }}Attributes = {
 {% endfor %}
 };
 
-export const {{ identifier(name) | camel_case }}AttributeKeys = [
+{% set head = "export const " ~ (identifier(name) | camel_case) ~ "AttributeKeys = [" %}
+{% set inline = signal.attributes | map(attribute="key") | map("tojson") | join(", ") %}
+{% if (head ~ inline ~ "] as const;") | length <= 80 %}
+{{ head }}{{ inline }}] as const;
+{% else %}
+{{ head }}
 {% for attr in signal.attributes %}
   {{ attr.key | tojson }},
 {% endfor %}
 ] as const;
+{% endif %}
 {% endif %}
 {% endfor %}
 {% endfor %}

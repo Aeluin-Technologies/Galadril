@@ -1,32 +1,37 @@
-file_format: definition/2
-attributes:
-  - key: galadril.audit.principal_id
-    type: string
-    brief: Verified subject identifier from the authorization boundary.
-    examples: tenant-scoped-principal
-    stability: development
-    annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
-  - key: galadril.audit.workload_id
-    type: string
-    brief: Verified workload identity of the decision caller.
-    examples: verified-vision-worker
-    stability: development
-    annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
-  - key: galadril.audit.permissions
-    type: string[]
-    brief: Permission names involved in a decision.
-    examples: [[view, administer]]
-    stability: development
-    annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
-  - key: galadril.audit.ifc_labels
-    type: string[]
-    brief: Policy-approved label identifiers relevant to the attempted flow.
-    examples: [[tenant-confidential]]
-    stability: development
-    annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
-events:
-  - name: galadril.audit.authorization.decided
-    requirement_level: recommended
+file_format: definition/1
+groups:
+  - id: registry.galadril.audit
+    type: attribute_group
+    brief: Canonical Galadril audit attributes.
+    stability: stable
+    attributes:
+      - id: galadril.audit.principal_id
+        type: string
+        brief: Verified subject identifier from the authorization boundary.
+        examples: tenant-scoped-principal
+        stability: development
+        annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
+      - id: galadril.audit.workload_id
+        type: string
+        brief: Verified workload identity of the decision caller.
+        examples: verified-vision-worker
+        stability: development
+        annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
+      - id: galadril.audit.permissions
+        type: string[]
+        brief: Permission names involved in a decision.
+        examples: [[view, administer]]
+        stability: development
+        annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
+      - id: galadril.audit.ifc_labels
+        type: string[]
+        brief: Policy-approved label identifiers relevant to the attempted flow.
+        examples: [[tenant-confidential]]
+        stability: development
+        annotations: {galadril.cardinality: unbounded, galadril.classification: protected}
+  - id: event.galadril.audit.authorization.decided
+    type: event
+    name: galadril.audit.authorization.decided
     brief: Protected evidence of an authorization decision.
     stability: development
     annotations: {galadril.classification: protected}

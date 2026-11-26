@@ -186,6 +186,20 @@ def main(weaver: Path, manifest: Path, upstream: Path, config: Path) -> None:
                 (log,) = (
                     sample["log"] for sample in samples if "log" in sample
                 )
+                resources = [
+                    sample["resource"]
+                    for sample in samples
+                    if "resource" in sample
+                ]
+                assert resources
+                assert all(
+                    any(
+                        attr["name"] == "service.name"
+                        and attr["value"] == "galadril-vision"
+                        for attr in resource["attributes"]
+                    )
+                    for resource in resources
+                )
                 assert span["name"] == "galadril.vision.step.execute"
                 assert (
                     span["live_check_result"]["match_info"]["signal"]

@@ -1,9 +1,9 @@
-file_format: definition/2
-attribute_groups:
+file_format: definition/1
+groups:
   - id: galadril.resource
+    type: attribute_group
     brief: Identifies the service producing an operational signal.
     stability: stable
-    visibility: public
     attributes:
       - {ref: service.name, requirement_level: required}
       - {ref: service.version, requirement_level: recommended}
