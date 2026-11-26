@@ -786,6 +786,58 @@ class ComposeEnvironment:
                     failure_events = _pipeline_failure_events(logs)
         return failure_events
 
+    async def _postgres_diagnostics(self, filename: str) -> object:
+        """Reads bounded summaries without serializing SQL text or parameters."""
+        statement = runfile(f"database/diagnostics/{filename}.sql").read_text(
+            encoding="utf-8"
+        )
+        if filename == "statements":
+            query = statement.rstrip().removesuffix(";")
+            statement = (
+                "SELECT coalesce(json_agg(ranked ORDER BY total_rank), '[]'::json) "
+                f"FROM (\n{query}\n) AS ranked"
+            )
+        output = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "postgres",
+                "psql",
+                "--username=postgres",
+                "--dbname=galadril_dev",
+                "--no-psqlrc",
+                "--no-align",
+                "--tuples-only",
+                "--set=ON_ERROR_STOP=1",
+                "--command",
+                statement,
+            ),
+            environment=self._environment,
+            timeout_seconds=10.0,
+        )
+        return json.loads(output)
+
+    async def failure_artifact(self) -> dict[str, object]:
+        """Collects operational failure identifiers and bounded SQL data before teardown."""
+        keys = ("failure_events", "postgres", "dominant_statements")
+        events, snapshot, statements = await asyncio.gather(
+            self.pipeline_failure_events(),
+            self._postgres_diagnostics("snapshot"),
+            self._postgres_diagnostics("statements"),
+            return_exceptions=True,
+        )
+        values: tuple[object, ...] = (
+            events.splitlines() if isinstance(events, str) else events,
+            snapshot,
+            statements,
+        )
+        return {
+            key: value
+            for key, value in zip(keys, values, strict=True)
+            if not isinstance(value, BaseException)
+        }
+
     async def close(self) -> None:
         """Removes containers, networks, and volumes created by this test."""
         await _run(
@@ -855,6 +907,12 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
     finally:
         output = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
         if output:
+            failure_artifact: dict[str, object] = {}
+            if primary_error is not None:
+                try:
+                    failure_artifact = await environment.failure_artifact()
+                except Exception:
+                    print("Unable to collect incident diagnostics", flush=True)
             try:
                 (Path(output) / "integration-performance.json").write_text(
                     json.dumps(
@@ -865,8 +923,9 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
                             else "passed",
                             "phases_seconds": phases,
                             "elapsed_seconds": sum(phases.values()),
-                            "startup_and_scenario_seconds": monotonic()
+                            "wall_seconds_before_teardown": monotonic()
                             - started,
+                            "diagnostics": failure_artifact,
                         },
                         sort_keys=True,
                     )

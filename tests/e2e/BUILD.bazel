@@ -287,6 +287,10 @@ py_library(
     name = "e2e_environment",
     testonly = True,
     srcs = ["environment.py"],
+    data = [
+        "//database:diagnostics/snapshot.sql",
+        "//database:diagnostics/statements.sql",
+    ],
     imports = ["."],
     deps = [
         ":e2e_assertions",

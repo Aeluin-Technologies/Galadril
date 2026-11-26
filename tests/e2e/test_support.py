@@ -1419,10 +1419,12 @@ def test_vision_readiness_requires_every_runtime_consumer_group() -> None:
     )
 
 
-def test_environment_preserves_structured_application_log_bodies() -> None:
-    """Keeps fatal OTLP diagnostics visible in Bazel failure artifacts."""
+def test_environment_preserves_structured_failure_events_without_metric_dumps() -> (
+    None
+):
+    """Keeps structured failures while bounding Collector console output."""
     collector = E2E_OTEL_COLLECTOR.read_text(encoding="utf-8")
-    assert "verbosity: detailed" in collector
+    assert "verbosity: basic" in collector
     assert "filter/drop_debug:" in collector
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
@@ -1633,11 +1635,24 @@ def test_environment_tears_down_after_startup_failure(
     async def prepare_configuration(_environment: ComposeEnvironment) -> None:
         calls.append("prepare")
 
+    async def failure_artifact(
+        _environment: ComposeEnvironment,
+    ) -> dict[str, object]:
+        calls.append("snapshot")
+        return {
+            "postgres": {"blocked_sessions": 1},
+            "failure_events": ["catalog event"],
+        }
+
     async def close(_environment: ComposeEnvironment) -> None:
         report = json.loads(
             (tmp_path / "integration-performance.json").read_text()
         )
         assert report["outcome"] == "failed"
+        assert report["diagnostics"] == {
+            "postgres": {"blocked_sessions": 1},
+            "failure_events": ["catalog event"],
+        }
         assert set(report["phases_seconds"]) == {
             "load_images",
             "prepare_configuration",
@@ -1654,6 +1669,9 @@ def test_environment_tears_down_after_startup_failure(
         prepare_configuration,
     )
     monkeypatch.setattr(ComposeEnvironment, "start_core", start_core)
+    monkeypatch.setattr(
+        ComposeEnvironment, "failure_artifact", failure_artifact, raising=False
+    )
     monkeypatch.setattr(ComposeEnvironment, "close", close)
 
     async def exercise() -> None:
@@ -1664,7 +1682,7 @@ def test_environment_tears_down_after_startup_failure(
                 )
 
     asyncio.run(exercise())
-    assert calls == ["load", "prepare", "start", "close"]
+    assert calls == ["load", "prepare", "start", "snapshot", "close"]
 
 
 def test_environment_preserves_failure_when_teardown_fails(

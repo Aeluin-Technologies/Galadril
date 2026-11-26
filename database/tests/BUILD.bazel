@@ -64,7 +64,10 @@ py_test(
     name = "extensions_test",
     size = "large",
     srcs = ["test_extensions.py"],
-    data = ["//database:load", "//database:diagnostics/snapshot.sql"],
+    data = [
+        "//database:diagnostics/snapshot.sql",
+        "//database:load",
+    ],
     exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "test_extensions.py",
