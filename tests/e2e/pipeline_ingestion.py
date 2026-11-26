@@ -11,6 +11,7 @@ from assertions import (
     require_mapping,
     require_sequence,
     tempo_service_names,
+    tempo_spans,
 )
 from clients import (
     OUTSIDER_ID,
@@ -21,12 +22,19 @@ from clients import (
     PipelineExecutionError,
     authenticated_token,
     canonical_spicedb_object_id,
+    consume_dead_letter,
     consume_lineage,
     read_pipeline_state,
     read_s3_object,
     read_tempo_trace,
     statuses_by_step,
     upload_presigned,
+)
+from galadril_pipeline.telemetry_contract import (
+    EVENT_VISION_STEP_FAILED,
+    SPAN_VISION_STEP_DISPATCH,
+    SPAN_VISION_STEP_EXECUTE,
+    ErrorCode,
 )
 from gateway_scenario import GatewayScenario, _field, _string
 
@@ -56,7 +64,9 @@ async def _gateway_search(
 
 
 async def _tempo_trace_with_services(
-    trace_id: str, required_services: frozenset[str]
+    trace_id: str,
+    required_services: frozenset[str],
+    required_spans: frozenset[str] = frozenset(),
 ) -> dict[str, object] | None:
     """Returns a trace only after all required service spans are queryable."""
     trace = await read_tempo_trace(trace_id)
@@ -64,7 +74,12 @@ async def _tempo_trace_with_services(
         missing := required_services - tempo_service_names(trace)
     ):
         raise AssertionError(f"Tempo trace {trace_id} lacks {sorted(missing)}")
-    return complete_tempo_trace(trace, required_services)
+    complete = complete_tempo_trace(trace, required_services)
+    if complete is None or not required_spans.issubset(
+        span.get("name") for span in tempo_spans(complete)
+    ):
+        return None
+    return complete
 
 
 async def _assert_upload_security_boundaries(
@@ -99,13 +114,15 @@ async def _assert_upload_security_boundaries(
             )
 
 
-async def ingest_record(
-    scenario: GatewayScenario, *, check_upload_boundaries: bool = False
-) -> tuple[DerivedPipelineState, str, str]:
-    """Waits for the committed state, draining the authorization outbox."""
-    gateway = scenario.gateway
-    spicedb = scenario.spicedb
-    uploader_token = scenario.uploader_token
+async def _upload_text(
+    scenario: GatewayScenario,
+    content: bytes,
+    target_name: str,
+    *,
+    check_upload_boundaries: bool = False,
+) -> str:
+    """Promotes a test input through the real Gateway and object store."""
+    gateway, uploader_token = scenario.gateway, scenario.uploader_token
     print("E2E stage: uploading through Gateway", flush=True)
     upload_data = await gateway.execute(
         uploader_token,
@@ -121,7 +138,7 @@ async def ingest_record(
     staging_key = _string(staging, "stagingKey")
     await upload_presigned(
         staging_url,
-        b"Galadril E2E record crossing the complete pipeline.\n",
+        content,
     )
     if check_upload_boundaries:
         await _assert_upload_security_boundaries(gateway, staging_key)
@@ -139,13 +156,28 @@ async def ingest_record(
         """,
         {
             "stagingKey": staging_key,
-            "targetName": "e2e-record.txt",
+            "targetName": target_name,
         },
         trace_id=_GATEWAY_TRACE_ID,
     )
     nonce = staging_key.rsplit("/", 1)[-1]
-    object_key = f"{TENANT_ID}/raw/default/{nonce}/e2e-record.txt"
+    object_key = f"{TENANT_ID}/raw/default/{nonce}/{target_name}"
     assert complete_data.get("completeUpload") == object_key
+
+    return object_key
+
+
+async def ingest_record(
+    scenario: GatewayScenario, *, check_upload_boundaries: bool = False
+) -> tuple[DerivedPipelineState, str, str]:
+    """Waits for the committed state, draining the authorization outbox."""
+    spicedb = scenario.spicedb
+    object_key = await _upload_text(
+        scenario,
+        b"Galadril E2E record crossing the complete pipeline.\n",
+        "e2e-record.txt",
+        check_upload_boundaries=check_upload_boundaries,
+    )
 
     s3_evidence = await read_s3_object(object_key)
     assert s3_evidence is not None
@@ -288,7 +320,10 @@ async def assert_ingestion_lineage(state: DerivedPipelineState) -> None:
     lineage_trace = await eventually(
         lambda: _tempo_trace_with_services(
             lineage_trace_id,
-            frozenset({"galadril-intake", "galadril-vision"}),
+            frozenset(
+                {"galadril-gateway", "galadril-intake", "galadril-vision"}
+            ),
+            frozenset({SPAN_VISION_STEP_DISPATCH, SPAN_VISION_STEP_EXECUTE}),
         ),
         timeout_seconds=60.0,
         description="Intake-to-Vision Tempo trace",
@@ -296,6 +331,18 @@ async def assert_ingestion_lineage(state: DerivedPipelineState) -> None:
     assert {"galadril-intake", "galadril-vision"}.issubset(
         tempo_service_names(lineage_trace)
     )
+    spans = tempo_spans(lineage_trace)
+    dispatches = {
+        span.get("spanId")
+        for span in spans
+        if span.get("name") == SPAN_VISION_STEP_DISPATCH
+    }
+    assert dispatches
+    executions = [
+        span for span in spans if span.get("name") == SPAN_VISION_STEP_EXECUTE
+    ]
+    assert executions
+    assert all(span.get("parentSpanId") in dispatches for span in executions)
     gateway_trace = await eventually(
         lambda: _tempo_trace_with_services(
             _GATEWAY_TRACE_ID, frozenset({"galadril-gateway"})
@@ -304,3 +351,38 @@ async def assert_ingestion_lineage(state: DerivedPipelineState) -> None:
         description="caller-propagated Gateway Tempo trace",
     )
     assert "galadril-gateway" in tempo_service_names(gateway_trace)
+
+
+async def assert_failed_ingestion(scenario: GatewayScenario) -> None:
+    """Joins the real Ray error event to the terminal message in Redpanda."""
+    await _upload_text(
+        scenario,
+        b'{"unexpected":"private diagnostic fixture input"}',
+        "e2e-failing-record.txt",
+    )
+    result = await consume_dead_letter()
+    assert result.step == "infer"
+    failure = result.failure
+    assert failure is not None
+    assert failure.code is ErrorCode.INTERNAL
+    assert result.admission is None
+    assert not result.output
+
+    async def has_correlated_failures() -> bool:
+        records = await scenario.environment.pipeline_failure_events()
+        prefix = (
+            f"{EVENT_VISION_STEP_FAILED} code={failure.code} "
+            f"occurrence_id={failure.occurrence_id}"
+        )
+        expected = (
+            f"{prefix} phase=execute attempt=0",
+            f"{prefix} phase=dispatch attempt=0",
+            f"{prefix} phase=result attempt=0 retry_scheduled=false",
+        )
+        return all(event in records.splitlines() for event in expected)
+
+    await eventually(
+        has_correlated_failures,
+        timeout_seconds=45.0,
+        description="corresponding Ray and Vision OTLP failure events",
+    )

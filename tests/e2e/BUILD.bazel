@@ -287,7 +287,11 @@ py_library(
     testonly = True,
     srcs = ["environment.py"],
     imports = ["."],
-    deps = [":e2e_assertions", "//infrastructure/envoy:testing"],
+    deps = [
+        ":e2e_assertions",
+        "//infrastructure/envoy:testing",
+        "//platform/pipeline/src/galadril_pipeline",
+    ],
 )
 
 py_library(
@@ -604,7 +608,7 @@ py_library(
     testonly = True,
     srcs = ["pipeline_ingestion.py"],
     imports = ["."],
-    deps = [":e2e_assertions", ":e2e_clients", ":gateway_scenario", "@pip//pytest"],
+    deps = [":e2e_assertions", ":e2e_clients", ":gateway_scenario", "//platform/pipeline/src/galadril_pipeline", "@pip//pytest"],
 )
 
 py_library(
@@ -650,7 +654,7 @@ pipeline_e2e_test(
     src = "test_pipeline_lifecycle.py",
     intake = True,
     vision = True,
-    deps = [":gateway_scenario", ":pipeline_ingestion", ":pipeline_publication"],
+    deps = [":e2e_clients", ":gateway_scenario", ":pipeline_ingestion", ":pipeline_publication"],
 )
 
 pipeline_e2e_test(

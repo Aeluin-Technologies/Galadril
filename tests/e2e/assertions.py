@@ -106,9 +106,9 @@ def complete_tempo_trace(
     return trace
 
 
-def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
-    """Reports span names without releasing messages, attributes or events."""
-    names: set[str] = set()
+def tempo_spans(trace: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    """Collects emitted spans from an OTLP-backed Tempo response."""
+    result: list[dict[str, object]] = []
     batches = trace.get("batches") or trace.get("resourceSpans")
     if not isinstance(batches, list):
         return ()
@@ -120,15 +120,20 @@ def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
             spans = scope.get("spans") if isinstance(scope, dict) else None
             if not isinstance(spans, list):
                 continue
-            for span in spans:
-                if not isinstance(span, dict):
-                    continue
-                status, name = span.get("status"), span.get("name")
-                if (
-                    isinstance(status, dict)
-                    and status.get("code") in (2, "STATUS_CODE_ERROR")
-                    and isinstance(name, str)
-                    and _SPAN_NAME.fullmatch(name)
-                ):
-                    names.add(name)
+            result.extend(span for span in spans if isinstance(span, dict))
+    return tuple(result)
+
+
+def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
+    """Reports span names without releasing messages, attributes or events."""
+    names: set[str] = set()
+    for span in tempo_spans(trace):
+        status, name = span.get("status"), span.get("name")
+        if (
+            isinstance(status, dict)
+            and status.get("code") in (2, "STATUS_CODE_ERROR")
+            and isinstance(name, str)
+            and _SPAN_NAME.fullmatch(name)
+        ):
+            names.add(name)
     return tuple(sorted(names)[:24])

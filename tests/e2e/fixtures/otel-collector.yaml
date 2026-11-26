@@ -20,6 +20,12 @@ exporters:
     endpoint: tempo:4317
     tls:
       insecure: true
+  file/logs:
+    path: /tmp/galadril-e2e-logs.jsonl
+    format: json
+    rotation:
+      max_megabytes: 4
+      max_backups: 1
   debug:
     verbosity: detailed
 
@@ -36,4 +42,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [filter/drop_debug, batch]
-      exporters: [debug]
+      exporters: [file/logs]

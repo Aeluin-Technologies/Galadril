@@ -1070,6 +1070,41 @@ async def read_s3_object(key: str) -> S3ObjectEvidence | None:
     return await asyncio.to_thread(_read_s3_object, key)
 
 
+def _consume_dead_letter() -> StepResult:
+    """Reads one real terminal event for the isolated lifecycle's failed upload."""
+    consumer = Consumer(
+        {
+            "bootstrap.servers": "127.0.0.1:19092",
+            "group.id": f"galadril-e2e-failure-{uuid4()}",
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
+        }
+    )
+    deadline = time.monotonic() + 60.0
+    try:
+        consumer.subscribe(["pipeline.dead-letter.v1"])
+        while time.monotonic() < deadline:
+            message = consumer.poll(0.5)
+            if message is None or message.error() is not None:
+                continue
+            payload = message.value()
+            if isinstance(payload, bytes):
+                result = StepResult.model_validate_json(payload)
+                if (
+                    result.tenant_id == TENANT_ID
+                    and f"/{PIPELINE_ID}/" in result.pipeline
+                ):
+                    return result
+    finally:
+        consumer.close()
+    raise AssertionError("The pipeline did not publish its terminal failure")
+
+
+async def consume_dead_letter() -> StepResult:
+    """Consumes the record without blocking the application event loop."""
+    return await asyncio.to_thread(_consume_dead_letter)
+
+
 def _consume_lineage(
     expected_statuses: Mapping[str, frozenset[str]],
     correlation_id: str,

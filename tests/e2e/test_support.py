@@ -1147,71 +1147,38 @@ def test_compose_diagnostics_expose_outbox_worker_state(
     assert "application_name" in rendered
     assert "find /tmp/ray" not in rendered
     assert "worker-*.err" in rendered
-    assert commands[-1][-2:] == ("12000", "otel-collector")
+    assert commands[-1][-2].endswith(":/tmp/galadril-e2e-logs.jsonl")
 
 
 def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
-    logs = """
-otel-collector-1  | LogRecord #0
-otel-collector-1  | Body: Str(protected value)
-otel-collector-1  |      -> event.name: Str(gol.worker.effect.denied)
-otel-collector-1  |      -> phase: Str(write_contract)
-otel-collector-1  |      -> reason: Str(value with spaces)
-otel-collector-1  | LogRecord #1
-otel-collector-1  | EventName: ray.actor.task.failed
-otel-collector-1  |      -> error_type: Str(VectorSearchError)
-otel-collector-1  |      -> step: Str(resolve)
-otel-collector-1  | LogRecord #2
-otel-collector-1  | EventName: unrelated.event
-otel-collector-1  |      -> error_type: Str(PrivateError)
-otel-collector-1  | LogRecord #3
-otel-collector-1  | EventName: pipeline.command.failed
-otel-collector-1  |      -> error_type: Str(RayTaskError(CommandProcessingError))
-otel-collector-1  |      -> step: Str(resolve)
-otel-collector-1  | LogRecord #4
-otel-collector-1  | EventName: pipeline.gol.failed
-otel-collector-1  |      -> phase: Str(handler)
-otel-collector-1  |      -> error_type: Str(GolDenied)
-otel-collector-1  |      -> step: Str(sink)
-otel-collector-1  | LogRecord #5
-otel-collector-1  | EventName: gol.worker.resume.denied
-otel-collector-1  |      -> phase: Str(principal_and_input)
-otel-collector-1  | LogRecord #6
-otel-collector-1  | EventName: pipeline.gol.rpc.failed
-otel-collector-1  |      -> phase: Str(begin)
-otel-collector-1  |      -> reason: Str(ReadTimeout)
-otel-collector-1  | LogRecord #7
-otel-collector-1  | EventName: pipeline.publication.failed
-otel-collector-1  |      -> phase: Str(authorize)
-otel-collector-1  |      -> topic: Str(pipeline.lineage.v1)
-otel-collector-1  |      -> status: Str(completed)
-otel-collector-1  |      -> error_type: Str(GolUnavailable)
-otel-collector-1  | LogRecord #8
-otel-collector-1  | EventName: gol.worker.invariant.denied
-otel-collector-1  |      -> reason: Str(Relationship)
-otel-collector-1  | LogRecord #9
-otel-collector-1  | EventName: gol.worker.effect.denied
-otel-collector-1  |      -> phase: Str(write_invariant)
-otel-collector-1  |      -> archive_error: Str(Some(Expired))
-otel-collector-1  | LogRecord #10
-otel-collector-1  | EventName: gol.worker.open.denied
-otel-collector-1  |      -> phase: Str(metadata)
-otel-collector-1  |      -> export_error: Str(Some(AuthorizationUnavailable))
-otel-collector-1  | LogRecord #11
-otel-collector-1  | EventName: gol.publication.denied
-"""
-    assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
-        "gol.worker.effect.denied phase=write_contract",
-        "ray.actor.task.failed error_type=VectorSearchError step=resolve",
-        "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
-        "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
-        "gol.worker.resume.denied phase=principal_and_input",
-        "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
-        "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
-        "gol.worker.invariant.denied reason=Relationship",
-        "gol.worker.effect.denied phase=write_invariant archive_error=Some(Expired)",
-        "gol.worker.open.denied phase=metadata export_error=Some(AuthorizationUnavailable)",
-        "gol.publication.denied",
+    occurrence = str(uuid4())
+    attributes = {
+        "galadril.error.code": {"stringValue": "access_denied"},
+        "galadril.error.occurrence_id": {"stringValue": occurrence},
+        "galadril.vision.phase": {"stringValue": "handler"},
+        "galadril.pipeline.attempt": {"intValue": "1"},
+        "galadril.vision.retry_scheduled": {"boolValue": False},
+        "galadril.audit.principal_id": {"stringValue": "private actor"},
+    }
+    entries = [
+        {
+            "eventName": "galadril.vision.step.failed",
+            "body": {"stringValue": "private receipt"},
+            "attributes": [
+                {"key": key, "value": value}
+                for key, value in attributes.items()
+            ],
+        },
+        {"eventName": "galadril.audit.authorization.decided"},
+    ]
+    logs = json.dumps(
+        {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
+    )
+    assert e2e_environment._pipeline_failure_events(
+        [logs, "partial {"]
+    ).splitlines() == [
+        f"galadril.vision.step.failed code=access_denied occurrence_id={occurrence} "
+        "phase=handler attempt=1 retry_scheduled=false"
     ]
 
 

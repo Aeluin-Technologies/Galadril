@@ -6,18 +6,29 @@ import asyncio
 import io
 import json
 import os
-import re
 import secrets
 import signal
 import tarfile
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from assertions import require_mapping
+from galadril_pipeline.telemetry_contract import (
+    ATTR_ERROR_CODE,
+    ATTR_ERROR_OCCURRENCE_ID,
+    ATTR_PIPELINE_ATTEMPT,
+    ATTR_VISION_PHASE,
+    ATTR_VISION_RETRY_SCHEDULED,
+    EVENT_GOL_WORKER_FAILED,
+    EVENT_VISION_STEP_FAILED,
+    ErrorCode,
+    VisionPhase,
+)
 
 from infrastructure.envoy.testing import identity_files
 
@@ -59,48 +70,59 @@ class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
 
 
-def _pipeline_failure_events(logs: str) -> str:
-    """Preserves failure stages when metrics crowd out the final collector tail."""
-    events = {
-        "gol.publication.denied",
-        "gol.worker.dependency.denied",
-        "gol.worker.effect.denied",
-        "gol.worker.invariant.denied",
-        "gol.worker.metadata.withheld",
-        "gol.worker.open.denied",
-        "gol.worker.resume.denied",
-        "gol.worker.write_contract.denied",
-        "identity.candidate_search.failed",
-        "pipeline.command.deferred",
-        "pipeline.command.failed",
-        "pipeline.gol.failed",
-        "pipeline.gol.rpc.failed",
-        "pipeline.publication.failed",
-        "ray.actor.task.failed",
-    }
-    details = re.compile(
-        r"-> (phase|reason|error_type|step|topic|status|archive_error|export_error): Str\(([\w.()-]{1,64})\)",
-        re.ASCII,
-    )
-    names = re.compile(
-        r"(?:EventName: ([\w.]+)|-> event\.name: Str\(([\w.]+)\))", re.ASCII
-    )
+def _pipeline_failure_events(lines: Iterable[str]) -> str:
+    """Extracts only catalog values from Collector OTLP JSON log batches."""
     recent: deque[str] = deque(maxlen=24)
-    for record in re.split(
-        r"^.*\|\s*LogRecord #\d+[ \t]*$", logs, flags=re.MULTILINE
-    ):
-        event = None
-        attributes: list[str] = []
-        for line in record.splitlines():
-            message = line.partition("|")[2].strip()
-            if name := names.fullmatch(message):
-                candidate = name.group(1) or name.group(2)
-                if candidate in events:
-                    event = candidate
-            elif detail := details.fullmatch(message):
-                attributes.append(f"{detail.group(1)}={detail.group(2)}")
-        if event is not None:
-            recent.append(" ".join((event, *attributes)))
+    for line in lines:
+        try:
+            envelope = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for resource in envelope.get("resourceLogs", []):
+            for scope in resource.get("scopeLogs", []):
+                for record in scope.get("logRecords", []):
+                    event = record.get("eventName")
+                    if event not in (
+                        EVENT_GOL_WORKER_FAILED,
+                        EVENT_VISION_STEP_FAILED,
+                    ):
+                        continue
+                    attributes = {
+                        attr["key"]: attr["value"]
+                        for attr in record.get("attributes", [])
+                    }
+                    try:
+                        code = ErrorCode(
+                            attributes[ATTR_ERROR_CODE]["stringValue"]
+                        )
+                        occurrence = UUID(
+                            attributes[ATTR_ERROR_OCCURRENCE_ID]["stringValue"]
+                        )
+                        details = [
+                            event,
+                            f"code={code}",
+                            f"occurrence_id={occurrence}",
+                        ]
+                        if event == EVENT_VISION_STEP_FAILED:
+                            phase = VisionPhase(
+                                attributes[ATTR_VISION_PHASE]["stringValue"]
+                            )
+                            attempt = int(
+                                attributes[ATTR_PIPELINE_ATTEMPT]["intValue"]
+                            )
+                            details.extend(
+                                (f"phase={phase}", f"attempt={attempt}")
+                            )
+                            retry = attributes.get(
+                                ATTR_VISION_RETRY_SCHEDULED, {}
+                            ).get("boolValue")
+                            if isinstance(retry, bool):
+                                details.append(
+                                    f"retry_scheduled={str(retry).lower()}"
+                                )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    recent.append(" ".join(details))
     return "\n".join(recent)
 
 
@@ -732,15 +754,37 @@ class ComposeEnvironment:
             timeout_seconds=90.0,
         )
         infrastructure_logs += "\n".join(collector_logs.splitlines()[-1000:])
+        failure_events = await self.pipeline_failure_events()
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
-            f"\nPipeline failure events:\n{_pipeline_failure_events(collector_logs)}"
+            f"\nPipeline failure events:\n{failure_events}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"
             f"\nVision Ray worker logs:\n{ray_logs}"
             f"\nIntake and Vision consumer offsets:\n{consumer_offsets}"
         )
+
+    async def pipeline_failure_events(self) -> str:
+        """Reads the bounded Collector file for correlated pipeline events."""
+        failure_events = ""
+        with TemporaryDirectory() as temporary:
+            log_path = Path(temporary) / "otlp.jsonl"
+            await _run(
+                (
+                    *self._command,
+                    "cp",
+                    "otel-collector:/tmp/galadril-e2e-logs.jsonl",
+                    str(log_path),
+                ),
+                environment=self._environment,
+                check=False,
+                timeout_seconds=90.0,
+            )
+            if log_path.is_file():
+                with log_path.open(encoding="utf-8") as logs:
+                    failure_events = _pipeline_failure_events(logs)
+        return failure_events
 
     async def close(self) -> None:
         """Removes containers, networks, and volumes created by this test."""
