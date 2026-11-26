@@ -34,7 +34,10 @@ from galadril_vision.telemetry.tracing import (
 )
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics._internal.point import NumberDataPoint
+from opentelemetry.sdk.metrics._internal.point import (
+    HistogramDataPoint,
+    NumberDataPoint,
+)
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -445,6 +448,11 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
         "galadril.vision.task.completed",
         "galadril.vision.task.active",
     }
+
+    duration = exported["galadril.vision.step.duration"].data.data_points[0]
+    assert isinstance(duration, HistogramDataPoint)
+    assert 0.25 in duration.explicit_bounds
+    assert 120 in duration.explicit_bounds
 
     phase_metric = exported["galadril.vision.phase.duration"]
     assert phase_metric.unit == "s"

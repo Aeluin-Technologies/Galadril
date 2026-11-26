@@ -22,6 +22,28 @@ from galadril_pipeline.telemetry_contract import (
 )
 from opentelemetry import metrics
 
+_PIPELINE_DURATION_BOUNDS = (
+    0.0001,
+    0.001,
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1,
+    2.5,
+    5,
+    10,
+    30,
+    60,
+    120,
+    300,
+    900,
+    1800,
+)
+
 
 class PipelineMetrics:
     """Records operational metrics for periodic OTLP export."""
@@ -40,30 +62,14 @@ class PipelineMetrics:
             METRIC_VISION_STEP_MESSAGES, unit=METRIC_VISION_STEP_MESSAGES_UNIT
         )
         self._otel_latency = meter.create_histogram(
-            METRIC_VISION_STEP_DURATION, unit=METRIC_VISION_STEP_DURATION_UNIT
+            METRIC_VISION_STEP_DURATION,
+            unit=METRIC_VISION_STEP_DURATION_UNIT,
+            explicit_bucket_boundaries_advisory=_PIPELINE_DURATION_BOUNDS,
         )
         self._otel_phase_duration = meter.create_histogram(
             METRIC_VISION_PHASE_DURATION,
             unit=METRIC_VISION_PHASE_DURATION_UNIT,
-            explicit_bucket_boundaries_advisory=(
-                0.0001,
-                0.001,
-                0.005,
-                0.01,
-                0.025,
-                0.05,
-                0.1,
-                0.25,
-                0.5,
-                1,
-                2.5,
-                5,
-                10,
-                30,
-                60,
-                120,
-                300,
-            ),
+            explicit_bucket_boundaries_advisory=_PIPELINE_DURATION_BOUNDS,
         )
         self._otel_ray_tasks = meter.create_counter(
             METRIC_VISION_TASK_COMPLETED, unit=METRIC_VISION_TASK_COMPLETED_UNIT
