@@ -1617,9 +1617,11 @@ def test_spicedb_probe_allowed_supports_canonical_resources() -> None:
 
 def test_environment_tears_down_after_startup_failure(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Prevents leaked containers when Compose fails before yielding."""
     calls: list[str] = []
+    monkeypatch.setenv("TEST_UNDECLARED_OUTPUTS_DIR", str(tmp_path))
 
     async def load_images(_environment: ComposeEnvironment) -> None:
         calls.append("load")
@@ -1632,6 +1634,16 @@ def test_environment_tears_down_after_startup_failure(
         calls.append("prepare")
 
     async def close(_environment: ComposeEnvironment) -> None:
+        report = json.loads(
+            (tmp_path / "integration-performance.json").read_text()
+        )
+        assert report["outcome"] == "failed"
+        assert set(report["phases_seconds"]) == {
+            "load_images",
+            "prepare_configuration",
+            "start_core",
+        }
+        assert "startup failed" not in json.dumps(report)
         calls.append("close")
 
     monkeypatch.setattr(ComposeEnvironment, "__init__", lambda _self: None)

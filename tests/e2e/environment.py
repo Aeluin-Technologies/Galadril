@@ -822,11 +822,24 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
     """Yields one environment and emits diagnostics before teardown."""
     environment = ComposeEnvironment()
     primary_error: BaseException | None = None
+    phases: dict[str, float] = {}
+    started = monotonic()
     try:
-        await environment.load_images()
-        await environment.prepare_configuration()
-        await environment.start_core()
-        yield environment
+        for name, run in (
+            ("load_images", environment.load_images),
+            ("prepare_configuration", environment.prepare_configuration),
+            ("start_core", environment.start_core),
+        ):
+            phase_started = monotonic()
+            try:
+                await run()
+            finally:
+                phases[name] = monotonic() - phase_started
+        phase_started = monotonic()
+        try:
+            yield environment
+        finally:
+            phases["scenario"] = monotonic() - phase_started
     except BaseException as error:
         primary_error = error
         try:
@@ -840,6 +853,31 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
             error.add_note(diagnostics)
         raise
     finally:
+        output = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
+        if output:
+            try:
+                (Path(output) / "integration-performance.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "outcome": "failed"
+                            if primary_error is not None
+                            else "passed",
+                            "phases_seconds": phases,
+                            "elapsed_seconds": sum(phases.values()),
+                            "startup_and_scenario_seconds": monotonic()
+                            - started,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                print(
+                    "Unable to publish integration performance diagnostics",
+                    flush=True,
+                )
         try:
             await environment.close()
         except Exception as cleanup_error:
