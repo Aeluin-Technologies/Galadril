@@ -304,8 +304,8 @@ test("aggregate exports remove identities and discard unapproved instruments", a
     const attempts = meter.createCounter("galadril.auth.attempts");
     for (const email of ["alice@example.com", "bob@example.com"]) {
       attempts.add(1, {
-        operation: "login",
-        outcome: "success",
+        "galadril.auth.operation": "login",
+        "galadril.auth.outcome": "success",
         email,
         tenant: email,
         token: "private-session-token",
@@ -331,8 +331,8 @@ test("aggregate exports remove identities and discard unapproved instruments", a
     assert.deepEqual(
       required(required(instruments[0]).dataPoints[0]).attributes,
       {
-        operation: "login",
-        outcome: "success",
+        "galadril.auth.operation": "login",
+        "galadril.auth.outcome": "success",
       },
     );
     assert.doesNotMatch(
