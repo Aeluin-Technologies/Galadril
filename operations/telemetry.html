@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-fa33da1d.js";
+            window.path_to_searchindex_js = "../searchindex-89fc9445.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-ced387d4.js"></script>
+        <script src="../toc-164f14b9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -182,7 +182,7 @@
                     <main>
                         <h1 id="galadril-telemetry-contract"><a class="header" href="#galadril-telemetry-contract">Galadril telemetry contract</a></h1>
 <p>Galadril binaries use OpenTelemetry SDKs and send logs, metrics, and traces to
-the intermediary collector exclusively with OTLP over gRPC. Application
+the intermediary collector with OTLP. Application
 containers do not expose scrape endpoints and do not select observability
 backends. Exporters use bounded queues and background workers; queue overflow
 drops telemetry instead of delaying application work.</p>
@@ -205,24 +205,10 @@ drops telemetry instead of delaying application work.</p>
 <p><code>service.name</code> is stable across worker roles so traces, metrics, logs, and
 profiles join on the same value. Instance and role data belong in separate
 attributes rather than in the service name.</p>
-<h2 id="structured-events"><a class="header" href="#structured-events">Structured events</a></h2>
-<p>Every log record has an <code>event.name</code> containing a lowercase dot-notation
-identifier with at least two segments, for example <code>auth.login</code> or
-<code>kafka.message.failed</code>. The record body is a distinct, lowercase explanatory
-phrase. Attribute names are lowercase and use OpenTelemetry semantic
-conventions where one exists.</p>
-<p>Do not place tenant IDs, entity IDs, paths, trace IDs, or other unbounded values
-on metrics. Those values can be log or span attributes when operationally
-necessary.</p>
-<p>Rust request paths register their instruments during service startup and emit
-<code>http.server.request.count</code>, <code>http.server.request.duration</code>,
-<code>messaging.process.count</code>, and <code>messaging.process.duration</code> without allocating
-metric labels dynamically. Python process and pipeline instruments use the same
-OTLP metric pipeline.</p>
-<h2 id="propagation"><a class="header" href="#propagation">Propagation</a></h2>
-<p>W3C <code>traceparent</code> is the canonical propagation format. HTTP ingress extracts it
-before starting server spans. Kafka and Ray producers inject it into their
-carriers, and consumers restore it before starting consumer spans.</p>
+<h2 id="signal-contracts"><a class="header" href="#signal-contracts">Signal contracts</a></h2>
+<p>The <a href="observability_contracts.html">observability contracts</a> define the
+shared rules for structured events, metrics, errors and W3C propagation.
+Studio’s opt-in aggregate metrics exporter uses OTLP over HTTP.</p>
 <h2 id="continuous-profiling"><a class="header" href="#continuous-profiling">Continuous profiling</a></h2>
 <p>Grafana Alloy profiles the Rust and Python containers out of process with the
 OpenTelemetry eBPF profiler. It samples at 19 Hz and ships a pprof-compatible
@@ -255,7 +241,7 @@ supplies it for Python.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../operations/proxies.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../operations/observability_contracts.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -269,7 +255,7 @@ supplies it for Python.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../operations/proxies.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../operations/observability_contracts.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

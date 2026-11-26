@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-fa33da1d.js";
+            window.path_to_searchindex_js = "searchindex-89fc9445.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-ced387d4.js"></script>
+        <script src="toc-164f14b9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -741,7 +741,7 @@ your pipeline:</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="galadril-telemetry-contract"><a class="header" href="#galadril-telemetry-contract">Galadril telemetry contract</a></h1>
 <p>Galadril binaries use OpenTelemetry SDKs and send logs, metrics, and traces to
-the intermediary collector exclusively with OTLP over gRPC. Application
+the intermediary collector with OTLP. Application
 containers do not expose scrape endpoints and do not select observability
 backends. Exporters use bounded queues and background workers; queue overflow
 drops telemetry instead of delaying application work.</p>
@@ -764,24 +764,10 @@ drops telemetry instead of delaying application work.</p>
 <p><code>service.name</code> is stable across worker roles so traces, metrics, logs, and
 profiles join on the same value. Instance and role data belong in separate
 attributes rather than in the service name.</p>
-<h2 id="structured-events"><a class="header" href="#structured-events">Structured events</a></h2>
-<p>Every log record has an <code>event.name</code> containing a lowercase dot-notation
-identifier with at least two segments, for example <code>auth.login</code> or
-<code>kafka.message.failed</code>. The record body is a distinct, lowercase explanatory
-phrase. Attribute names are lowercase and use OpenTelemetry semantic
-conventions where one exists.</p>
-<p>Do not place tenant IDs, entity IDs, paths, trace IDs, or other unbounded values
-on metrics. Those values can be log or span attributes when operationally
-necessary.</p>
-<p>Rust request paths register their instruments during service startup and emit
-<code>http.server.request.count</code>, <code>http.server.request.duration</code>,
-<code>messaging.process.count</code>, and <code>messaging.process.duration</code> without allocating
-metric labels dynamically. Python process and pipeline instruments use the same
-OTLP metric pipeline.</p>
-<h2 id="propagation"><a class="header" href="#propagation">Propagation</a></h2>
-<p>W3C <code>traceparent</code> is the canonical propagation format. HTTP ingress extracts it
-before starting server spans. Kafka and Ray producers inject it into their
-carriers, and consumers restore it before starting consumer spans.</p>
+<h2 id="signal-contracts"><a class="header" href="#signal-contracts">Signal contracts</a></h2>
+<p>The <a href="#observability-contracts">observability contracts</a> define the
+shared rules for structured events, metrics, errors and W3C propagation.
+Studio’s opt-in aggregate metrics exporter uses OTLP over HTTP.</p>
 <h2 id="continuous-profiling"><a class="header" href="#continuous-profiling">Continuous profiling</a></h2>
 <p>Grafana Alloy profiles the Rust and Python containers out of process with the
 OpenTelemetry eBPF profiler. It samples at 19 Hz and ships a pprof-compatible
@@ -805,6 +791,134 @@ telemetry pipeline but cannot produce profiles.</p>
 <code>OTEL_TRACES_SAMPLER_ARG</code> variables. <code>DEPLOYMENT_ENVIRONMENT</code> supplies the
 environment resource value for Rust; validated pipeline telemetry configuration
 supplies it for Python.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="observability-contracts"><a class="header" href="#observability-contracts">Observability contracts</a></h1>
+<p>The <a href="../../platform/telemetry/contracts/registry">Weaver registry</a> defines Galadril’s business telemetry and
+references the official OpenTelemetry conventions for HTTP, RPC, databases,
+messaging, CI and generative AI. Bazel pins Weaver 0.28.0 and the OpenTelemetry
+registry 1.41.0 by archive digest. Weaver resolves the registry offline from
+Bazel inputs. The source definitions use Weaver’s stable <code>definition/1</code> format.
+Weaver resolves these definitions into the v2 model used by the templates and
+live span matchers. The existing SDKs and OTLP exporter lifecycle handle delivery.</p>
+<h2 id="naming-and-classification"><a class="header" href="#naming-and-classification">Naming and classification</a></h2>
+<p>Use <code>galadril.&lt;domain&gt;.&lt;operation&gt;[.&lt;phase&gt;]</code> for fixed business span and
+event names. Use <code>service.name</code> for the process identity and the native OTLP
+event name, timestamp, trace ID and span ID for logs. Keep identifiers out of
+signal names. Put allowed operation and outcome enums on metrics with
+finite, reviewed value sets. Put per-message UUIDs, attempt numbers and
+immutable revision coordinates on explicitly declared traces or logs. User
+input, tenant names and custom step names have unbounded cardinality.</p>
+<p>Operational failure events carry the application code and occurrence UUID.
+Vision additionally records the phase at which each component observed the
+failure, the Kafka command UUID and the attempt index. The Kafka result retains
+the original phase. Startup or control-plane logs can use a separate event
+when there is no command. For one asynchronous command use its W3C parent.
+Use span links for independent parents when combining multiple messages.
+Vision’s existing batch UDF instrumentation accepts trace parents as links.</p>
+<p>Keep verified principal IDs, workload IDs, permissions and IFC labels in
+protected audit storage. The production Collector drops audit events from
+the operational pipeline and strips the reserved audit attribute namespace.
+The existing Gateway audit read path requires tenant administrator authority
+and the store scopes the query to the tenant. Keep policies, permits, receipts,
+tokens, exception messages and business content out of exported diagnostics.
+Trace IDs, message IDs and failure UUIDs provide correlation. Authority and
+provenance come from the original authenticated service context and verified
+artifacts.</p>
+<h2 id="error-transport-and-retry"><a class="header" href="#error-transport-and-retry">Error transport and retry</a></h2>
+<p><a href="../../platform/telemetry/contracts/registry/errors.yaml">The catalog</a> defines meaning, category, confidentiality, conditional
+retry and HTTP/gRPC mappings. The GraphQL canonical extension uses the code
+as its value. Public API adapters that still use legacy codes retain their
+existing behavior while they are migrated. Ray and Kafka carry <code>failure.code</code>,
+<code>failure.occurrence_id</code> and <code>failure.phase</code>. The private Gateway worker HTTP
+adapter returns the same code and UUID in <code>X-Galadril-Error-Code</code> and
+<code>X-Galadril-Error-Occurrence-Id</code>. Vision uses the response status to classify
+transport failures from peers without those headers.</p>
+<p>Assign a random occurrence UUID at the origin and preserve it when wrapping
+or forwarding. Keep the exception chain in the originating process. When
+publishing, serialize the typed failure fields only. An attempt can retry
+only when the catalog and the operation both permit it. The Vision command
+handler retries transient failures within the idempotent command’s configured
+attempt budget. A change to authority or concurrent state requires fresh
+admission or state acquisition. A new execution failure has its own occurrence.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Outcome</th><th>Durable state and action</th></tr>
+</thead>
+<tbody>
+<tr><td>Access denied after dispatch</td><td>Store the failure and publish the authorized dead-letter record.</td></tr>
+<tr><td>Transient failure with attempts remaining</td><td>Store the failure and confirm the next Kafka command.</td></tr>
+<tr><td>Running lineage refused before dispatch</td><td>Release the running claim for broker redelivery under a fresh check.</td></tr>
+<tr><td>Cached completion</td><td>Validate scope and republish permitted successors without executing the step again.</td></tr>
+<tr><td>Dispatch cancelled</td><td>Decrement the active metric and preserve the existing cancellation path.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="contributing"><a class="header" href="#contributing">Contributing</a></h2>
+<ol>
+<li>
+<p>Reuse an official attribute or signal where available. Define the fixed
+name, kind, requirement levels and stability in the registry. A business
+span uses <code>id: span.galadril.&lt;domain&gt;.&lt;operation&gt;[.&lt;phase&gt;]</code>. Describe units
+and finite dimensions for metrics. Classify each Galadril attribute.</p>
+</li>
+<li>
+<p>Add an error to <code>registry/errors.yaml</code> when recovery or handling needs a
+distinct meaning. Keep published meanings and codes stable. Define the
+transport mapping and the conditions required for retry. Put safe text in
+<code>brief</code> and keep runtime details in the local exception chain.</p>
+</li>
+<li>
+<p>Build the generated bindings and refresh the source copies used by Cargo,
+the Python distribution and Nuxt. Commit the registry and bindings together.</p>
+<pre><code class="language-sh">bazel build //platform/telemetry/contracts:generate
+cp bazel-bin/platform/telemetry/contracts/generated/contracts.rs platform/telemetry/src/generated/contract.rs
+cp bazel-bin/platform/telemetry/contracts/generated/contracts.py platform/pipeline/src/galadril_pipeline/telemetry_contract.py
+cp bazel-bin/platform/telemetry/contracts/generated/contracts.ts front/dashboard/server/auth/telemetry-contract.ts
+bazel test //platform/telemetry/contracts/...
+</code></pre>
+</li>
+<li>
+<p>Use the generated Rust event emitters, Python attribute builders or
+TypeScript metric contracts with the existing SDK. Add a test of the
+emitted OTLP signal and update affected Collector, Grafana or E2E consumers.
+For a change to an already published version, run <code>weaver registry diff</code>
+against the previous Galadril model. The checked-in test compares the initial
+Galadril model against the pinned upstream baseline.</p>
+</li>
+<li>
+<p>For a plugin registry, use a unique schema URL under
+<code>https://galadril.aeluin.com/schemas/plugins/&lt;plugin&gt;/&lt;version&gt;</code>.
+Declare the core model dependency and use
+<code>galadril.plugin.&lt;plugin&gt;.&lt;operation&gt;[.&lt;phase&gt;]</code>. Run Weaver check with
+<code>platform/telemetry/contracts/plugin_namespace.rego</code>. The Bazel plugin
+test stages and validates one such registry and rejects a conflicting name.</p>
+</li>
+</ol>
+<h2 id="audit-and-rollout-evidence"><a class="header" href="#audit-and-rollout-evidence">Audit and rollout evidence</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Boundary</th><th>Existing behavior and migration status</th></tr>
+</thead>
+<tbody>
+<tr><td>Rust SDK, Gateway and Intake</td><td><code>platform/telemetry/src/lib.rs</code> owns the OTLP bridge and W3C propagation. Gateway authorization checks formerly included principal and resource identifiers and a duplicate service field. The migrated event carries decision and optional structured failure. HTTP Intake metrics and other Rust error calls still need a convention-by-convention pass.</td></tr>
+<tr><td>Registry and GOL</td><td>Registry uses hand-authored tracing around compilation and publication in <code>platform/registry/src/gol_service.rs</code> and <code>composition.rs</code>. Private GOL HTTP responses previously dropped occurrence identity. The private adapter now returns an explicit code and UUID. Public GraphQL administration and pipeline adapters still classify some legacy errors by message.</td></tr>
+<tr><td>Vision, Kafka and Ray</td><td>FastStream extracts context and dispatch injects it into Ray. Actor status and logs previously attached raw exception text and dispatcher errors lost the identity. Actor, dispatcher and dead letter now carry structured failures. Workflow-configured names were removed from the migrated metric labels.</td></tr>
+<tr><td>IFC, LI-ESKG, Amarth and Scribe</td><td>The registry defines initial operation names. The database, causal and agent instrumentation has independent names today. Scribe uses both business spans and provider-specific metrics in <code>machine-learning/scribe/python/galadril_scribe</code>. Exact IFC classification and the wider adapter migration remain separate work.</td></tr>
+<tr><td>Plugins</td><td><code>plugins/src/galadril_plugins/telemetry.py</code> has its own SDK setup and JSON log renderer. The registry extension works without referring to plugin capabilities in core. Existing plugin workers keep their current exporters.</td></tr>
+<tr><td>TypeScript Studio</td><td>The server intentionally exports opt-in aggregate metrics. Generated operation/outcome values and the Collector allowlist remain bounded. Browser traces and identities stay outside that export.</td></tr>
+<tr><td>Audit and correlation</td><td>Existing authorization audit storage is separate from OTLP. Full IFC label and GOLC version capture is not wired across all services. The registry defines fields for subsequent audited integrations and the ordinary Collector excludes protected fields.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The focused Bazel gate runs Weaver check, generate, diff and live-check. It
+compares independently generated source bytes, checks the released error
+catalog and plugin namespace, and feeds real OTLP gRPC from the Vision
+adapters to Weaver. The Docker lifecycle E2E additionally checks the real
+Kafka, Gateway and Ray trace, matches a Ray failure UUID to a dead letter, and verifies positive and negative Gateway audit
+access. The isolated adapter tests exercise failure correlation and privacy.
+Use the normal BuildBuddy-backed Bazel presubmit for the container lifecycle.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="operating-the-local-api-proxy"><a class="header" href="#operating-the-local-api-proxy">Operating the local API proxy</a></h1>
 <p>Docker Compose runs one Envoy process named <code>api-proxy</code>. Gateway, Registry,
