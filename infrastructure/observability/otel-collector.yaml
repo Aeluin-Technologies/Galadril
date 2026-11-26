@@ -112,15 +112,20 @@ processors:
   transform/operational_privacy:
     error_mode: propagate
     trace_statements:
-      - delete_matching_keys(span.attributes, "^galadril[.]audit[.]")
-      - delete_key(span.attributes, "db.query.text")
-      - delete_key(span.attributes, "db.statement")
-      - delete_key(span.attributes, "url.full")
-      - delete_key(span.attributes, "url.query")
-      - delete_key(span.attributes, "http.url")
-      - delete_matching_keys(span.attributes, "^(http[.](request|response)[.]header[.]|db[.]query[.]parameter[.])")
-      - set(span.status.message, "")
-      - delete_matching_keys(spanevent.attributes, "^(galadril[.]audit[.]|exception[.])")
+      # Span attributes must be redacted even when the span has no events.
+      - context: span
+        statements:
+          - delete_matching_keys(span.attributes, "^galadril[.]audit[.]")
+          - delete_key(span.attributes, "db.query.text")
+          - delete_key(span.attributes, "db.statement")
+          - delete_key(span.attributes, "url.full")
+          - delete_key(span.attributes, "url.query")
+          - delete_key(span.attributes, "http.url")
+          - delete_matching_keys(span.attributes, "^(http[.](request|response)[.]header[.]|db[.]query[.]parameter[.])")
+          - set(span.status.message, "")
+      - context: spanevent
+        statements:
+          - delete_matching_keys(spanevent.attributes, "^(galadril[.]audit[.]|exception[.])")
     metric_statements:
       - delete_matching_keys(datapoint.attributes, "^galadril[.]audit[.]")
     log_statements:
