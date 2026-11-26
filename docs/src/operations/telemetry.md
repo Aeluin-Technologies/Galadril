@@ -1,7 +1,7 @@
 # Galadril telemetry contract
 
 Galadril binaries use OpenTelemetry SDKs and send logs, metrics, and traces to
-the intermediary collector exclusively with OTLP over gRPC. Application
+the intermediary collector with OTLP. Application
 containers do not expose scrape endpoints and do not select observability
 backends. Exporters use bounded queues and background workers; queue overflow
 drops telemetry instead of delaying application work.
@@ -22,29 +22,11 @@ Every signal carries these lowercase resource attributes:
 profiles join on the same value. Instance and role data belong in separate
 attributes rather than in the service name.
 
-## Structured events
+## Signal contracts
 
-Every log record has an `event.name` containing a lowercase dot-notation
-identifier with at least two segments, for example `auth.login` or
-`kafka.message.failed`. The record body is a distinct, lowercase explanatory
-phrase. Attribute names are lowercase and use OpenTelemetry semantic
-conventions where one exists.
-
-Do not place tenant IDs, entity IDs, paths, trace IDs, or other unbounded values
-on metrics. Those values can be log or span attributes when operationally
-necessary.
-
-Rust request paths register their instruments during service startup and emit
-`http.server.request.count`, `http.server.request.duration`,
-`messaging.process.count`, and `messaging.process.duration` without allocating
-metric labels dynamically. Python process and pipeline instruments use the same
-OTLP metric pipeline.
-
-## Propagation
-
-W3C `traceparent` is the canonical propagation format. HTTP ingress extracts it
-before starting server spans. Kafka and Ray producers inject it into their
-carriers, and consumers restore it before starting consumer spans.
+The [observability contracts](observability_contracts.md) define the
+shared rules for structured events, metrics, errors and W3C propagation.
+Studio's opt-in aggregate metrics exporter uses OTLP over HTTP.
 
 ## Continuous profiling
 
