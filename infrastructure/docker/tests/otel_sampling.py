@@ -139,9 +139,10 @@ def check_tail_sampling() -> None:
         collector = (
             DockerContainer(cast(str, services["otel-collector"]["image"]))
             .with_network(network)
+            .with_command(["--config=/etc/otelcol-contrib/config.yaml"])
             .with_env("GALADRIL_TRACE_DECISION_WAIT", "2s")
             .with_env("GALADRIL_TRACE_SUCCESS_SAMPLE_PERCENT", "0")
-            .with_env("GALADRIL_TRACE_EXPORT_RETRY_LIMIT", "3s")
+            .with_env("GALADRIL_TRACE_EXPORT_RETRY_LIMIT", "6s")
             .with_volume_mapping(
                 str(config / "otel-collector.yaml"),
                 "/etc/otelcol-contrib/config.yaml",
@@ -161,7 +162,15 @@ def check_tail_sampling() -> None:
             ) as health,
         ):
             _eventually(traces, "/ready")
-            _eventually(health, "/metrics")
+            try:
+                _eventually(health, "/metrics")
+            except AssertionError as error:
+                logs = (
+                    collector.get_wrapped_container()
+                    .logs()
+                    .decode(errors="replace")
+                )
+                raise AssertionError(logs[-3000:]) from error
             root = "0102030405060708"
             child = "0203040506070809"
             late = "0304050607080910"
