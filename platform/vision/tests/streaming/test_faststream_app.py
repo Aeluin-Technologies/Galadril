@@ -280,13 +280,19 @@ async def test_app_lifespan_owns_authz_worker_lifecycle() -> None:
     close.assert_awaited_once_with()
 
 
+@pytest.mark.parametrize("metrics_port", [None, "18089"])
 def test_ray_initializes_process_local_runtime_without_dashboard(
     monkeypatch: pytest.MonkeyPatch,
+    metrics_port: str | None,
 ) -> None:
     """Starts embedded Ray when neither environment nor YAML has an address."""
     ray_module = MagicMock()
     ray_module.is_initialized.return_value = False
     monkeypatch.delenv("RAY_ADDRESS", raising=False)
+    if metrics_port:
+        monkeypatch.setenv("RAY_METRICS_EXPORT_PORT", metrics_port)
+    else:
+        monkeypatch.delenv("RAY_METRICS_EXPORT_PORT", raising=False)
 
     with patch.dict(sys.modules, {"ray": ray_module}):
         started = _initialize_ray(_config())
@@ -301,6 +307,7 @@ def test_ray_initializes_process_local_runtime_without_dashboard(
         ignore_reinit_error=True,
         log_to_driver=False,
         _system_config={"agent_register_timeout_ms": 120_000},
+        **({"_metrics_export_port": int(metrics_port)} if metrics_port else {}),
     )
 
 
