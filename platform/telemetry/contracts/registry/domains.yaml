@@ -1,0 +1,63 @@
+file_format: definition/2
+spans:
+  - type: galadril.gol.runtime.bind
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Acquires the ontology binding for an admitted execution.
+    stability: development
+    attributes:
+      - {ref: galadril.pipeline.revision_id, requirement_level: required}
+      - ref: galadril.gol.revision_id
+        requirement_level: {conditionally_required: Once the runtime resolves the ontology.}
+      - {ref: galadril.golc.version, requirement_level: opt_in}
+  - type: galadril.ifc.flow.evaluate
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Evaluates a proposed information flow under the active policy.
+    stability: development
+    attributes:
+      - {ref: galadril.authorization.decision, requirement_level: required}
+  - type: galadril.registry.revision.publish
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Publishes an immutable pipeline revision for execution.
+    stability: development
+  - type: galadril.gateway.authorization.evaluate
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Evaluates structural and contextual authority for an operation.
+    stability: development
+  - type: galadril.intake.observation.ingest
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Admits and normalizes a source observation before broker publication.
+    stability: development
+  - type: galadril.li_eskg.observation.persist
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Materializes authorized evidence in the graph.
+    stability: development
+  - type: galadril.amarth.effect.estimate
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Estimates an effect against an admitted causal specification.
+    stability: development
+  - type: galadril.scribe.generation.execute
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Executes an agent generation across model and permitted tool calls.
+    stability: development
+  - type: galadril.plugin.capability.invoke
+    requirement_level: recommended
+    kind: internal
+    name: {note: Use the fixed span type.}
+    brief: Invokes an admitted plugin capability in the host.
+    stability: development

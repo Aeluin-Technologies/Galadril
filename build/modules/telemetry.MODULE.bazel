@@ -1,0 +1,46 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "weaver_linux_amd64",
+    build_file_content = 'exports_files(["weaver"])',
+    sha256 = "69069769ec3509c358ddbfbc29ff9965590fe4f8dd8b03e1c1e1be1ae56122e8",
+    strip_prefix = "weaver-x86_64-unknown-linux-musl",
+    urls = ["https://github.com/open-telemetry/weaver/releases/download/v0.28.0/weaver-x86_64-unknown-linux-musl.tar.xz"],
+)
+
+http_archive(
+    name = "weaver_linux_arm64",
+    build_file_content = 'exports_files(["weaver"])',
+    sha256 = "55a47e3d6226a372570b65853e56413266c149aaa7716172bdffb0dc8422d544",
+    strip_prefix = "weaver-aarch64-unknown-linux-musl",
+    urls = ["https://github.com/open-telemetry/weaver/releases/download/v0.28.0/weaver-aarch64-unknown-linux-musl.tar.xz"],
+)
+
+http_archive(
+    name = "weaver_macos_amd64",
+    build_file_content = 'exports_files(["weaver"])',
+    sha256 = "40dd65d72b43bc97041b849203e450b322cd786629af8f926cfd2d05798d9ca4",
+    strip_prefix = "weaver-x86_64-apple-darwin",
+    urls = ["https://github.com/open-telemetry/weaver/releases/download/v0.28.0/weaver-x86_64-apple-darwin.tar.xz"],
+)
+
+http_archive(
+    name = "weaver_macos_arm64",
+    build_file_content = 'exports_files(["weaver"])',
+    sha256 = "b334b37372325f77374b461fd6a11d38bc050122832eb83a9732fcd6831a5ab1",
+    strip_prefix = "weaver-aarch64-apple-darwin",
+    urls = ["https://github.com/open-telemetry/weaver/releases/download/v0.28.0/weaver-aarch64-apple-darwin.tar.xz"],
+)
+
+http_archive(
+    name = "otel_semconv",
+    build_file_content = """
+package(default_visibility = ["//visibility:public"])
+exports_files(["model/version.properties"])
+filegroup(name = "model", srcs = glob(["model/**/*.yaml"]) + ["model/version.properties"])
+""",
+    sha256 = "fb8cb1b41fb1009bf4713cfeba71d299503942699a121f2f91efc8dff43ca4df",
+    strip_prefix = "semantic-conventions-1.41.0",
+    type = "tar.gz",
+    urls = ["https://codeload.github.com/open-telemetry/semantic-conventions/tar.gz/refs/tags/v1.41.0"],
+)

@@ -1,6 +1,11 @@
 //! Role-aware OTLP/gRPC telemetry shared by Galadril binaries and libraries.
 #![deny(unsafe_code, missing_docs)]
 
+/// Generated schema types and structured instrumentation.
+#[rustfmt::skip]
+#[path = "generated/contract.rs"]
+pub mod contract;
+
 use std::env;
 use std::time::Duration;
 

@@ -1,0 +1,41 @@
+file_format: definition/2
+attributes:
+  - key: galadril.auth.operation
+    type:
+      members:
+        - {id: session, brief: Read session state.}
+        - {id: mfa_options, value: mfa/options, brief: Fetch challenge options.}
+        - {id: mfa_verify, value: mfa/verify, brief: Verify a challenge.}
+        - {id: local_flow, value: local/flow, brief: Start the local flow.}
+        - {id: local_callback, value: local/callback, brief: Finish the local flow.}
+        - {id: logout, brief: End a session.}
+        - {id: start, brief: Begin sign-in.}
+        - {id: login, brief: Submit sign-in.}
+        - {id: polis_callback, value: polis/callback, brief: Handle the Polis callback.}
+        - {id: consent, brief: Record consent.}
+        - {id: callback, brief: Handle the sign-in callback.}
+        - {id: mcp_continue, value: mcp/continue, brief: Continue MCP sign-in.}
+        - {id: refresh, brief: Extend session lifetime.}
+        - {id: step_up, value: step-up, brief: Start step-up authentication.}
+        - {id: unknown, brief: Request outside the known authentication routes.}
+    brief: Fixed authentication route family.
+    stability: stable
+    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+  - key: galadril.auth.outcome
+    type:
+      members:
+        - {id: success, brief: The authentication route completed.}
+        - {id: denied, brief: The authentication route returned a failure.}
+    brief: Terminal result of the authentication attempt.
+    stability: stable
+    annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+metrics:
+  - name: galadril.auth.attempts
+    requirement_level: recommended
+    instrument: counter
+    unit: "{attempt}"
+    brief: Authentication attempts across Studio routes.
+    stability: stable
+    attributes:
+      - {ref: galadril.auth.operation, requirement_level: required}
+      - {ref: galadril.auth.outcome, requirement_level: required}

@@ -1,0 +1,161 @@
+load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# gazelle:exclude live_check_test.py
+# gazelle:exclude policy_test.py
+
+[
+    config_setting(
+        name = name,
+        constraint_values = [
+            "@platforms//os:" + os,
+            "@platforms//cpu:" + cpu,
+        ],
+    )
+    for name, os, cpu in [
+        ("linux_amd64", "linux", "x86_64"),
+        ("linux_arm64", "linux", "aarch64"),
+        ("macos_amd64", "osx", "x86_64"),
+        ("macos_arm64", "osx", "aarch64"),
+    ]
+]
+
+alias(
+    name = "weaver",
+    actual = select({
+        ":linux_amd64": "@weaver_linux_amd64//:weaver",
+        ":linux_arm64": "@weaver_linux_arm64//:weaver",
+        ":macos_amd64": "@weaver_macos_amd64//:weaver",
+        ":macos_arm64": "@weaver_macos_arm64//:weaver",
+    }),
+)
+
+filegroup(
+    name = "registry",
+    srcs = glob(["registry/*.yaml"]),
+)
+
+filegroup(
+    name = "templates",
+    srcs = glob(["templates/**"]),
+)
+
+genrule(
+    name = "generate",
+    srcs = [
+        ":registry",
+        ":templates",
+        "templates/contracts/weaver.yaml",
+        "@otel_semconv//:model",
+        "@otel_semconv//:model/version.properties",
+        "registry/manifest.yaml",
+    ],
+    outs = [
+        "generated/catalog.json",
+        "generated/contracts.py",
+        "generated/contracts.rs",
+        "generated/contracts.ts",
+        "generated/live-check.toml",
+    ],
+    cmd = """
+        action_root="$$PWD"
+        stage="$$(mktemp -d "$$action_root/weaver.XXXXXXXX")"
+        trap 'rm -rf "$$stage"' EXIT
+        mkdir "$$stage/semconv" "$$stage/registry" "$$stage/templates"
+        cp -RL "$$(dirname "$(location @otel_semconv//:model/version.properties)")/." "$$stage/semconv"
+        cp -RL "$$(dirname "$(location registry/manifest.yaml)")/." "$$stage/registry"
+        cp -RL "$$(dirname "$$(dirname "$(location templates/contracts/weaver.yaml)")")/." "$$stage/templates"
+        cd "$$stage"
+        "$$action_root/$(execpath :weaver)" registry generate --v2 --quiet -r registry -t templates \
+          contracts "$$action_root/$(@D)/generated"
+    """,
+    tools = [":weaver"],
+)
+
+sh_test(
+    name = "registry_test",
+    srcs = ["registry_test.sh"],
+    args = [
+        "$(rootpath :weaver)",
+        "$(rootpath registry/manifest.yaml)",
+        "$(rootpath @otel_semconv//:model/version.properties)",
+    ],
+    data = [
+        ":registry",
+        ":weaver",
+        "@otel_semconv//:model",
+        "@otel_semconv//:model/version.properties",
+        "registry/manifest.yaml",
+    ],
+)
+
+sh_test(
+    name = "reproducibility_test",
+    srcs = ["reproducibility_test.sh"],
+    args = [
+        "$(rootpath :weaver)",
+        "$(rootpath registry/manifest.yaml)",
+        "$(rootpath @otel_semconv//:model/version.properties)",
+        "$(rootpath templates/contracts/weaver.yaml)",
+        "$(rootpath generated/contracts.py)",
+        "$(rootpath generated/contracts.rs)",
+        "$(rootpath generated/contracts.ts)",
+        "$(rootpath //platform/pipeline/src/galadril_pipeline:telemetry_contract.py)",
+        "$(rootpath //platform/telemetry/src/generated:contract.rs)",
+        "$(rootpath //front/dashboard:server/auth/telemetry-contract.ts)",
+    ],
+    data = [
+        "generated/contracts.py",
+        "generated/contracts.rs",
+        "generated/contracts.ts",
+        "generated/live-check.toml",
+        ":registry",
+        ":templates",
+        "templates/contracts/weaver.yaml",
+        ":weaver",
+        "//front/dashboard:server/auth/telemetry-contract.ts",
+        "//platform/pipeline/src/galadril_pipeline:telemetry_contract.py",
+        "//platform/telemetry/src/generated:contract.rs",
+        "@otel_semconv//:model",
+        "@otel_semconv//:model/version.properties",
+        "registry/manifest.yaml",
+    ],
+)
+
+py_test(
+    name = "policy_test",
+    srcs = ["policy_test.py"],
+    args = [
+        "$(rootpath generated/catalog.json)",
+        "$(rootpath error-codes-v1.json)",
+        "platform/telemetry/contracts/registry",
+    ],
+    data = [
+        ":registry",
+        "error-codes-v1.json",
+        "generated/catalog.json",
+    ],
+    deps = ["@pip//pyyaml"],
+)
+
+sh_test(
+    name = "plugin_test",
+    srcs = ["plugin_test.sh"],
+    args = [
+        "$(rootpath :weaver)",
+        "$(rootpath registry/manifest.yaml)",
+        "$(rootpath @otel_semconv//:model/version.properties)",
+        "$(rootpath plugin-example/manifest.yaml)",
+        "$(rootpath plugin_namespace.rego)",
+    ],
+    data = [
+        ":registry",
+        ":weaver",
+        "@otel_semconv//:model",
+        "@otel_semconv//:model/version.properties",
+        "plugin-example/manifest.yaml",
+        "plugin-example/operations.yaml",
+        "plugin_namespace.rego",
+        "registry/manifest.yaml",
+    ],
+)

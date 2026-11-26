@@ -1,0 +1,12 @@
+file_format: definition/2
+attribute_groups:
+  - id: galadril.resource
+    brief: Identifies the service producing an operational signal.
+    stability: stable
+    visibility: public
+    attributes:
+      - {ref: service.name, requirement_level: required}
+      - {ref: service.version, requirement_level: recommended}
+      - {ref: service.instance.id, requirement_level: recommended}
+      - {ref: deployment.environment.name, requirement_level: recommended}
+      - {ref: telemetry.sdk.language, requirement_level: recommended}

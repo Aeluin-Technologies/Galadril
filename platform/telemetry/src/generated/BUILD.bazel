@@ -1,0 +1,4 @@
+exports_files(["contract.rs"], visibility = [
+    "//platform/telemetry:__pkg__",
+    "//platform/telemetry/contracts:__pkg__",
+])

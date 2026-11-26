@@ -1,0 +1,83 @@
+{
+  "access_denied": {
+    "meaning": "The requested action exceeds the verified authority.",
+    "category": "authorization",
+    "retry": "after_authority_change",
+    "http": 403,
+    "graphql": "access_denied",
+    "grpc": "PERMISSION_DENIED",
+    "confidentiality": "protected_context"
+  },
+  "ifc_violation": {
+    "meaning": "The requested flow violates an information-flow constraint.",
+    "category": "information_flow",
+    "retry": "after_authority_change",
+    "http": 403,
+    "graphql": "ifc_violation",
+    "grpc": "PERMISSION_DENIED",
+    "confidentiality": "protected_context"
+  },
+  "concurrent_conflict": {
+    "meaning": "A concurrent operation invalidated the attempted state transition.",
+    "category": "conflict",
+    "retry": "with_fresh_state",
+    "http": 409,
+    "graphql": "concurrent_conflict",
+    "grpc": "ABORTED",
+    "confidentiality": "code_only"
+  },
+  "unavailable": {
+    "meaning": "A required dependency is currently unavailable.",
+    "category": "availability",
+    "retry": "if_idempotent",
+    "http": 503,
+    "graphql": "unavailable",
+    "grpc": "UNAVAILABLE",
+    "confidentiality": "code_only"
+  },
+  "deadline_exceeded": {
+    "meaning": "An operation exhausted its execution deadline.",
+    "category": "timeout",
+    "retry": "if_idempotent",
+    "http": 504,
+    "graphql": "deadline_exceeded",
+    "grpc": "DEADLINE_EXCEEDED",
+    "confidentiality": "code_only"
+  },
+  "expired": {
+    "meaning": "The command or capability has exceeded its validity period.",
+    "category": "expiration",
+    "retry": "with_fresh_state",
+    "http": 410,
+    "graphql": "expired",
+    "grpc": "FAILED_PRECONDITION",
+    "confidentiality": "protected_context"
+  },
+  "invalid_input": {
+    "meaning": "The input cannot satisfy the operation contract.",
+    "category": "permanent",
+    "retry": "never",
+    "http": 400,
+    "graphql": "invalid_input",
+    "grpc": "INVALID_ARGUMENT",
+    "confidentiality": "code_only"
+  },
+  "invalid_result": {
+    "meaning": "The execution result violates the internal result contract.",
+    "category": "internal",
+    "retry": "never",
+    "http": 500,
+    "graphql": "invalid_result",
+    "grpc": "INTERNAL",
+    "confidentiality": "code_only"
+  },
+  "internal": {
+    "meaning": "An unexpected internal error prevented completion.",
+    "category": "internal",
+    "retry": "never",
+    "http": 500,
+    "graphql": "internal",
+    "grpc": "INTERNAL",
+    "confidentiality": "code_only"
+  }
+}

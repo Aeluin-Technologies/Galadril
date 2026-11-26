@@ -1,0 +1,8 @@
+file_format: definition/2
+spans:
+  - type: galadril.plugin.example.normalize
+    name: {note: Use the fixed span type.}
+    kind: internal
+    brief: Normalizes an input using the example capability.
+    requirement_level: recommended
+    stability: development
