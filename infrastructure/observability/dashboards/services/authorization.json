@@ -1,0 +1,132 @@
+{
+  "uid": "galadril-authorization",
+  "title": "Authorization & GOL",
+  "description": "SpiceDB RPC volume and canonical Gateway decisions.",
+  "tags": [
+    "galadril",
+    "provisioned"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "SpiceDB permission RPC latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket{grpc_service=~\".*PermissionsService\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{grpc_method}}",
+          "exemplar": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket{grpc_service=~\".*PermissionsService\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{grpc_method}}",
+          "exemplar": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket{grpc_service=~\".*PermissionsService\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{grpc_method}}",
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "title": "SpiceDB permission RPCs",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum by (grpc_method, grpc_code) (rate(grpc_server_handled_total{grpc_service=~\".*PermissionsService\"}[$__rate_interval]))",
+          "legendFormat": "{{grpc_method}} {{grpc_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2
+    },
+    {
+      "title": "Gateway authorization denials and errors",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=\"galadril-gateway\"} | event_name=\"galadril.gateway.authorization.check\" | galadril_authorization_decision=~\"deny|error\"",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3
+    }
+  ]
+}

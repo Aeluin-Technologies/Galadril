@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from typing import cast
@@ -25,6 +26,53 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_operational_dashboards_reference_provisioned_data_sources(
+        self,
+    ) -> None:
+        dashboards = {
+            document["title"]: document
+            for path in (OBSERVABILITY_ROOT / "dashboards/services").glob(
+                "*.json"
+            )
+            if isinstance(document := json.loads(path.read_text()), dict)
+        }
+        for title in (
+            "Galadril Overview",
+            "Pipeline Performance",
+            "Authorization & GOL",
+            "Database Performance",
+            "Kafka & Ray",
+            "Error Analysis",
+            "Observability Health",
+            "CI Performance",
+        ):
+            dashboard = dashboards[title]
+            self.assertTrue(dashboard["panels"])
+            for panel in dashboard["panels"]:
+                for target in panel.get("targets", []):
+                    self.assertIn(
+                        target.get("datasource", panel.get("datasource"))[
+                            "uid"
+                        ],
+                        {"grafana", "mimir", "loki", "tempo", "pyroscope"},
+                    )
+
+    def test_ray_metrics_are_scraped_on_an_internal_port(self) -> None:
+        vision = mapping(services("streaming.yaml")["vision"])
+        self.assertNotIn("ports", vision)
+        self.assertEqual(
+            mapping(vision["environment"])["RAY_METRICS_EXPORT_PORT"], "18089"
+        )
+        config = mapping(
+            yaml.safe_load(
+                (OBSERVABILITY_ROOT / "otel-collector.yaml").read_text()
+            )
+        )
+        self.assertIn(
+            "api-proxy:18089",
+            str(mapping(config["receivers"])["prometheus/ray"]),
+        )
+
     def test_expensive_profiling_is_opt_in_and_backends_are_local(self) -> None:
         telemetry = services("observability.yaml")
         for service in ("profiler", "pyroscope"):

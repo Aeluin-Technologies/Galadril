@@ -1,0 +1,33 @@
+{
+  "uid": "galadril-ci-performance",
+  "title": "CI Performance",
+  "description": "Use the BuildBuddy invocation associated with the CI run for timings and cache statistics.",
+  "tags": [
+    "galadril",
+    "provisioned"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "Bazel runs and artifacts",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "[Galadril Bazel CI runs](https://github.com/Aeluin-Technologies/Galadril/actions/workflows/bazel.yaml)\n\nOpen the BuildBuddy invocation from the test job. Use its Timing and Cache views and open the integration test’s undeclared outputs for `integration-performance.json`."
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    }
+  ]
+}

@@ -46,6 +46,17 @@ receivers:
             - targets: [otel-collector:8888]
               labels:
                 service: otel-collector
+  prometheus/ray:
+    config:
+      scrape_configs:
+        - job_name: ray
+          scrape_interval: 30s
+          static_configs:
+            - targets: [api-proxy:18089]
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'ray_node_(cpu_count|cpu_utilization|mem_used|mem_total|cgroup_mem_used|cgroup_mem_total|disk_free|disk_usage|disk_io_read_speed|disk_io_write_speed|network_received|network_sent)'
+              action: keep
   prometheus/profiler:
     config:
       scrape_configs:
@@ -104,6 +115,9 @@ processors:
       - delete_matching_keys(span.attributes, "^galadril[.]audit[.]")
       - delete_key(span.attributes, "db.query.text")
       - delete_key(span.attributes, "db.statement")
+      - delete_key(span.attributes, "url.full")
+      - delete_key(span.attributes, "url.query")
+      - delete_key(span.attributes, "http.url")
       - delete_matching_keys(span.attributes, "^(http[.](request|response)[.]header[.]|db[.]query[.]parameter[.])")
       - set(span.status.message, "")
       - delete_matching_keys(spanevent.attributes, "^(galadril[.]audit[.]|exception[.])")
@@ -152,6 +166,7 @@ service:
         prometheus/tempo,
         prometheus/collector,
         prometheus/profiler,
+        prometheus/ray,
       ]
       processors: [memory_limiter, resource, transform/operational_privacy, batch]
       exporters: [prometheusremotewrite/mimir]

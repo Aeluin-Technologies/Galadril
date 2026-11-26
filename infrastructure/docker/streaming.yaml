@@ -119,6 +119,7 @@ services:
       RAY_raylet_start_wait_time_s: "60"
       PYTHONUNBUFFERED: "1"
       RAY_ADDRESS: ${RAY_ADDRESS:-}
+      RAY_METRICS_EXPORT_PORT: "18089"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: always_on

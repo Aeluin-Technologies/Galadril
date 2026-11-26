@@ -31,6 +31,17 @@ def _send_span(
         if code is not None
         else []
     )
+    attributes.extend(
+        {
+            "key": key,
+            "value": {"stringValue": "must-not-reach-tempo"},
+        }
+        for key in (
+            "galadril.audit.principal_id",
+            "db.query.text",
+            "http.request.header.authorization",
+        )
+    )
     response = client.post(
         "/v1/traces",
         json={
@@ -75,7 +86,7 @@ def _endpoint(container: DockerContainer, port: int) -> str:
 
 def _eventually(
     client: httpx.Client, path: str, expected_span: str = ""
-) -> None:
+) -> str:
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         try:
@@ -86,7 +97,7 @@ def _eventually(
                 in response.text
                 or expected_span in response.text
             ):
-                return
+                return response.text
         except httpx.TransportError:
             pass
         time.sleep(0.25)
@@ -151,7 +162,9 @@ def check_tail_sampling() -> None:
             _send_span(ingest, denied, root, code="access_denied")
             for trace_id in (failed, slow, security):
                 _eventually(traces, f"/api/traces/{trace_id}")
-            _eventually(traces, f"/api/traces/{failed}", child)
+            retained = _eventually(traces, f"/api/traces/{failed}", child)
+            assert "must-not-reach-tempo" not in retained
+            _eventually(traces, f"/api/traces/{failed}", root)
             _send_span(ingest, failed, late, parent=root)
             _eventually(traces, f"/api/traces/{failed}", late)
             for trace_id in (success, denied):

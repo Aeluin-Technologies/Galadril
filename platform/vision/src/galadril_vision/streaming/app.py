@@ -547,6 +547,7 @@ def _initialize_ray(config: VisionConfig) -> bool:
     address = _resolve_ray_address(config)
     if address is None:
         _inherit_ray_pythonpath()
+        metrics_port = os.getenv("RAY_METRICS_EXPORT_PORT")
         ray.init(
             address=None,
             namespace=config.ray.namespace,
@@ -555,6 +556,7 @@ def _initialize_ray(config: VisionConfig) -> bool:
             num_cpus=config.ray.num_cpus,
             num_gpus=config.ray.num_gpus,
             include_dashboard=False,
+            _metrics_export_port=int(metrics_port) if metrics_port else None,
             # Large production images can exceed Ray's 30-second Linux
             # registration window while importing the agent dependencies.
             _system_config={
