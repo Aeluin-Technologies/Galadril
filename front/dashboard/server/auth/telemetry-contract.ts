@@ -67,6 +67,15 @@ export const visionResourceClassValues = ["cpu", "gpu", "causal"] as const;
 
 export type VisionResourceClass = (typeof visionResourceClassValues)[number];
 
+export const visionTimingPhaseValues = [
+  "serialization",
+  "ray_round_trip",
+  "execution",
+  "persistence",
+] as const;
+
+export type VisionTimingPhase = (typeof visionTimingPhaseValues)[number];
+
 export const ATTR_AUDIT_IFC_LABELS = "galadril.audit.ifc_labels";
 export const ATTR_AUDIT_PERMISSIONS = "galadril.audit.permissions";
 export const ATTR_AUDIT_PRINCIPAL_ID = "galadril.audit.principal_id";
@@ -84,6 +93,7 @@ export const ATTR_VISION_OUTCOME = "galadril.vision.outcome";
 export const ATTR_VISION_PHASE = "galadril.vision.phase";
 export const ATTR_VISION_RESOURCE_CLASS = "galadril.vision.resource_class";
 export const ATTR_VISION_RETRY_SCHEDULED = "galadril.vision.retry_scheduled";
+export const ATTR_VISION_TIMING_PHASE = "galadril.vision.timing_phase";
 export const SPAN_AMARTH_EFFECT_ESTIMATE = "galadril.amarth.effect.estimate";
 export const SPAN_GATEWAY_AUTHORIZATION_EVALUATE =
   "galadril.gateway.authorization.evaluate";
@@ -107,6 +117,8 @@ export const EVENT_GOL_WORKER_FAILED = "galadril.gol.worker.failed";
 export const EVENT_VISION_STEP_FAILED = "galadril.vision.step.failed";
 export const METRIC_AUTH_ATTEMPTS = "galadril.auth.attempts";
 export const METRIC_AUTH_ATTEMPTS_UNIT = "{attempt}";
+export const METRIC_VISION_PHASE_DURATION = "galadril.vision.phase.duration";
+export const METRIC_VISION_PHASE_DURATION_UNIT = "s";
 export const METRIC_VISION_STEP_DURATION = "galadril.vision.step.duration";
 export const METRIC_VISION_STEP_DURATION_UNIT = "s";
 export const METRIC_VISION_STEP_MESSAGES = "galadril.vision.step.messages";
@@ -272,6 +284,16 @@ export type AuthAttemptsAttributes = {
 export const authAttemptsAttributeKeys = [
   "galadril.auth.operation",
   "galadril.auth.outcome",
+] as const;
+
+export type VisionPhaseDurationAttributes = {
+  "galadril.vision.resource_class": VisionResourceClass;
+  "galadril.vision.timing_phase": VisionTimingPhase;
+};
+
+export const visionPhaseDurationAttributeKeys = [
+  "galadril.vision.resource_class",
+  "galadril.vision.timing_phase",
 ] as const;
 
 export type VisionStepDurationAttributes = {

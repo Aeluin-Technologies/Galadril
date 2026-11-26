@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from asyncio import CancelledError
 from collections.abc import Awaitable, Mapping, Sequence
+from time import perf_counter
 from typing import Protocol, TypeVar, cast
 
 from galadril_pipeline.events import (
@@ -18,6 +19,7 @@ from galadril_pipeline.telemetry_contract import (
     ErrorCode,
     VisionOutcome,
     VisionPhase,
+    VisionTimingPhase,
     vision_step_dispatch_attributes,
 )
 from opentelemetry import trace
@@ -95,10 +97,24 @@ class RayActorDispatcher:
             outcome = VisionOutcome.FAILED
             phase = VisionPhase.DISPATCH
             try:
-                reference = actor.execute.remote(
-                    command.model_dump_json().encode("utf-8"), carrier
+                started = perf_counter()
+                command_json = command.model_dump_json().encode("utf-8")
+                submitted = perf_counter()
+                self._metrics.phase_completed(
+                    phase=VisionTimingPhase.SERIALIZATION,
+                    resource_class=command.resource_class,
+                    duration_seconds=submitted - started,
                 )
-                payload = await _await_reference(reference)
+                submitted = perf_counter()
+                try:
+                    reference = actor.execute.remote(command_json, carrier)
+                    payload = await _await_reference(reference)
+                finally:
+                    self._metrics.phase_completed(
+                        phase=VisionTimingPhase.RAY_ROUND_TRIP,
+                        resource_class=command.resource_class,
+                        duration_seconds=perf_counter() - submitted,
+                    )
                 phase = VisionPhase.RESULT
                 result = StepResult.model_validate_json(payload)
                 if result.failure is not None:

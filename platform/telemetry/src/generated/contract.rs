@@ -232,6 +232,31 @@ impl VisionResourceClass {
     }
 }
 
+/// Fixed timing boundary for a Vision command.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisionTimingPhase {
+    /// Encode the command before Ray submission.
+    Serialization,
+    /// Submit the command and await its reply including queue time and computation.
+    RayRoundTrip,
+    /// Run the validated command inside the actor.
+    Execution,
+    /// Commit successful execution state to the ledger.
+    Persistence,
+}
+
+impl VisionTimingPhase {
+    /// Returns the canonical wire value.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Serialization => "serialization",
+            Self::RayRoundTrip => "ray_round_trip",
+            Self::Execution => "execution",
+            Self::Persistence => "persistence",
+        }
+    }
+}
+
 /// Policy-approved label identifiers relevant to the attempted flow.
 pub const ATTR_AUDIT_IFC_LABELS: &str = "galadril.audit.ifc_labels";
 /// Permission names involved in a decision.
@@ -266,6 +291,8 @@ pub const ATTR_VISION_PHASE: &str = "galadril.vision.phase";
 pub const ATTR_VISION_RESOURCE_CLASS: &str = "galadril.vision.resource_class";
 /// The worker confirmed publication of a subsequent attempt.
 pub const ATTR_VISION_RETRY_SCHEDULED: &str = "galadril.vision.retry_scheduled";
+/// Fixed timing boundary for a Vision command.
+pub const ATTR_VISION_TIMING_PHASE: &str = "galadril.vision.timing_phase";
 /// Estimates an effect against an admitted causal specification.
 pub const SPAN_AMARTH_EFFECT_ESTIMATE: &str = "galadril.amarth.effect.estimate";
 /// Evaluates structural and contextual authority for an operation.
@@ -298,6 +325,10 @@ pub const EVENT_VISION_STEP_FAILED: &str = "galadril.vision.step.failed";
 pub const METRIC_AUTH_ATTEMPTS: &str = "galadril.auth.attempts";
 /// Unit of measurement.
 pub const METRIC_AUTH_ATTEMPTS_UNIT: &str = "{attempt}";
+/// Wall time spent in a fixed Vision boundary. Ray round trip includes execution.
+pub const METRIC_VISION_PHASE_DURATION: &str = "galadril.vision.phase.duration";
+/// Unit of measurement.
+pub const METRIC_VISION_PHASE_DURATION_UNIT: &str = "s";
 /// End-to-end processing duration of a Vision message.
 pub const METRIC_VISION_STEP_DURATION: &str = "galadril.vision.step.duration";
 /// Unit of measurement.

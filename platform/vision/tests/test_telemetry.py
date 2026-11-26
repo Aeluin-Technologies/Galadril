@@ -10,6 +10,7 @@ import structlog
 from galadril_pipeline.telemetry_contract import (
     VisionOutcome,
     VisionResourceClass,
+    VisionTimingPhase,
 )
 from galadril_vision.telemetry.context import (
     bind_pipeline_context,
@@ -424,6 +425,12 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
         outcome=VisionOutcome.COMPLETED, duration_seconds=0.25
     )
 
+    instruments.phase_completed(
+        phase=VisionTimingPhase.SERIALIZATION,
+        resource_class=VisionResourceClass.GPU,
+        duration_seconds=0.005,
+    )
+
     metric_data = metric_reader.get_metrics_data()
     assert metric_data is not None
     exported = {
@@ -437,6 +444,15 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
         "galadril.vision.step.duration",
         "galadril.vision.task.completed",
         "galadril.vision.task.active",
+    }
+
+    phase_metric = exported["galadril.vision.phase.duration"]
+    assert phase_metric.unit == "s"
+    phase_points = phase_metric.data.data_points
+    assert len(phase_points) == 1
+    assert dict(phase_points[0].attributes or {}) == {
+        "galadril.vision.timing_phase": "serialization",
+        "galadril.vision.resource_class": "gpu",
     }
 
     active = exported["galadril.vision.task.active"].data.data_points
