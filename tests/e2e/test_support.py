@@ -1217,6 +1217,7 @@ def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
     entries = [
         {
             "eventName": "galadril.vision.step.failed",
+            "traceId": base64.b64encode(bytes.fromhex("ab" * 16)).decode(),
             "body": {"stringValue": "private receipt"},
             "attributes": [
                 {"key": key, "value": value}
@@ -1232,7 +1233,7 @@ def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
         [logs, "partial {"]
     ).splitlines() == [
         f"galadril.vision.step.failed code=access_denied occurrence_id={occurrence} "
-        "phase=handler attempt=1 retry_scheduled=false"
+        f"trace_id={'ab' * 16} phase=handler attempt=1 retry_scheduled=false"
     ]
 
 
@@ -1635,6 +1636,10 @@ def test_environment_tears_down_after_startup_failure(
     async def prepare_configuration(_environment: ComposeEnvironment) -> None:
         calls.append("prepare")
 
+    async def raw_logs(_environment: ComposeEnvironment) -> str:
+        calls.append("raw_logs")
+        return "sensitive legacy diagnostics"
+
     async def failure_artifact(
         _environment: ComposeEnvironment,
     ) -> dict[str, object]:
@@ -1663,6 +1668,7 @@ def test_environment_tears_down_after_startup_failure(
 
     monkeypatch.setattr(ComposeEnvironment, "__init__", lambda _self: None)
     monkeypatch.setattr(ComposeEnvironment, "load_images", load_images)
+    monkeypatch.setattr(ComposeEnvironment, "logs", raw_logs)
     monkeypatch.setattr(
         ComposeEnvironment,
         "prepare_configuration",
@@ -1688,7 +1694,8 @@ def test_environment_tears_down_after_startup_failure(
 def test_environment_preserves_failure_when_teardown_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keeps the actionable service failure when best-effort cleanup fails."""
+    """Keeps the actionable local failure when best-effort cleanup fails."""
+    monkeypatch.delenv("TEST_UNDECLARED_OUTPUTS_DIR", raising=False)
 
     async def succeed(_environment: ComposeEnvironment) -> None:
         return None

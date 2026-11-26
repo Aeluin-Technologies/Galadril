@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import os
@@ -70,6 +71,21 @@ class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
 
 
+def _trace_id(value: object) -> str | None:
+    """Normalizes OTLP JSON trace identifiers without exporting arbitrary strings."""
+    if not isinstance(value, str):
+        return None
+    try:
+        raw = (
+            bytes.fromhex(value)
+            if len(value) == 32
+            else base64.b64decode(value, validate=True)
+        )
+    except ValueError:
+        return None
+    return raw.hex() if len(raw) == 16 and any(raw) else None
+
+
 def _pipeline_failure_events(lines: Iterable[str]) -> str:
     """Extracts only catalog values from Collector OTLP JSON log batches."""
     recent: deque[str] = deque(maxlen=24)
@@ -103,6 +119,9 @@ def _pipeline_failure_events(lines: Iterable[str]) -> str:
                             f"code={code}",
                             f"occurrence_id={occurrence}",
                         ]
+                        trace_id = _trace_id(record.get("traceId"))
+                        if trace_id is not None:
+                            details.append(f"trace_id={trace_id}")
                         if event == EVENT_VISION_STEP_FAILED:
                             phase = VisionPhase(
                                 attributes[ATTR_VISION_PHASE]["stringValue"]
@@ -873,6 +892,7 @@ class ComposeEnvironment:
 async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
     """Yields one environment and emits diagnostics before teardown."""
     environment = ComposeEnvironment()
+    output = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
     primary_error: BaseException | None = None
     phases: dict[str, float] = {}
     started = monotonic()
@@ -894,18 +914,21 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
             phases["scenario"] = monotonic() - phase_started
     except BaseException as error:
         primary_error = error
-        try:
-            diagnostics = await environment.logs()
-        except Exception as diagnostic_error:
+        if output:
             error.add_note(
-                f"Unable to collect Docker Compose diagnostics: "
-                f"{diagnostic_error}"
+                "Structured diagnostics are available in integration-performance.json"
             )
         else:
-            error.add_note(diagnostics)
+            try:
+                diagnostics = await environment.logs()
+            except Exception as diagnostic_error:
+                error.add_note(
+                    f"Unable to collect Docker Compose diagnostics: {diagnostic_error}"
+                )
+            else:
+                error.add_note(diagnostics)
         raise
     finally:
-        output = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
         if output:
             failure_artifact: dict[str, object] = {}
             if primary_error is not None:

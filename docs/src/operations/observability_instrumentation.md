@@ -23,7 +23,9 @@ docker compose --env-file .env \
 For short diagnostic runs, use `diagnostic.env` and the
 `observability-diagnostic` profile. Stop the profiler and Pyroscope after the
 window. Recreate the Collector with the normal environment to restore the
-ordinary sampling percentage. The dedicated profiles share the CPU and RAM
+ordinary sampling percentage. For a trace-only reproduction, apply the
+diagnostic preset to `otel-collector` alone. This opens the short decision
+window without launching Alloy or Pyroscope. The dedicated profiles share the CPU and RAM
 limits in Compose. Adjust the preset's target regex to the containers needed
 for the experiment.
 
@@ -165,6 +167,8 @@ customer payloads and profiles of unrelated processes outside CI artifacts.
 
 The Bazel `integration-performance.json` report records startup and scenario
 durations before teardown. For failures, it also attempts to include catalog
-events, wait aggregates and top statement fingerprints. A missing section means
+events with trace IDs, wait aggregates and top statement fingerprints. The
+Bazel lifecycle uses this structured artifact in place of its legacy
+Compose log dump. A missing section means
 that snapshot was unavailable. The BuildBuddy invocation provides the Bazel
 critical path and cache information.
