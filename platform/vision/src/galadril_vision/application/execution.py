@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from galadril_ontology import (
+    GolDenied,
     GolError,
     GolRequest,
     GolRuntimeManager,
@@ -15,16 +15,12 @@ from galadril_ontology import (
     source_object_id,
 )
 from galadril_pipeline.config import PipelineStep
-from galadril_pipeline.events import PipelineCommand
+from galadril_pipeline.events import Failure, PipelineCommand
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
 from pydantic import JsonValue
 
-from galadril_vision.application.errors import (
-    CommandFailureReason,
-    CommandProcessingError,
-)
+from galadril_vision.application.errors import CommandProcessingError
 from galadril_vision.application.ontology import ontology_contract
-
-logger = logging.getLogger(__name__)
 
 
 class StepHandler(Protocol):
@@ -118,7 +114,9 @@ class PipelineExecutor:
                 f"Command step type '{command.step_type}' does not match '{binding.step.type}'"
             )
         if self._ontology_runtime is None:
-            raise CommandProcessingError("GOL runtime admission is required")
+            raise CommandProcessingError(
+                "GOL runtime admission is required", code=ErrorCode.UNAVAILABLE
+            )
         record = command.payload.get("record")
         if not isinstance(record, dict):
             raise CommandProcessingError("GOL source object unavailable")
@@ -137,39 +135,34 @@ class PipelineExecutor:
             pipeline_revision_id=route.revision_id,
             block_id=command.step,
         )
-        phase = "runtime_open"
+        phase = VisionPhase.RUNTIME_OPEN
         try:
             async with self._ontology_runtime.bind(
                 request,
                 ontology_contract(binding.step),
                 admission=command.admission,
             ):
-                phase = "handler"
+                phase = VisionPhase.HANDLER
                 return await binding.handler.execute(command, binding.step)
         except GolError as error:
             if isinstance(error, GolUnavailable):
-                reason = (
-                    CommandFailureReason.GOL_RUNTIME_UNAVAILABLE
-                    if phase == "runtime_open"
-                    else CommandFailureReason.GOL_HANDLER_UNAVAILABLE
+                code = ErrorCode.UNAVAILABLE
+            elif isinstance(error, GolDenied):
+                code = ErrorCode.ACCESS_DENIED
+            else:
+                code = ErrorCode.INTERNAL
+            if (
+                error.diagnostic_code is not None
+                and error.occurrence_id is not None
+            ):
+                try:
+                    code = ErrorCode(error.diagnostic_code)
+                except ValueError:
+                    # An older worker can retain the occurrence when the host adds a code.
+                    pass
+                failure = Failure(
+                    code=code, phase=phase, occurrence_id=error.occurrence_id
                 )
             else:
-                reason = (
-                    CommandFailureReason.GOL_RUNTIME_OPEN
-                    if phase == "runtime_open"
-                    else CommandFailureReason.GOL_HANDLER
-                )
-            logger.warning(
-                "GOL authorization unavailable for pipeline command",
-                extra={
-                    "event.name": "pipeline.gol.failed",
-                    "phase": phase,
-                    "reason": reason.value,
-                    "error_type": type(error).__name__,
-                    "step": command.step,
-                },
-            )
-            raise CommandProcessingError(
-                "Block GOL authorization is unavailable",
-                reason=reason,
-            ) from None
+                failure = Failure(code=code, phase=phase)
+            raise CommandProcessingError(code.value, failure=failure) from error

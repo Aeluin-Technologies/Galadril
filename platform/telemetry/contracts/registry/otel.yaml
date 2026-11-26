@@ -1,0 +1,16 @@
+file_format: definition/1
+imports:
+  metrics:
+    - http.server.request.duration
+    - rpc.server.call.duration
+    - db.client.operation.duration
+    - messaging.client.operation.duration
+    - cicd.pipeline.run.duration
+    - gen_ai.client.operation.duration
+    - gen_ai.client.token.usage
+  spans:
+    - span.http.server
+    - span.rpc.grpc.call.server
+    - span.db.client
+    - span.gen_ai.inference.client
+    - span.cicd.pipeline.run.server

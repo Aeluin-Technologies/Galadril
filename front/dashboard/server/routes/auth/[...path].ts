@@ -3,6 +3,16 @@ import { jwtVerify } from "jose";
 import { metrics } from "@opentelemetry/api";
 import { authConfig } from "../../auth/config.ts";
 import {
+  METRIC_AUTH_ATTEMPTS,
+  METRIC_AUTH_ATTEMPTS_UNIT,
+  authOperationValues,
+} from "../../auth/telemetry-contract.ts";
+import type {
+  AuthAttemptsAttributes,
+  AuthOperation,
+  AuthOutcome,
+} from "../../auth/telemetry-contract.ts";
+import {
   activeUser,
   findConnection,
   findLoginProvider,
@@ -50,31 +60,20 @@ const cookie = {
   path: "/",
 };
 const random = () => randomBytes(32).toString("base64url");
-const operations = new Set([
-  "session",
-  "mfa/options",
-  "mfa/verify",
-  "local/flow",
-  "local/callback",
-  "logout",
-  "start",
-  "login",
-  "polis/callback",
-  "consent",
-  "callback",
-  "mcp/continue",
-  "refresh",
-  "step-up",
-]);
+const operations = new Set<string>(authOperationValues);
+const isAuthOperation = (path: string | undefined): path is AuthOperation =>
+  path !== undefined && operations.has(path);
 const attempts = metrics
   .getMeter("galadril.studio.auth")
-  .createCounter("galadril.auth.attempts");
+  .createCounter<AuthAttemptsAttributes>(METRIC_AUTH_ATTEMPTS, {
+    unit: METRIC_AUTH_ATTEMPTS_UNIT,
+  });
 const challenge = (value: string) =>
   createHash("sha256").update(value).digest("base64url");
 
 export default defineEventHandler(async (event) => {
-  let outcome = "success";
-  let operation = "unknown";
+  let outcome: AuthOutcome = "success";
+  let operation: AuthOperation = "unknown";
   try {
     setResponseHeader(event, "Cache-Control", "private, no-store, max-age=0");
     setResponseHeader(event, "Vary", "Cookie, Authorization");
@@ -82,7 +81,7 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, "Referrer-Policy", "no-referrer");
     const config = authConfig();
     const path = getRouterParam(event, "path");
-    operation = operations.has(path ?? "") ? path! : "unknown";
+    operation = isAuthOperation(path) ? path : "unknown";
     const query = getQuery(event);
     const param = (name: string) => {
       const value = query[name];
@@ -777,6 +776,9 @@ export default defineEventHandler(async (event) => {
       },
     });
   } finally {
-    attempts.add(1, { operation, outcome });
+    attempts.add(1, {
+      "galadril.auth.operation": operation,
+      "galadril.auth.outcome": outcome,
+    });
   }
 });

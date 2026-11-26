@@ -65,17 +65,27 @@ processors:
     error_mode: ignore
     trace_conditions:
       - 'span.attributes["galadril.health_check"] == true and span.status.code != STATUS_CODE_ERROR'
-  filter/authorization_allows:
-    error_mode: ignore
+  filter/operational_logs:
+    error_mode: propagate
     log_conditions:
-      - 'resource.attributes["service.name"] == "galadril-gateway" and log.attributes["event.name"] == "authorization.check" and log.attributes["decision"] == "allow"'
-  transform/authorization_denials:
-    error_mode: ignore
+      - 'IsMatch(log.event_name, "^galadril[.]audit[.]")'
+      - 'log.attributes["event.name"] != nil and IsMatch(log.attributes["event.name"], "^galadril[.]audit[.]")'
+      - 'log.attributes["event.name"] == "authorization.check"'
+      - 'log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "allow"'
+  transform/operational_privacy:
+    error_mode: propagate
+    trace_statements:
+      - delete_matching_keys(span.attributes, "^galadril[.]audit[.]")
+      - delete_matching_keys(spanevent.attributes, "^galadril[.]audit[.]")
+    metric_statements:
+      - delete_matching_keys(datapoint.attributes, "^galadril[.]audit[.]")
     log_statements:
-      - context: log
-        statements:
-          - 'set(log.severity_text, "WARN") where resource.attributes["service.name"] == "galadril-gateway" and log.attributes["event.name"] == "authorization.check" and log.attributes["decision"] == "deny"'
-          - 'set(log.severity_number, SEVERITY_NUMBER_WARN) where resource.attributes["service.name"] == "galadril-gateway" and log.attributes["event.name"] == "authorization.check" and log.attributes["decision"] == "deny"'
+      - delete_matching_keys(log.attributes, "^galadril[.]audit[.]")
+      - 'set(log.attributes["event.name"], log.event_name) where IsMatch(log.event_name, "^galadril[.]")'
+      - 'set(log.severity_text, "ERROR") where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "error"'
+      - 'set(log.severity_number, SEVERITY_NUMBER_ERROR) where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "error"'
+      - 'set(log.severity_text, "WARN") where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "deny"'
+      - 'set(log.severity_number, SEVERITY_NUMBER_WARN) where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "deny"'
   batch:
     timeout: 2s
     send_batch_size: 2048
@@ -101,7 +111,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource, filter/health_checks, batch]
+      processors: [memory_limiter, resource, filter/health_checks, transform/operational_privacy, batch]
       exporters: [otlp/tempo]
     metrics:
       receivers: [
@@ -113,11 +123,11 @@ service:
         prometheus/collector,
         prometheus/profiler,
       ]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resource, transform/operational_privacy, batch]
       exporters: [prometheusremotewrite/mimir]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resource, transform/authorization_denials, filter/authorization_allows, batch]
+      processors: [memory_limiter, resource, filter/operational_logs, transform/operational_privacy, batch]
       exporters: [otlphttp/loki]
   telemetry:
     metrics:

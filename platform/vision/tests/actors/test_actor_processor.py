@@ -1,7 +1,6 @@
 """Unit tests for actor-local command contract enforcement."""
 
 import asyncio
-import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -389,19 +388,18 @@ def test_processor_injects_route_handlers_after_admission() -> None:
 
 
 @pytest.mark.parametrize(
-    ("failure_type", "phase", "category"),
+    ("failure_type", "phase", "code"),
     [
-        (GolDenied, "runtime_open", "gol_runtime_open"),
-        (GolDenied, "handler", "gol_handler"),
-        (GolUnavailable, "runtime_open", "gol_runtime_unavailable"),
-        (GolUnavailable, "handler", "gol_handler_unavailable"),
+        (GolDenied, "runtime_open", "access_denied"),
+        (GolDenied, "handler", "access_denied"),
+        (GolUnavailable, "runtime_open", "unavailable"),
+        (GolUnavailable, "handler", "unavailable"),
     ],
 )
-def test_processor_records_gol_failure_without_error_text(
-    caplog: pytest.LogCaptureFixture,
+def test_processor_preserves_structured_gol_failure(
     failure_type: type[GolDenied] | type[GolUnavailable],
     phase: str,
-    category: str,
+    code: str,
 ) -> None:
     """Reports a stable failure category without publishing protected details."""
     handler = MagicMock()
@@ -427,24 +425,13 @@ def test_processor_records_gol_failure_without_error_text(
         step_type=StepType.DBT,
         resource_class=ResourceClass.CPU,
     )
-    with (
-        caplog.at_level(logging.WARNING),
-        pytest.raises(
-            CommandProcessingError, match="GOL authorization"
-        ) as rejected,
-    ):
+    with pytest.raises(CommandProcessingError) as rejected:
         asyncio.run(processor.process(command))
 
-    failure = next(
-        record
-        for record in caplog.records
-        if record.__dict__.get("event.name") == "pipeline.gol.failed"
-    )
-    assert failure.__dict__["phase"] == phase
-    assert failure.__dict__["reason"] == category
-    assert failure.__dict__["error_type"] == failure_type.__name__
-    assert rejected.value.reason == category
-    assert "protected detail" not in caplog.text
+    assert rejected.value.failure.phase == phase
+    assert rejected.value.failure.code == code
+    assert rejected.value.__cause__ is fault
+    assert "protected detail" not in str(rejected.value)
 
 
 def test_builtin_resources_are_owned_by_each_route() -> None:

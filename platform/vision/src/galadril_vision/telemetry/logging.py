@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 
 import structlog
+from galadril_pipeline.telemetry_contract import Attribute
+from opentelemetry._logs import SeverityNumber, get_logger
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider
 from structlog.types import EventDict, Processor
@@ -13,6 +16,19 @@ from structlog.types import EventDict, Processor
 _EVENT_SEPARATOR = re.compile(r"[^a-z0-9]+")
 _LOG_RECORD_KEYS = frozenset(logging.makeLogRecord({}).__dict__)
 _LOGGING_INSTRUMENTOR = LoggingInstrumentor()
+
+
+def emit_contract_event(
+    name: str, message: str, attributes: Mapping[str, Attribute]
+) -> None:
+    """Bypasses workflow log bindings so only approved attributes reach OTLP."""
+    get_logger("galadril.telemetry.contract").emit(
+        event_name=name,
+        severity_number=SeverityNumber.WARN,
+        severity_text="WARN",
+        body=message,
+        attributes=attributes,
+    )
 
 
 class OTLPContextProcessor:

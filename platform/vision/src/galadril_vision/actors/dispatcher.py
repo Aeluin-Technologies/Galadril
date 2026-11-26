@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+from asyncio import CancelledError
 from collections.abc import Awaitable, Mapping, Sequence
 from typing import Protocol, TypeVar, cast
 
-from galadril_pipeline.events import PipelineCommand, ResourceClass, StepResult
+from galadril_pipeline.events import (
+    EventStatus,
+    Failure,
+    PipelineCommand,
+    ResourceClass,
+    StepResult,
+)
+from galadril_pipeline.telemetry_contract import (
+    SPAN_VISION_STEP_DISPATCH,
+    ErrorCode,
+    VisionOutcome,
+    VisionPhase,
+    vision_step_dispatch_attributes,
+)
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
-from ray.exceptions import RayTaskError
+from ray.exceptions import ActorDiedError, ActorUnavailableError, RayTaskError
 
 from galadril_vision.application.errors import (
-    CommandFailureReason,
     CommandProcessingError,
+    execution_failure,
 )
 from galadril_vision.telemetry.context import inject_trace_context
+from galadril_vision.telemetry.failures import record_failure
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
 T = TypeVar("T")
@@ -63,44 +78,56 @@ class RayActorDispatcher:
     async def dispatch(self, command: PipelineCommand) -> StepResult:
         """Awaits a Ray ObjectRef cooperatively and validates its result contract."""
         actor = self._next_actor(command.resource_class)
-        labels = {
-            "pipeline": command.pipeline,
-            "step": command.step,
-            "resource_class": command.resource_class.value,
-        }
         tracer = trace.get_tracer("galadril.ray.dispatcher")
         with tracer.start_as_current_span(
-            "ray.dispatch",
+            SPAN_VISION_STEP_DISPATCH,
             kind=SpanKind.PRODUCER,
-            attributes={
-                "messaging.message.id": str(command.event_id),
-                "galadril.pipeline": command.pipeline,
-                "galadril.pipeline.step": command.step,
-                "ray.resource_class": command.resource_class.value,
-            },
-        ):
+            attributes=vision_step_dispatch_attributes(
+                messaging_message_id=str(command.event_id),
+                pipeline_attempt=command.attempt,
+                vision_resource_class=command.resource_class,
+            ),
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             carrier = inject_trace_context()
-            self._metrics.ray_task_started(**labels)
+            self._metrics.ray_task_started(command.resource_class)
+            outcome = VisionOutcome.FAILED
+            phase = VisionPhase.DISPATCH
             try:
                 reference = actor.execute.remote(
                     command.model_dump_json().encode("utf-8"), carrier
                 )
                 payload = await _await_reference(reference)
+                phase = VisionPhase.RESULT
                 result = StepResult.model_validate_json(payload)
-            except Exception as error:
-                self._metrics.ray_task_completed(**labels, outcome="failed")
-                if (
-                    isinstance(error, RayTaskError)
-                    and isinstance(error.cause, CommandProcessingError)
-                    and isinstance(error.cause.reason, CommandFailureReason)
-                ):
-                    reason = error.cause.reason
-                    raise CommandProcessingError(
-                        reason.public_message(), reason=reason
-                    ) from None
+                if result.failure is not None:
+                    record_failure(
+                        command, result.failure, VisionPhase.DISPATCH, span=span
+                    )
+                elif result.status is EventStatus.COMPLETED:
+                    outcome = VisionOutcome.COMPLETED
+                return result
+            except CancelledError:
+                outcome = VisionOutcome.CANCELLED
                 raise
-            self._metrics.ray_task_completed(**labels, outcome="completed")
-            return result
+            except Exception as error:
+                if isinstance(error, RayTaskError) and isinstance(
+                    error.cause, CommandProcessingError
+                ):
+                    failure = error.cause.failure
+                elif isinstance(error, (ActorDiedError, ActorUnavailableError)):
+                    failure = Failure(code=ErrorCode.UNAVAILABLE, phase=phase)
+                else:
+                    failure = execution_failure(error, phase)
+                record_failure(command, failure, phase, span=span)
+                raise CommandProcessingError(
+                    failure.code.value, failure=failure
+                ) from None
+            finally:
+                self._metrics.ray_task_completed(
+                    command.resource_class, outcome
+                )
 
     def _next_actor(self, resource: ResourceClass) -> ActorHandle:
         """Returns an actor in constant time using a bounded integer cursor."""

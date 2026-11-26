@@ -11,6 +11,7 @@ py_library(
     imports = ["../.."],
     visibility = [
         "//platform/vision/src:__subpackages__",
+        "//platform/telemetry/contracts:__pkg__",
         "//platform/vision/tests:__subpackages__",
     ],
     deps = [

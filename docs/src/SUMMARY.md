@@ -14,6 +14,7 @@
   - [Dashboard Builder](studio/dashboard-builder.md)
 
 - [Operations](operations/telemetry.md)
+  - [Observability Contracts](operations/observability_contracts.md)
   - [API Proxies](operations/proxies.md)
   - [Enterprise SSO](operations/enterprise_sso.md)
   - [Kubernetes and k3s](operations/kubernetes.md)

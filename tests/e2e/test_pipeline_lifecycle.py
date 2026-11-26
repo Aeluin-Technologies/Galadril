@@ -5,8 +5,10 @@ from __future__ import annotations
 import sys
 
 import pytest
+from clients import GraphQLOperationError
 from gateway_scenario import gateway_scenario
 from pipeline_ingestion import (
+    assert_failed_ingestion,
     assert_ingestion_access,
     assert_ingestion_lineage,
     ingest_record,
@@ -35,6 +37,12 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             scenario, state, object_key, source_raw_id
         )
         await assert_ingestion_lineage(state)
+        query = "query { administration { auditEvents(limit: 1) { action } } }"
+        await scenario.gateway.execute(scenario.uploader_token, query)
+        with pytest.raises(GraphQLOperationError) as denied:
+            await scenario.gateway.execute(scenario.outsider_token, query)
+        denied.value.require_forbidden(("administration", "auditEvents"))
+        await assert_failed_ingestion(scenario)
 
 
 if __name__ == "__main__":

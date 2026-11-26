@@ -1,0 +1,7 @@
+file_format: definition_manifest/2.0
+name: example-plugin
+description: Independent example of plugin-owned telemetry.
+schema_url: https://galadril.aeluin.com/schemas/plugins/example/1.0.0
+dependencies:
+  - schema_url: https://galadril.aeluin.com/schemas/1.0.0
+    registry_path: registry

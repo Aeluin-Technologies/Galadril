@@ -1,0 +1,27 @@
+{%- macro identifier(key) -%}
+{{ key | replace("galadril.", "") | replace(".", "_") }}
+{%- endmacro -%}
+
+{%- macro pytype(attribute) -%}
+{%- if attribute.type.members is defined -%}
+{{ identifier(attribute.key) | pascal_case }}
+{%- else -%}
+{{ {"string": "str", "int": "int", "double": "float", "boolean": "bool", "string[]": "tuple[str, ...]"}[attribute.type] }}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro tstype(attribute) -%}
+{%- if attribute.type.members is defined -%}
+{{ identifier(attribute.key) | pascal_case }}
+{%- else -%}
+{{ {"string": "string", "int": "number", "double": "number", "boolean": "boolean", "string[]": "readonly string[]"}[attribute.type] }}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro rusttype(attribute) -%}
+{%- if attribute.type.members is defined -%}
+{{ identifier(attribute.key) | pascal_case }}
+{%- else -%}
+{{ {"string": "&str", "int": "i64", "double": "f64", "boolean": "bool", "string[]": "&[&str]"}[attribute.type] }}
+{%- endif -%}
+{%- endmacro -%}

@@ -1,0 +1,25 @@
+whitespace_control:
+  trim_blocks: true
+  lstrip_blocks: true
+
+templates:
+  - template: contracts.py.j2
+    application_mode: single
+    file_name: contracts.py
+    filter: .registry
+  - template: contracts.rs.j2
+    application_mode: single
+    file_name: contracts.rs
+    filter: .registry
+  - template: contracts.ts.j2
+    application_mode: single
+    file_name: contracts.ts
+    filter: .registry
+  - template: catalog.json.j2
+    application_mode: single
+    file_name: catalog.json
+    filter: '.registry.attributes[] | select(.key == "galadril.error.code") | .type.members'
+  - template: live-check.toml.j2
+    application_mode: single
+    file_name: live-check.toml
+    filter: .registry

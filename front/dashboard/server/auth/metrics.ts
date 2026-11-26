@@ -6,6 +6,10 @@ import {
 } from "@opentelemetry/sdk-metrics";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
+import {
+  METRIC_AUTH_ATTEMPTS,
+  authAttemptsAttributeKeys,
+} from "./telemetry-contract.ts";
 
 /** Unapproved instruments must never fall back to the SDK's default aggregation. */
 class AggregateMetricReader extends PeriodicExportingMetricReader {
@@ -23,10 +27,10 @@ export function createAggregateMetricsProvider(exporter: PushMetricExporter) {
     ],
     views: [
       {
-        instrumentName: "galadril.auth.attempts",
+        instrumentName: METRIC_AUTH_ATTEMPTS,
         aggregation: { type: AggregationType.SUM },
         attributesProcessors: [
-          createAllowListAttributesProcessor(["operation", "outcome"]),
+          createAllowListAttributesProcessor([...authAttemptsAttributeKeys]),
         ],
         aggregationCardinalityLimit: 32,
       },

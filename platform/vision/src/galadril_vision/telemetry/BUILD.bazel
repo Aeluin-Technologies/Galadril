@@ -11,6 +11,7 @@ py_library(
     srcs = [
         "__init__.py",
         "context.py",
+        "failures.py",
         "logging.py",
         "metrics.py",
         "tracing.py",
@@ -18,9 +19,11 @@ py_library(
     imports = ["../.."],
     visibility = [
         "//platform/vision/src:__subpackages__",
+        "//platform/telemetry/contracts:__pkg__",
         "//platform/vision/tests:__subpackages__",
     ],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
         "@pip//opentelemetry_instrumentation_logging",

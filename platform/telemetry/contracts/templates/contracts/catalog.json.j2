@@ -1,0 +1,13 @@
+{
+{% for member in ctx %}
+  {{ member.value | tojson }}: {
+    "meaning": {{ member.brief | tojson }},
+    "category": {{ member.annotations.category | tojson }},
+    "retry": {{ member.annotations.retry | tojson }},
+    "http": {{ member.annotations.http }},
+    "graphql": {{ member.value | tojson }},
+    "grpc": {{ member.annotations.grpc | tojson }},
+    "confidentiality": {{ member.annotations.confidentiality | tojson }}
+  }{% if not loop.last %},{% endif %}{{ "\n" -}}
+{% endfor %}
+}

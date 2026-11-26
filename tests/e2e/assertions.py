@@ -7,6 +7,11 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 
+from galadril_pipeline.telemetry_contract import (
+    SPAN_VISION_STEP_DISPATCH,
+    SPAN_VISION_STEP_EXECUTE,
+)
+
 _SPAN_NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9._/-]{0,95}", re.ASCII)
 
 
@@ -106,9 +111,9 @@ def complete_tempo_trace(
     return trace
 
 
-def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
-    """Reports span names without releasing messages, attributes or events."""
-    names: set[str] = set()
+def tempo_spans(trace: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    """Collects emitted spans from an OTLP-backed Tempo response."""
+    result: list[dict[str, object]] = []
     batches = trace.get("batches") or trace.get("resourceSpans")
     if not isinstance(batches, list):
         return ()
@@ -120,15 +125,71 @@ def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
             spans = scope.get("spans") if isinstance(scope, dict) else None
             if not isinstance(spans, list):
                 continue
-            for span in spans:
-                if not isinstance(span, dict):
-                    continue
-                status, name = span.get("status"), span.get("name")
-                if (
-                    isinstance(status, dict)
-                    and status.get("code") in (2, "STATUS_CODE_ERROR")
-                    and isinstance(name, str)
-                    and _SPAN_NAME.fullmatch(name)
-                ):
-                    names.add(name)
+            result.extend(span for span in spans if isinstance(span, dict))
+    return tuple(result)
+
+
+def _tempo_message_id(span: Mapping[str, object]) -> str | None:
+    attributes = span.get("attributes")
+    if not isinstance(attributes, list):
+        return None
+    for attribute in attributes:
+        if (
+            isinstance(attribute, dict)
+            and attribute.get("key") == "messaging.message.id"
+        ):
+            value = attribute.get("value")
+            if isinstance(value, dict) and isinstance(
+                message_id := value.get("stringValue"), str
+            ):
+                return message_id
+    return None
+
+
+def require_tempo_ray_spans(
+    trace: Mapping[str, object], expected_commands: frozenset[str]
+) -> None:
+    """Requires a directly linked dispatch and execution per Kafka command."""
+    dispatches: set[tuple[str, str]] = set()
+    executions: list[tuple[str, object]] = []
+    for span in tempo_spans(trace):
+        name = span.get("name")
+        if name not in (SPAN_VISION_STEP_DISPATCH, SPAN_VISION_STEP_EXECUTE):
+            continue
+        command = _tempo_message_id(span)
+        if command is None or command not in expected_commands:
+            continue
+        if name == SPAN_VISION_STEP_DISPATCH:
+            span_id = span.get("spanId")
+            if isinstance(span_id, str) and span_id:
+                dispatches.add((command, span_id))
+        else:
+            executions.append((command, span.get("parentSpanId")))
+
+    matched: set[str] = set()
+    orphaned = 0
+    for command, parent in executions:
+        if isinstance(parent, str) and (command, parent) in dispatches:
+            matched.add(command)
+        else:
+            orphaned += 1
+    if matched != expected_commands or orphaned:
+        raise AssertionError(
+            f"Tempo matched {len(matched)} of {len(expected_commands)} commands "
+            f"to a Ray span pair. {orphaned} execution spans lack their dispatch parent."
+        )
+
+
+def tempo_error_spans(trace: Mapping[str, object]) -> tuple[str, ...]:
+    """Reports span names without releasing messages, attributes or events."""
+    names: set[str] = set()
+    for span in tempo_spans(trace):
+        status, name = span.get("status"), span.get("name")
+        if (
+            isinstance(status, dict)
+            and status.get("code") in (2, "STATUS_CODE_ERROR")
+            and isinstance(name, str)
+            and _SPAN_NAME.fullmatch(name)
+        ):
+            names.add(name)
     return tuple(sorted(names)[:24])

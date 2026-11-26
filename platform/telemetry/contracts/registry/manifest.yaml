@@ -1,0 +1,7 @@
+file_format: definition_manifest/2.0
+name: galadril
+description: Operational and protected audit conventions for Galadril.
+schema_url: https://galadril.aeluin.com/schemas/1.0.0
+dependencies:
+  - schema_url: https://opentelemetry.io/schemas/1.41.0
+    registry_path: semconv

@@ -465,3 +465,5 @@ js_test(
     ],
     entry_point = "tests/pdf-signing.test.ts",
 )
+
+exports_files(["server/auth/telemetry-contract.ts"], visibility = ["//platform/telemetry/contracts:__pkg__"])

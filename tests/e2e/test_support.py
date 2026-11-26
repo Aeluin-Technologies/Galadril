@@ -22,7 +22,12 @@ import clients as e2e_clients
 import environment as e2e_environment
 import httpx
 import pytest
-from assertions import complete_tempo_trace, eventually, tempo_service_names
+from assertions import (
+    complete_tempo_trace,
+    eventually,
+    require_tempo_ray_spans,
+    tempo_service_names,
+)
 from clients import (
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     _vision_consumer_groups_have_members,
@@ -43,6 +48,10 @@ from environment import (
 )
 from galadril_pipeline.config import StepType
 from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
+from galadril_pipeline.telemetry_contract import (
+    SPAN_VISION_STEP_DISPATCH,
+    SPAN_VISION_STEP_EXECUTE,
+)
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
@@ -935,6 +944,51 @@ def test_tempo_trace_waits_for_every_required_service() -> None:
     assert complete_tempo_trace(complete, required) is complete
 
 
+def test_tempo_trace_requires_the_exact_dispatch_for_each_ray_execution() -> (
+    None
+):
+    """Tempo can expose a worker span before its parent reaches storage."""
+
+    def span(
+        name: str, span_id: str, command_id: str, parent_id: str = ""
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "spanId": span_id,
+            "parentSpanId": parent_id,
+            "attributes": [
+                {
+                    "key": "messaging.message.id",
+                    "value": {"stringValue": command_id},
+                }
+            ],
+        }
+
+    first_dispatch = span(SPAN_VISION_STEP_DISPATCH, "dispatch-1", "one")
+    first_execution = span(
+        SPAN_VISION_STEP_EXECUTE, "execute-1", "one", "dispatch-1"
+    )
+    second_dispatch = span(SPAN_VISION_STEP_DISPATCH, "dispatch-2", "two")
+    second_execution = span(
+        SPAN_VISION_STEP_EXECUTE, "execute-2", "two", "dispatch-2"
+    )
+    wrong_parent = {**second_execution, "parentSpanId": "dispatch-1"}
+    spans = [first_dispatch, first_execution]
+    trace = {"batches": [{"scopeSpans": [{"spans": spans}]}]}
+    expected = frozenset({"one", "two"})
+
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans.append(second_execution)
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans[-1:] = [second_dispatch, wrong_parent]
+    with pytest.raises(AssertionError, match="1 of 2 command"):
+        require_tempo_ray_spans(trace, expected)
+    spans[-1] = second_execution
+    require_tempo_ray_spans(trace, expected)
+
+
 def test_tempo_failure_reports_only_error_span_names() -> None:
     """Keeps exported error details and trace payloads out of test failures."""
     from assertions import tempo_error_spans
@@ -1147,71 +1201,38 @@ def test_compose_diagnostics_expose_outbox_worker_state(
     assert "application_name" in rendered
     assert "find /tmp/ray" not in rendered
     assert "worker-*.err" in rendered
-    assert commands[-1][-2:] == ("12000", "otel-collector")
+    assert commands[-1][-2].endswith(":/tmp/galadril-e2e-logs.jsonl")
 
 
 def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
-    logs = """
-otel-collector-1  | LogRecord #0
-otel-collector-1  | Body: Str(protected value)
-otel-collector-1  |      -> event.name: Str(gol.worker.effect.denied)
-otel-collector-1  |      -> phase: Str(write_contract)
-otel-collector-1  |      -> reason: Str(value with spaces)
-otel-collector-1  | LogRecord #1
-otel-collector-1  | EventName: ray.actor.task.failed
-otel-collector-1  |      -> error_type: Str(VectorSearchError)
-otel-collector-1  |      -> step: Str(resolve)
-otel-collector-1  | LogRecord #2
-otel-collector-1  | EventName: unrelated.event
-otel-collector-1  |      -> error_type: Str(PrivateError)
-otel-collector-1  | LogRecord #3
-otel-collector-1  | EventName: pipeline.command.failed
-otel-collector-1  |      -> error_type: Str(RayTaskError(CommandProcessingError))
-otel-collector-1  |      -> step: Str(resolve)
-otel-collector-1  | LogRecord #4
-otel-collector-1  | EventName: pipeline.gol.failed
-otel-collector-1  |      -> phase: Str(handler)
-otel-collector-1  |      -> error_type: Str(GolDenied)
-otel-collector-1  |      -> step: Str(sink)
-otel-collector-1  | LogRecord #5
-otel-collector-1  | EventName: gol.worker.resume.denied
-otel-collector-1  |      -> phase: Str(principal_and_input)
-otel-collector-1  | LogRecord #6
-otel-collector-1  | EventName: pipeline.gol.rpc.failed
-otel-collector-1  |      -> phase: Str(begin)
-otel-collector-1  |      -> reason: Str(ReadTimeout)
-otel-collector-1  | LogRecord #7
-otel-collector-1  | EventName: pipeline.publication.failed
-otel-collector-1  |      -> phase: Str(authorize)
-otel-collector-1  |      -> topic: Str(pipeline.lineage.v1)
-otel-collector-1  |      -> status: Str(completed)
-otel-collector-1  |      -> error_type: Str(GolUnavailable)
-otel-collector-1  | LogRecord #8
-otel-collector-1  | EventName: gol.worker.invariant.denied
-otel-collector-1  |      -> reason: Str(Relationship)
-otel-collector-1  | LogRecord #9
-otel-collector-1  | EventName: gol.worker.effect.denied
-otel-collector-1  |      -> phase: Str(write_invariant)
-otel-collector-1  |      -> archive_error: Str(Some(Expired))
-otel-collector-1  | LogRecord #10
-otel-collector-1  | EventName: gol.worker.open.denied
-otel-collector-1  |      -> phase: Str(metadata)
-otel-collector-1  |      -> export_error: Str(Some(AuthorizationUnavailable))
-otel-collector-1  | LogRecord #11
-otel-collector-1  | EventName: gol.publication.denied
-"""
-    assert e2e_environment._pipeline_failure_events(logs).splitlines() == [
-        "gol.worker.effect.denied phase=write_contract",
-        "ray.actor.task.failed error_type=VectorSearchError step=resolve",
-        "pipeline.command.failed error_type=RayTaskError(CommandProcessingError) step=resolve",
-        "pipeline.gol.failed phase=handler error_type=GolDenied step=sink",
-        "gol.worker.resume.denied phase=principal_and_input",
-        "pipeline.gol.rpc.failed phase=begin reason=ReadTimeout",
-        "pipeline.publication.failed phase=authorize topic=pipeline.lineage.v1 status=completed error_type=GolUnavailable",
-        "gol.worker.invariant.denied reason=Relationship",
-        "gol.worker.effect.denied phase=write_invariant archive_error=Some(Expired)",
-        "gol.worker.open.denied phase=metadata export_error=Some(AuthorizationUnavailable)",
-        "gol.publication.denied",
+    occurrence = str(uuid4())
+    attributes = {
+        "galadril.error.code": {"stringValue": "access_denied"},
+        "galadril.error.occurrence_id": {"stringValue": occurrence},
+        "galadril.vision.phase": {"stringValue": "handler"},
+        "galadril.pipeline.attempt": {"intValue": "1"},
+        "galadril.vision.retry_scheduled": {"boolValue": False},
+        "galadril.audit.principal_id": {"stringValue": "private actor"},
+    }
+    entries = [
+        {
+            "eventName": "galadril.vision.step.failed",
+            "body": {"stringValue": "private receipt"},
+            "attributes": [
+                {"key": key, "value": value}
+                for key, value in attributes.items()
+            ],
+        },
+        {"eventName": "galadril.audit.authorization.decided"},
+    ]
+    logs = json.dumps(
+        {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
+    )
+    assert e2e_environment._pipeline_failure_events(
+        [logs, "partial {"]
+    ).splitlines() == [
+        f"galadril.vision.step.failed code=access_denied occurrence_id={occurrence} "
+        "phase=handler attempt=1 retry_scheduled=false"
     ]
 
 
@@ -1404,6 +1425,32 @@ def test_environment_preserves_structured_application_log_bodies() -> None:
     assert "verbosity: detailed" in collector
     assert "filter/drop_debug:" in collector
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
+
+
+def test_collector_log_export_has_project_owned_writable_storage() -> None:
+    """Keeps the file exporter readable through Docker's archive API."""
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    _, storage_service, observability = compose.partition(
+        "\n  otel-log-storage:\n"
+    )
+    assert storage_service
+    initializer, collector_service, collector = observability.partition(
+        "\n  otel-collector:\n"
+    )
+    assert collector_service
+    collector = collector.split("\n  registry:\n", 1)[0]
+    assert "chown 10001:10001 /logs" in initializer
+    assert "chmod 0700 /logs" in initializer
+    assert "- otel-logs:/logs" in initializer
+    assert "- otel-logs:/tmp" in collector
+    assert (
+        "otel-log-storage:\n        condition: service_completed_successfully"
+        in collector
+    )
+    assert "\n  otel-logs:\n" in compose
+    assert "path: /tmp/galadril-e2e-logs.jsonl" in E2E_OTEL_COLLECTOR.read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,68 @@
+file_format: definition/1
+groups:
+  - id: registry.galadril.errors
+    type: attribute_group
+    brief: Canonical Galadril errors attributes.
+    stability: stable
+    attributes:
+      - id: galadril.error.code
+        brief: Stable application error code assigned at the originating boundary.
+        stability: stable
+        annotations:
+          galadril.cardinality: bounded
+          galadril.classification: operational
+        type:
+          members:
+            - id: access_denied
+              value: access_denied
+              brief: The requested action exceeds the verified authority.
+              stability: stable
+              annotations: {category: authorization, retry: after_authority_change, http: 403, grpc: PERMISSION_DENIED, confidentiality: protected_context}
+            - id: ifc_violation
+              value: ifc_violation
+              brief: The requested flow violates an information-flow constraint.
+              stability: stable
+              annotations: {category: information_flow, retry: after_authority_change, http: 403, grpc: PERMISSION_DENIED, confidentiality: protected_context}
+            - id: concurrent_conflict
+              value: concurrent_conflict
+              brief: A concurrent operation invalidated the attempted state transition.
+              stability: stable
+              annotations: {category: conflict, retry: with_fresh_state, http: 409, grpc: ABORTED, confidentiality: code_only}
+            - id: unavailable
+              value: unavailable
+              brief: A required dependency is currently unavailable.
+              stability: stable
+              annotations: {category: availability, retry: if_idempotent, http: 503, grpc: UNAVAILABLE, confidentiality: code_only}
+            - id: deadline_exceeded
+              value: deadline_exceeded
+              brief: An operation exhausted its execution deadline.
+              stability: stable
+              annotations: {category: timeout, retry: if_idempotent, http: 504, grpc: DEADLINE_EXCEEDED, confidentiality: code_only}
+            - id: expired
+              value: expired
+              brief: The command or capability has exceeded its validity period.
+              stability: stable
+              annotations: {category: expiration, retry: with_fresh_state, http: 410, grpc: FAILED_PRECONDITION, confidentiality: protected_context}
+            - id: invalid_input
+              value: invalid_input
+              brief: The input cannot satisfy the operation contract.
+              stability: stable
+              annotations: {category: permanent, retry: never, http: 400, grpc: INVALID_ARGUMENT, confidentiality: code_only}
+            - id: invalid_result
+              value: invalid_result
+              brief: The execution result violates the internal result contract.
+              stability: stable
+              annotations: {category: internal, retry: never, http: 500, grpc: INTERNAL, confidentiality: code_only}
+            - id: internal
+              value: internal
+              brief: An unexpected internal error prevented completion.
+              stability: stable
+              annotations: {category: internal, retry: never, http: 500, grpc: INTERNAL, confidentiality: code_only}
+      - id: galadril.error.occurrence_id
+        type: string
+        brief: Random UUID created once at the failure origin and preserved by adapters.
+        examples: 8fa86263-7c40-47a8-af25-a7b34ccf0b22
+        stability: stable
+        annotations:
+          galadril.cardinality: unbounded
+          galadril.classification: operational

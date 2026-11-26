@@ -395,7 +395,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count by (__name__) ({__name__=~\"http_server_request_count_total|messaging_process_count_total|compilation_count_total|galadril_pipeline_messages_total|galadril_ray_actor_tasks_total\"})",
+          "expr": "count by (__name__) ({__name__=~\"http_server_request_count_total|messaging_process_count_total|compilation_count_total|galadril_vision_step_messages_total|galadril_vision_task_completed_total\"})",
           "legendFormat": "{{job}} / {{__name__}}",
           "range": true
         }

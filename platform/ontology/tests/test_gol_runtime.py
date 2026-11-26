@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 from galadril_ontology import (
@@ -224,9 +225,18 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
     async def test_transport_failure_reports_only_operation_and_category(
         self,
     ) -> None:
+        occurrence = uuid4()
+
         def transport(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/internal/gol/runtime":
-                return httpx.Response(403, text="protected response")
+                return httpx.Response(
+                    403,
+                    headers={
+                        "x-galadril-error-code": "access_denied",
+                        "x-galadril-error-occurrence-id": str(occurrence),
+                    },
+                    text="protected response",
+                )
             self.assertNotIn("metadataTarget", json.loads(request.content))
             raise httpx.ReadTimeout(
                 "protected transport details", request=request
@@ -243,8 +253,10 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(transport)
         )
         with self.assertLogs("galadril_ontology.client", "WARNING") as logs:
-            with self.assertRaises(GolDenied):
+            with self.assertRaises(GolDenied) as denied:
                 await client.open(request, "private admission")
+            self.assertEqual(denied.exception.diagnostic_code, "access_denied")
+            self.assertEqual(denied.exception.occurrence_id, occurrence)
             with self.assertRaises(GolUnavailable):
                 async with client.protected(
                     request,

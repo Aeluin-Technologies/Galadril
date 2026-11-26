@@ -17,12 +17,26 @@ use cedar_policy::{
     PolicySet, Request, RestrictedExpression,
 };
 use chrono::Timelike as _;
+use galadril_telemetry::contract::{
+    AuthorizationDecision, ErrorCode, emit_gateway_authorization_check,
+};
 use loth::engine::LothEngine;
 use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 
 use super::relationship_retry::resilient_structural_check;
 use crate::application::ports::iam_store::IamStore;
 use crate::domain::validate_tenant_id;
+
+fn authorization_error(code: ErrorCode) {
+    let mut buffer = uuid::Uuid::encode_buffer();
+    let occurrence =
+        uuid::Uuid::new_v4().hyphenated().encode_lower(&mut buffer);
+    emit_gateway_authorization_check(
+        AuthorizationDecision::Error,
+        Some(code),
+        Some(occurrence),
+    );
+}
 
 /// Dynamic request context.
 #[derive(
@@ -247,26 +261,16 @@ impl AuthService {
         let structural = match structural_result {
             Ok(decision) => decision,
             Err(error) => {
-                let grpc_code = match &error {
-                    AuthError::SpiceDbStatus { status, .. } => {
-                        Some(status.code() as i32)
+                let code = match &error {
+                    AuthError::SpiceDbStatus { status, .. }
+                        if status.code() == tonic::Code::DeadlineExceeded =>
+                    {
+                        ErrorCode::DeadlineExceeded
                     },
-                    _ => None,
+                    AuthError::SpiceDbStatus { .. } => ErrorCode::Unavailable,
+                    _ => ErrorCode::Internal,
                 };
-                tracing::error!(
-                    event.name = "authorization.check",
-                    tenant_id,
-                    actor_type = "user",
-                    actor_id = user_id,
-                    resource_type,
-                    resource_id = rid.as_ref(),
-                    permission = permission.as_str(),
-                    decision = "error",
-                    service = "gateway",
-                    error.kind = "spicedb_unavailable",
-                    grpc_code,
-                    "authorization dependency failed closed"
-                );
+                authorization_error(code);
                 return Err(error).context("Loth check_permission failed");
             },
         };
@@ -293,33 +297,18 @@ impl AuthService {
         let decision = match contextual_decision {
             Ok(decision) => decision,
             Err(error) => {
-                tracing::error!(
-                    event.name = "authorization.check",
-                    tenant_id,
-                    actor_type = "user",
-                    actor_id = user_id,
-                    resource_type,
-                    resource_id = rid.as_ref(),
-                    permission = permission.as_str(),
-                    decision = "error",
-                    service = "gateway",
-                    error.kind = "policy_evaluation_failed",
-                    "authorization policy evaluation failed closed"
-                );
+                authorization_error(ErrorCode::Internal);
                 return Err(error);
             },
         };
-        tracing::info!(
-            event.name = "authorization.check",
-            tenant_id,
-            actor_type = "user",
-            actor_id = user_id,
-            resource_type,
-            resource_id = rid.as_ref(),
-            permission = permission.as_str(),
-            decision = if decision { "allow" } else { "deny" },
-            service = "gateway",
-            "authorization decision"
+        emit_gateway_authorization_check(
+            if decision {
+                AuthorizationDecision::Allow
+            } else {
+                AuthorizationDecision::Deny
+            },
+            None,
+            None,
         );
         Ok(decision)
     }

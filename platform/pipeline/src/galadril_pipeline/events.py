@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -14,9 +14,14 @@ from pydantic import (
     JsonValue,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from galadril_pipeline.config import StepType
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
+from galadril_pipeline.telemetry_contract import (
+    VisionResourceClass as ResourceClass,
+)
 
 EventString = Annotated[
     str,
@@ -32,14 +37,6 @@ LineageProof = Annotated[str, StringConstraints(min_length=1, max_length=65536)]
 def utc_now() -> datetime:
     """Returns an aware UTC timestamp for event envelopes."""
     return datetime.now(UTC)
-
-
-class ResourceClass(StrEnum):
-    """Execution pools used to isolate workloads with different constraints."""
-
-    CPU = "cpu"
-    GPU = "gpu"
-    CAUSAL = "causal"
 
 
 class EventStatus(StrEnum):
@@ -96,6 +93,18 @@ class PipelineCommand(EventEnvelope):
         return f"{self.event_id}:{self.pipeline}:{self.step}"
 
 
+class Failure(BaseModel):
+    """Safe failure correlation carried between execution and transport adapters."""
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", hide_input_in_errors=True
+    )
+
+    code: ErrorCode
+    occurrence_id: UUID = Field(default_factory=uuid4)
+    phase: VisionPhase
+
+
 class StepResult(EventEnvelope):
     """Durable outcome produced after a Ray actor finishes a command."""
 
@@ -108,8 +117,20 @@ class StepResult(EventEnvelope):
     attempt: int = Field(default=0, ge=0)
     duration_seconds: float = Field(ge=0.0)
     output: dict[str, JsonValue] = Field(default_factory=dict)
+    failure: Failure | None = None
     error_type: EventString | None = None
     error_message: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode="after")
+    def require_failed_status(self) -> Self:
+        """Prevents a structured failure from being interpreted as output."""
+        if self.failure is not None and (
+            self.status is not EventStatus.FAILED or self.output
+        ):
+            raise ValueError(
+                "A failure requires a failed result without output"
+            )
+        return self
 
 
 class LineageEvent(EventEnvelope):

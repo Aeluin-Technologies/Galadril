@@ -1,0 +1,75 @@
+file_format: definition/1
+groups:
+  - id: span.galadril.gol.runtime.bind
+    type: span
+    span_kind: internal
+    brief: Acquires the ontology binding for an admitted execution.
+    stability: development
+    attributes:
+      - {ref: galadril.pipeline.revision_id, requirement_level: required}
+      - ref: galadril.gol.revision_id
+        requirement_level: {conditionally_required: Once the runtime resolves the ontology.}
+      - {ref: galadril.golc.version, requirement_level: opt_in}
+  - id: span.galadril.ifc.flow.evaluate
+    type: span
+    span_kind: internal
+    brief: Evaluates a proposed information flow under the active policy.
+    stability: development
+    attributes:
+      - {ref: galadril.authorization.decision, requirement_level: required}
+  - id: span.galadril.registry.revision.publish
+    type: span
+    span_kind: internal
+    brief: Publishes an immutable pipeline revision for execution.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.gateway.authorization.evaluate
+    type: span
+    span_kind: internal
+    brief: Evaluates structural and contextual authority for an operation.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.intake.observation.ingest
+    type: span
+    span_kind: internal
+    brief: Admits and normalizes a source observation before broker publication.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.li_eskg.observation.persist
+    type: span
+    span_kind: internal
+    brief: Materializes authorized evidence in the graph.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.amarth.effect.estimate
+    type: span
+    span_kind: internal
+    brief: Estimates an effect against an admitted causal specification.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.scribe.generation.execute
+    type: span
+    span_kind: internal
+    brief: Executes an agent generation across model and permitted tool calls.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
+  - id: span.galadril.plugin.capability.invoke
+    type: span
+    span_kind: internal
+    brief: Invokes an admitted plugin capability in the host.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the operation failed.}
