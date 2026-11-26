@@ -30,12 +30,17 @@ def extract_trace_context(
     carrier: Mapping[str, str | bytes],
 ) -> context.Context:
     """Extracts a remote W3C parent from Kafka or Ray-safe string headers."""
-    normalized = {
-        key.lower(): value.decode("ascii")
-        if isinstance(value, bytes)
-        else value
-        for key, value in carrier.items()
-    }
+    normalized: dict[str, str] = {}
+    for key, value in carrier.items():
+        name = key.lower()
+        if name not in ("traceparent", "tracestate"):
+            continue
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("ascii")
+            except UnicodeDecodeError:
+                continue
+        normalized[name] = value
     return _PROPAGATOR.extract(carrier=normalized)
 
 
@@ -53,7 +58,8 @@ def start_span_from_carrier(
     carrier: Mapping[str, str | bytes],
     *,
     kind: SpanKind = SpanKind.CONSUMER,
-    attributes: Mapping[str, str | int | float | bool] | None = None,
+    attributes: Mapping[str, str | int | float | bool | tuple[str, ...]]
+    | None = None,
 ) -> Iterator[Span]:
     """Starts a child span whose remote parent retains the incoming Trace ID."""
     remote_context = extract_trace_context(carrier)
@@ -63,6 +69,8 @@ def start_span_from_carrier(
         context=remote_context,
         kind=kind,
         attributes=attributes,
+        record_exception=False,
+        set_status_on_exception=False,
     ) as span:
         yield span
 

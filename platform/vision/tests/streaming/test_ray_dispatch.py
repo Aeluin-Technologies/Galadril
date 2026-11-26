@@ -8,7 +8,13 @@ from uuid import uuid4
 
 import pytest
 from galadril_pipeline.config import StepType
-from galadril_pipeline.events import PipelineCommand, ResourceClass
+from galadril_pipeline.events import (
+    EventStatus,
+    PipelineCommand,
+    ResourceClass,
+    StepResult,
+)
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
 from galadril_vision.actors.dispatcher import RayActorDispatcher
 from galadril_vision.actors.worker import PipelineActor
 from galadril_vision.telemetry.context import inject_trace_context
@@ -80,11 +86,14 @@ async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
 @pytest.mark.anyio
 async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
     """Checks the wrapper used for errors returned across process boundaries."""
-    from galadril_vision.application.errors import (
-        CommandFailureReason,
-        CommandProcessingError,
-    )
+    from galadril_vision.application.errors import CommandProcessingError
     from ray.exceptions import RayTaskError
+
+    cause = CommandProcessingError(
+        "private worker details",
+        code=ErrorCode.UNAVAILABLE,
+        phase=VisionPhase.HANDLER,
+    )
 
     class FailedActor:
         class Method:
@@ -94,10 +103,7 @@ async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
                 raise RayTaskError(
                     "execute",
                     "private traceback",
-                    CommandProcessingError(
-                        "private worker details",
-                        reason=CommandFailureReason.GOL_HANDLER_UNAVAILABLE,
-                    ),
+                    cause,
                 )
 
         execute = Method()
@@ -107,11 +113,33 @@ async def test_dispatch_preserves_safe_worker_failure_across_ray() -> None:
     )
     with pytest.raises(CommandProcessingError) as failure:
         await dispatcher.dispatch(_command())
-    assert failure.value.reason is CommandFailureReason.GOL_HANDLER_UNAVAILABLE
-    assert (
-        str(failure.value)
-        == "Pipeline execution unavailable (gol_handler_unavailable)"
+    assert failure.value.failure == cause.failure
+    assert str(failure.value) == "unavailable"
+
+
+@pytest.mark.anyio
+async def test_actor_returns_safe_failing_result() -> None:
+    """Rejects accidental exception serialization in the actor's return value."""
+    from galadril_vision.application.errors import CommandProcessingError
+
+    cause = CommandProcessingError(
+        "private receipt details",
+        code=ErrorCode.ACCESS_DENIED,
+        phase=VisionPhase.RUNTIME_OPEN,
     )
+
+    class RejectingProcessor:
+        async def process(
+            self, _command: PipelineCommand
+        ) -> dict[str, JsonValue]:
+            raise cause
+
+    actor = PipelineActor(RejectingProcessor())
+    payload = await actor.execute(_command().model_dump_json().encode(), {})
+    assert b"private receipt" not in payload
+    result = StepResult.model_validate_json(payload)
+    assert result.status is EventStatus.FAILED
+    assert result.failure == cause.failure
 
 
 @pytest.mark.anyio

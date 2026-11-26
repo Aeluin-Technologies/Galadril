@@ -138,6 +138,38 @@ py_test(
     deps = ["@pip//pyyaml"],
 )
 
+py_test(
+    name = "live_check_test",
+    size = "medium",
+    srcs = ["live_check_test.py"],
+    args = [
+        "$(rootpath :weaver)",
+        "$(rootpath registry/manifest.yaml)",
+        "$(rootpath @otel_semconv//:model/version.properties)",
+        "$(rootpath generated/live-check.toml)",
+    ],
+    data = [
+        ":registry",
+        ":weaver",
+        "@otel_semconv//:model",
+        "@otel_semconv//:model/version.properties",
+        "generated/live-check.toml",
+        "registry/manifest.yaml",
+    ],
+    tags = ["requires-network"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/application",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//opentelemetry_api",
+        "@pip//opentelemetry_exporter_otlp_proto_grpc",
+        "@pip//opentelemetry_sdk",
+        "@pip//pydantic",
+    ],
+)
+
 sh_test(
     name = "plugin_test",
     srcs = ["plugin_test.sh"],

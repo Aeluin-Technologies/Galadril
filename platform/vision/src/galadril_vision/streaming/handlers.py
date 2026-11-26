@@ -10,17 +10,25 @@ import structlog
 from galadril_ontology import GolDenied
 from galadril_pipeline.events import (
     EventStatus,
+    Failure,
     LineageEvent,
     PipelineCommand,
     StepResult,
     utc_now,
 )
 from galadril_pipeline.routing import PipelineRouteTable
+from galadril_pipeline.telemetry_contract import (
+    ERROR_RETRY,
+    ErrorCode,
+    RetryPolicy,
+    VisionOutcome,
+    VisionPhase,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from galadril_vision.application.errors import (
-    CommandFailureReason,
     CommandProcessingError,
+    execution_failure,
 )
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.kafka.schemas import EventNormalizer
@@ -31,6 +39,7 @@ from galadril_vision.telemetry.context import (
     bind_pipeline_context,
     current_trace_identifiers,
 )
+from galadril_vision.telemetry.failures import record_failure
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
 logger = structlog.get_logger(__name__)
@@ -220,9 +229,7 @@ class IngressHandler:
             # still needs a fresh transfer decision for its deterministic IDs.
             raise
         self._metrics.message_completed(
-            pipeline=self._pipeline,
-            step="ingress",
-            outcome="accepted",
+            outcome=VisionOutcome.COMPLETED,
             duration_seconds=time.perf_counter() - started,
         )
         return tuple(published)
@@ -237,9 +244,7 @@ class IngressHandler:
         """Without a verified scope, malformed ingress has no permitted output sink."""
         del error
         self._metrics.message_completed(
-            pipeline=self._pipeline,
-            step="ingress",
-            outcome="rejected",
+            outcome=VisionOutcome.FAILED,
             duration_seconds=time.perf_counter()
             - (started_at or time.perf_counter()),
         )
@@ -460,58 +465,53 @@ class CommandHandler:
                 await self._publish_lineage(command, EventStatus.RUNNING)
             except Exception as error:
                 # Dispatch has not started, so redelivery can reclaim this lease.
-                logger.warning(
-                    "pipeline_command_deferred",
-                    event_id=str(command.event_id),
-                    attempt=command.attempt,
-                    error_type=type(error).__name__,
-                    phase="running_lineage",
+                phase = VisionPhase.RUNNING_LINEAGE
+                failure = (
+                    Failure(code=ErrorCode.ACCESS_DENIED, phase=phase)
+                    if isinstance(error, GolDenied)
+                    else execution_failure(error, phase)
                 )
+                record_failure(command, failure, phase)
                 await self._ledger.defer(
-                    command,
-                    RuntimeError(
-                        CommandFailureReason.RUNNING_LINEAGE.public_message()
-                    ),
+                    command, RuntimeError(failure.model_dump_json())
                 )
                 raise
-            reason = CommandFailureReason.WORKER_EXECUTION
+            phase = VisionPhase.DISPATCH
             try:
                 result = await self._dispatcher.dispatch(command)
-                reason = CommandFailureReason.WORKER_RESULT
+                phase = VisionPhase.RESULT
                 _require_result_scope(command, result)
+                if result.failure is not None:
+                    raise CommandProcessingError(
+                        result.failure.code.value, failure=result.failure
+                    )
+                if result.status is not EventStatus.COMPLETED:
+                    raise CommandProcessingError(
+                        ErrorCode.INVALID_RESULT.value,
+                        code=ErrorCode.INVALID_RESULT,
+                        phase=phase,
+                    )
                 self._routes.successors(command.step, result.output)
-                reason = CommandFailureReason.LEDGER_COMPLETION
+                phase = VisionPhase.LEDGER
                 await self._ledger.complete(command, result)
             except Exception as error:
-                if isinstance(error, CommandProcessingError) and isinstance(
-                    error.reason, CommandFailureReason
-                ):
-                    reason = error.reason
-                logger.error(
-                    "pipeline_command_failed",
-                    event_id=str(command.event_id),
-                    attempt=command.attempt,
-                    error_type=type(error).__name__,
-                    outcome="unavailable",
-                    reason=reason.value,
-                )
+                failure = execution_failure(error, phase)
                 await self._ledger.fail(
-                    command, RuntimeError(reason.public_message())
+                    command, RuntimeError(failure.model_dump_json())
                 )
-                await self._handle_failure(command, reason)
+                retry_scheduled = await self._handle_failure(command, failure)
+                record_failure(
+                    command, failure, phase, retry_scheduled=retry_scheduled
+                )
                 self._metrics.message_completed(
-                    pipeline=command.pipeline,
-                    step=command.step,
-                    outcome="failed",
+                    outcome=VisionOutcome.FAILED,
                     duration_seconds=time.perf_counter() - started_at,
                 )
                 return None
 
             await self._publish_successors(command, result)
             self._metrics.message_completed(
-                pipeline=command.pipeline,
-                step=command.step,
-                outcome="completed",
+                outcome=VisionOutcome.COMPLETED,
                 duration_seconds=time.perf_counter() - started_at,
             )
             logger.info(
@@ -566,11 +566,14 @@ class CommandHandler:
             )
 
     async def _handle_failure(
-        self, command: PipelineCommand, reason: CommandFailureReason
-    ) -> None:
+        self, command: PipelineCommand, cause: Failure
+    ) -> bool:
         """Publishes bounded retries or a terminal dead-letter event."""
         route = self._routes.route(command.step)
-        if command.attempt < route.max_retries:
+        if (
+            command.attempt < route.max_retries
+            and ERROR_RETRY[cause.code] is RetryPolicy.IF_IDEMPOTENT
+        ):
             retry = command.model_copy(
                 update={
                     "attempt": command.attempt + 1,
@@ -586,7 +589,7 @@ class CommandHandler:
                 no_confirm=False,
             )
             await self._publish_lineage(command, EventStatus.FAILED)
-            return
+            return True
 
         failure = StepResult(
             correlation_id=command.correlation_id,
@@ -598,12 +601,10 @@ class CommandHandler:
             step=command.step,
             step_type=command.step_type,
             resource_class=command.resource_class,
-            admission=command.admission,
             status=EventStatus.FAILED,
             attempt=command.attempt,
             duration_seconds=0.0,
-            error_type="PipelineExecutionError",
-            error_message=reason.public_message(),
+            failure=cause,
         )
         await self._publish(
             command,
@@ -614,6 +615,7 @@ class CommandHandler:
             no_confirm=False,
         )
         await self._publish_lineage(command, EventStatus.FAILED, result=failure)
+        return False
 
     async def _publish_lineage(
         self,

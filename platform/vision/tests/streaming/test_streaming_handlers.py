@@ -26,11 +26,14 @@ from galadril_pipeline.config import (
 )
 from galadril_pipeline.events import (
     EventStatus,
+    Failure,
     PipelineCommand,
     ResourceClass,
     StepResult,
 )
 from galadril_pipeline.routing import PipelineRouteTable
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
+from galadril_vision.application.errors import CommandProcessingError
 from galadril_vision.common.config import PipelineStepConfig, VisionConfig
 from galadril_vision.common.schemas import CanonicalRecord, ObservationLineage
 from galadril_vision.pipeline.ledger import MemoryExecutionLedger
@@ -433,17 +436,17 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
 
 
 @pytest.mark.anyio
-async def test_actor_failure_publishes_bounded_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_actor_failure_publishes_bounded_retry() -> None:
     """Increments attempts durably instead of creating an infinite poison loop."""
     publisher = _Publisher()
-    log = Mock()
-    monkeypatch.setattr("galadril_vision.streaming.handlers.logger", log)
     handler = CommandHandler(
         routes=PipelineRouteTable(_pipeline(max_retries=1)),
         publisher=publisher,
-        dispatcher=_Dispatcher(RuntimeError("temporary GPU failure")),
+        dispatcher=_Dispatcher(
+            CommandProcessingError(
+                "temporary GPU failure", code=ErrorCode.UNAVAILABLE
+            )
+        ),
         ledger=MemoryExecutionLedger(),
         topics=TopicLayout(),
         metrics=PipelineMetrics(),
@@ -467,14 +470,6 @@ async def test_actor_failure_publishes_bounded_retry(
     assert result is None
     assert isinstance(retry, dict)
     assert retry["attempt"] == 1
-    log.error.assert_called_once_with(
-        "pipeline_command_failed",
-        event_id=str(command.event_id),
-        attempt=0,
-        error_type="RuntimeError",
-        outcome="unavailable",
-        reason="worker_execution",
-    )
     assert not any(
         item.topic == TopicLayout().dead_letter for item in publisher.items
     )
@@ -483,9 +478,10 @@ async def test_actor_failure_publishes_bounded_retry(
 @pytest.mark.anyio
 async def test_failed_command_retains_a_safe_diagnostic_code() -> None:
     """Durable status and dead letters identify the phase without private details."""
-    from galadril_vision.application.errors import (
-        CommandFailureReason,
-        CommandProcessingError,
+    cause = CommandProcessingError(
+        "private receipt details",
+        code=ErrorCode.ACCESS_DENIED,
+        phase=VisionPhase.RUNTIME_OPEN,
     )
 
     class Ledger(MemoryExecutionLedger):
@@ -501,14 +497,9 @@ async def test_failed_command_retains_a_safe_diagnostic_code() -> None:
     publisher = _Publisher()
     topics = TopicLayout()
     handler = CommandHandler(
-        routes=PipelineRouteTable(_pipeline(max_retries=0)),
+        routes=PipelineRouteTable(_pipeline(max_retries=3)),
         publisher=publisher,
-        dispatcher=_Dispatcher(
-            CommandProcessingError(
-                "private receipt details",
-                reason=CommandFailureReason.GOL_RUNTIME_OPEN,
-            )
-        ),
+        dispatcher=_Dispatcher(cause),
         ledger=ledger,
         topics=topics,
         metrics=PipelineMetrics(),
@@ -522,15 +513,16 @@ async def test_failed_command_retains_a_safe_diagnostic_code() -> None:
         resource_class=ResourceClass.GPU,
     )
     assert await handler.handle(command) is None
-    expected = "Pipeline execution unavailable (gol_runtime_open)"
-    assert ledger.error == expected
+    assert ledger.error is not None
+    assert Failure.model_validate_json(ledger.error) == cause.failure
     dead_letter = next(
         item.message
         for item in publisher.items
         if item.topic == topics.dead_letter
     )
     assert isinstance(dead_letter, dict)
-    assert dead_letter["error_message"] == expected
+    assert StepResult.model_validate(dead_letter).failure == cause.failure
+    assert "private receipt" not in str(dead_letter)
 
 
 @pytest.mark.anyio
@@ -739,7 +731,10 @@ async def test_denied_running_lineage_can_reacquire_the_same_command() -> None:
         await handler.handle(command)
     assert publisher.items == []
     assert dispatcher.calls == 0
-    assert ledger.deferred == "Pipeline execution unavailable (running_lineage)"
+    assert ledger.deferred is not None
+    deferred = Failure.model_validate_json(ledger.deferred)
+    assert deferred.code is ErrorCode.ACCESS_DENIED
+    assert deferred.phase is VisionPhase.RUNNING_LINEAGE
 
     gate.allowed = True
     assert await handler.handle(command) is not None

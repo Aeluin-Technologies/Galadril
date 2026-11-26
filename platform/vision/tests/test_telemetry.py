@@ -7,6 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import structlog
+from galadril_pipeline.telemetry_contract import (
+    VisionOutcome,
+    VisionResourceClass,
+)
 from galadril_vision.telemetry.context import (
     bind_pipeline_context,
     inject_trace_context,
@@ -412,20 +416,12 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
     _, metric_reader = memory_telemetry
     instruments = PipelineMetrics()
 
-    instruments.ray_task_started(
-        pipeline="vision", step="infer", resource_class="gpu"
-    )
+    instruments.ray_task_started(VisionResourceClass.GPU)
     instruments.ray_task_completed(
-        pipeline="vision",
-        step="infer",
-        resource_class="gpu",
-        outcome="completed",
+        VisionResourceClass.GPU, VisionOutcome.COMPLETED
     )
     instruments.message_completed(
-        pipeline="vision",
-        step="infer",
-        outcome="completed",
-        duration_seconds=0.25,
+        outcome=VisionOutcome.COMPLETED, duration_seconds=0.25
     )
 
     metric_data = metric_reader.get_metrics_data()
@@ -437,21 +433,19 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
         for metric in scope.metrics
     }
     assert set(exported) >= {
-        "galadril.pipeline.messages",
-        "galadril.pipeline.processing.duration",
-        "galadril.ray.actor.tasks",
-        "galadril.ray.actor.tasks.active",
+        "galadril.vision.step.messages",
+        "galadril.vision.step.duration",
+        "galadril.vision.task.completed",
+        "galadril.vision.task.active",
     }
 
-    active = exported["galadril.ray.actor.tasks.active"].data.data_points
+    active = exported["galadril.vision.task.active"].data.data_points
     assert len(active) == 1
     active_point = active[0]
     assert isinstance(active_point, NumberDataPoint)
     assert active_point.value == 0
     assert dict(active_point.attributes or {}) == {
-        "pipeline": "vision",
-        "step": "infer",
-        "resource_class": "gpu",
+        "galadril.vision.resource_class": "gpu",
     }
 
 

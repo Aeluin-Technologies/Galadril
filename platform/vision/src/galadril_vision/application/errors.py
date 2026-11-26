@@ -1,29 +1,34 @@
-"""Domain failures shared by execution policy and its adapters."""
+"""Structured outcomes shared by execution and its transport adapters."""
 
-from enum import StrEnum
-
-
-class CommandFailureReason(StrEnum):
-    """Public diagnostic categories carried across the worker boundary."""
-
-    RUNNING_LINEAGE = "running_lineage"
-    GOL_RUNTIME_OPEN = "gol_runtime_open"
-    GOL_HANDLER = "gol_handler"
-    GOL_RUNTIME_UNAVAILABLE = "gol_runtime_unavailable"
-    GOL_HANDLER_UNAVAILABLE = "gol_handler_unavailable"
-    WORKER_EXECUTION = "worker_execution"
-    WORKER_RESULT = "worker_result"
-    LEDGER_COMPLETION = "ledger_completion"
-
-    def public_message(self) -> str:
-        return f"Pipeline execution unavailable ({self.value})"
+from galadril_pipeline.events import Failure
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
 
 
 class CommandProcessingError(RuntimeError):
-    """Raised for non-retryable command or pipeline configuration errors."""
+    """Carries the original failure independently of the local exception text."""
+
+    __slots__ = ("failure",)
 
     def __init__(
-        self, message: str, *, reason: CommandFailureReason | None = None
+        self,
+        message: str,
+        *,
+        code: ErrorCode = ErrorCode.INVALID_INPUT,
+        phase: VisionPhase = VisionPhase.EXECUTE,
+        failure: Failure | None = None,
     ) -> None:
-        self.reason = reason
         super().__init__(message)
+        self.failure = failure or Failure(code=code, phase=phase)
+
+
+def execution_failure(error: Exception, phase: VisionPhase) -> Failure:
+    """Assigns an occurrence only when no upstream structured cause exists."""
+    if isinstance(error, CommandProcessingError):
+        return error.failure
+    if isinstance(error, TimeoutError):
+        code = ErrorCode.DEADLINE_EXCEEDED
+    elif phase is VisionPhase.RESULT:
+        code = ErrorCode.INVALID_RESULT
+    else:
+        code = ErrorCode.INTERNAL
+    return Failure(code=code, phase=phase)

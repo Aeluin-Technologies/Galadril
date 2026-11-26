@@ -15,6 +15,7 @@ from galadril_ontology import (
 )
 from galadril_pipeline.config import StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
+from galadril_pipeline.telemetry_contract import ErrorCode, VisionPhase
 from galadril_vision.actors.processor import (
     CommandProcessingError,
     VisionCommandProcessor,
@@ -181,15 +182,19 @@ async def test_processor_binds_registry_runtime_slice() -> None:
 @pytest.mark.anyio
 async def test_processor_fails_closed_without_registry_binding() -> None:
     """Prevents execution when Registry cannot resolve the pinned binding."""
-    store = StubRegistryStore(GolDenied("ontology unavailable"))
+    cause = GolDenied("ontology unavailable")
+    store = StubRegistryStore(cause)
     processor = VisionCommandProcessor(
         _config(), ontology_runtime=GolRuntimeManager(store)
     )
 
-    with pytest.raises(
-        CommandProcessingError, match="authorization is unavailable"
-    ):
+    with pytest.raises(CommandProcessingError) as rejected:
         await processor.process(_command())
+
+    assert rejected.value.failure.code is ErrorCode.ACCESS_DENIED
+    assert rejected.value.failure.phase is VisionPhase.RUNTIME_OPEN
+    assert rejected.value.__cause__ is cause
+    assert store.load_count == 1
 
 
 @pytest.fixture

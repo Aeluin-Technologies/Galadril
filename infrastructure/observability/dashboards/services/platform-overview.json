@@ -265,7 +265,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(galadril_ray_actor_tasks_active{service_name=\"galadril-vision\"})",
+          "expr": "sum(galadril_vision_task_active{service_name=\"galadril-vision\"})",
           "legendFormat": "Total",
           "range": true
         }
