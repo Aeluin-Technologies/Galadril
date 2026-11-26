@@ -21,6 +21,7 @@ import authentication as e2e_authentication
 import clients as e2e_clients
 import environment as e2e_environment
 import httpx
+import pipeline_ingestion as e2e_pipeline_ingestion
 import pytest
 from assertions import (
     complete_tempo_trace,
@@ -47,10 +48,17 @@ from environment import (
     runfile,
 )
 from galadril_pipeline.config import StepType
-from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
+from galadril_pipeline.events import (
+    EventStatus,
+    Failure,
+    ResourceClass,
+    StepResult,
+)
 from galadril_pipeline.telemetry_contract import (
     SPAN_VISION_STEP_DISPATCH,
     SPAN_VISION_STEP_EXECUTE,
+    ErrorCode,
+    VisionPhase,
 )
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
@@ -1229,12 +1237,64 @@ def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
     logs = json.dumps(
         {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
     )
-    assert e2e_environment._pipeline_failure_events(
-        [logs, "partial {"]
-    ).splitlines() == [
-        f"galadril.vision.step.failed code=access_denied occurrence_id={occurrence} "
-        f"trace_id={'ab' * 16} phase=handler attempt=1 retry_scheduled=false"
+    assert e2e_environment._pipeline_failure_events([logs, "partial {"]) == [
+        {
+            "event": "galadril.vision.step.failed",
+            "code": ErrorCode.ACCESS_DENIED,
+            "occurrence_id": occurrence,
+            "trace_id": "ab" * 16,
+            "phase": VisionPhase.HANDLER,
+            "attempt": 1,
+            "retry_scheduled": False,
+        }
     ]
+
+
+def test_pipeline_failure_correlation_accepts_otlp_trace_ids() -> None:
+    failure = Failure(code=ErrorCode.INTERNAL, phase=VisionPhase.EXECUTE)
+    entries: list[dict[str, object]] = []
+    for phase in (
+        VisionPhase.EXECUTE,
+        VisionPhase.DISPATCH,
+        VisionPhase.RESULT,
+    ):
+        attributes: list[dict[str, object]] = [
+            {
+                "key": "galadril.error.code",
+                "value": {"stringValue": failure.code},
+            },
+            {
+                "key": "galadril.error.occurrence_id",
+                "value": {"stringValue": str(failure.occurrence_id)},
+            },
+            {"key": "galadril.vision.phase", "value": {"stringValue": phase}},
+            {"key": "galadril.pipeline.attempt", "value": {"intValue": "0"}},
+        ]
+        if phase is VisionPhase.RESULT:
+            attributes.append(
+                {
+                    "key": "galadril.vision.retry_scheduled",
+                    "value": {"boolValue": False},
+                }
+            )
+        entries.append(
+            {
+                "eventName": "galadril.vision.step.failed",
+                "traceId": "ab" * 16,
+                "attributes": attributes,
+            }
+        )
+    logs = json.dumps(
+        {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
+    )
+    observations = e2e_environment._pipeline_failure_events([logs])
+    assert e2e_pipeline_ingestion._has_correlated_failure(observations, failure)
+    assert not e2e_pipeline_ingestion._has_correlated_failure(
+        observations[:-1], failure
+    )
+    assert not e2e_pipeline_ingestion._has_correlated_failure(
+        observations, failure.model_copy(update={"occurrence_id": uuid4()})
+    )
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(

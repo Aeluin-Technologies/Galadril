@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from typing import NotRequired, TypedDict
 from uuid import UUID, uuid4
 
 from assertions import require_mapping
@@ -86,9 +87,23 @@ def _trace_id(value: object) -> str | None:
     return raw.hex() if len(raw) == 16 and any(raw) else None
 
 
-def _pipeline_failure_events(lines: Iterable[str]) -> str:
+class PipelineFailureEvent(TypedDict):
+    """Carries catalog fields that can safely be attached to a failed test."""
+
+    event: str
+    code: ErrorCode
+    occurrence_id: str
+    trace_id: NotRequired[str]
+    phase: NotRequired[VisionPhase]
+    attempt: NotRequired[int]
+    retry_scheduled: NotRequired[bool]
+
+
+def _pipeline_failure_events(
+    lines: Iterable[str],
+) -> list[PipelineFailureEvent]:
     """Extracts only catalog values from Collector OTLP JSON log batches."""
-    recent: deque[str] = deque(maxlen=24)
+    recent: deque[PipelineFailureEvent] = deque(maxlen=24)
     for line in lines:
         try:
             envelope = json.loads(line)
@@ -108,41 +123,38 @@ def _pipeline_failure_events(lines: Iterable[str]) -> str:
                         for attr in record.get("attributes", [])
                     }
                     try:
-                        code = ErrorCode(
-                            attributes[ATTR_ERROR_CODE]["stringValue"]
+                        details = PipelineFailureEvent(
+                            event=event,
+                            code=ErrorCode(
+                                attributes[ATTR_ERROR_CODE]["stringValue"]
+                            ),
+                            occurrence_id=str(
+                                UUID(
+                                    attributes[ATTR_ERROR_OCCURRENCE_ID][
+                                        "stringValue"
+                                    ]
+                                )
+                            ),
                         )
-                        occurrence = UUID(
-                            attributes[ATTR_ERROR_OCCURRENCE_ID]["stringValue"]
-                        )
-                        details = [
-                            event,
-                            f"code={code}",
-                            f"occurrence_id={occurrence}",
-                        ]
                         trace_id = _trace_id(record.get("traceId"))
                         if trace_id is not None:
-                            details.append(f"trace_id={trace_id}")
+                            details["trace_id"] = trace_id
                         if event == EVENT_VISION_STEP_FAILED:
-                            phase = VisionPhase(
+                            details["phase"] = VisionPhase(
                                 attributes[ATTR_VISION_PHASE]["stringValue"]
                             )
-                            attempt = int(
+                            details["attempt"] = int(
                                 attributes[ATTR_PIPELINE_ATTEMPT]["intValue"]
-                            )
-                            details.extend(
-                                (f"phase={phase}", f"attempt={attempt}")
                             )
                             retry = attributes.get(
                                 ATTR_VISION_RETRY_SCHEDULED, {}
                             ).get("boolValue")
                             if isinstance(retry, bool):
-                                details.append(
-                                    f"retry_scheduled={str(retry).lower()}"
-                                )
+                                details["retry_scheduled"] = retry
                     except (KeyError, TypeError, ValueError):
                         continue
-                    recent.append(" ".join(details))
-    return "\n".join(recent)
+                    recent.append(details)
+    return list(recent)
 
 
 def image_loader_command(loader: Path) -> tuple[str, str]:
@@ -776,7 +788,7 @@ class ComposeEnvironment:
         failure_events = await self.pipeline_failure_events()
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
-            f"\nPipeline failure events:\n{failure_events}"
+            f"\nPipeline failure events:\n{json.dumps(failure_events, indent=2)}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"
@@ -784,9 +796,8 @@ class ComposeEnvironment:
             f"\nIntake and Vision consumer offsets:\n{consumer_offsets}"
         )
 
-    async def pipeline_failure_events(self) -> str:
+    async def pipeline_failure_events(self) -> list[PipelineFailureEvent]:
         """Reads the bounded Collector file for correlated pipeline events."""
-        failure_events = ""
         with TemporaryDirectory() as temporary:
             log_path = Path(temporary) / "otlp.jsonl"
             await _run(
@@ -802,8 +813,8 @@ class ComposeEnvironment:
             )
             if log_path.is_file():
                 with log_path.open(encoding="utf-8") as logs:
-                    failure_events = _pipeline_failure_events(logs)
-        return failure_events
+                    return _pipeline_failure_events(logs)
+        return []
 
     async def _postgres_diagnostics(self, filename: str) -> object:
         """Reads bounded summaries without serializing SQL text or parameters."""
@@ -846,11 +857,7 @@ class ComposeEnvironment:
             self._postgres_diagnostics("statements"),
             return_exceptions=True,
         )
-        values: tuple[object, ...] = (
-            events.splitlines() if isinstance(events, str) else events,
-            snapshot,
-            statements,
-        )
+        values: tuple[object, ...] = (events, snapshot, statements)
         return {
             key: value
             for key, value in zip(keys, values, strict=True)

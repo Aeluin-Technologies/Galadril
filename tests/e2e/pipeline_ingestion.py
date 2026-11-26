@@ -30,9 +30,12 @@ from clients import (
     statuses_by_step,
     upload_presigned,
 )
+from environment import PipelineFailureEvent
+from galadril_pipeline.events import Failure
 from galadril_pipeline.telemetry_contract import (
     EVENT_VISION_STEP_FAILED,
     ErrorCode,
+    VisionPhase,
 )
 from gateway_scenario import GatewayScenario, _field, _string
 
@@ -340,6 +343,26 @@ async def assert_ingestion_lineage(state: DerivedPipelineState) -> None:
     assert "galadril-gateway" in tempo_service_names(gateway_trace)
 
 
+def _has_correlated_failure(
+    records: Sequence[PipelineFailureEvent], failure: Failure
+) -> bool:
+    """Matches observations by the failure identity carried in the dead letter."""
+    occurrence_id = str(failure.occurrence_id)
+    observed = {
+        (record.get("phase"), record.get("retry_scheduled"))
+        for record in records
+        if record["event"] == EVENT_VISION_STEP_FAILED
+        and record["code"] == failure.code
+        and record["occurrence_id"] == occurrence_id
+        and record.get("attempt") == 0
+    }
+    return {
+        (VisionPhase.EXECUTE, None),
+        (VisionPhase.DISPATCH, None),
+        (VisionPhase.RESULT, False),
+    }.issubset(observed)
+
+
 async def assert_failed_ingestion(scenario: GatewayScenario) -> None:
     """Joins the real Ray error event to the terminal message in Redpanda."""
     await _upload_text(
@@ -357,16 +380,7 @@ async def assert_failed_ingestion(scenario: GatewayScenario) -> None:
 
     async def has_correlated_failures() -> bool:
         records = await scenario.environment.pipeline_failure_events()
-        prefix = (
-            f"{EVENT_VISION_STEP_FAILED} code={failure.code} "
-            f"occurrence_id={failure.occurrence_id}"
-        )
-        expected = (
-            f"{prefix} phase=execute attempt=0",
-            f"{prefix} phase=dispatch attempt=0",
-            f"{prefix} phase=result attempt=0 retry_scheduled=false",
-        )
-        return all(event in records.splitlines() for event in expected)
+        return _has_correlated_failure(records, failure)
 
     await eventually(
         has_correlated_failures,
