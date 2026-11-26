@@ -9,6 +9,7 @@ load("//build:database.bzl", "database_build", "database_oci_layout")
 
 exports_files([
     "Dockerfile",
+    "diagnostics/auto-explain.sql",
     "diagnostics/snapshot.sql",
     "diagnostics/statements.sql",
     "ldconfig-retry.sh",
