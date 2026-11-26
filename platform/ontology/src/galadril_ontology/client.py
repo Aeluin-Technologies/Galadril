@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import stat
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -18,9 +19,10 @@ from opentelemetry import propagate
 from pydantic import ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 from .contracts import GolEffect, GolLease, GolRequest
-from .errors import GolDenied, GolUnavailable
+from .errors import GolDenied, GolError, GolUnavailable
 
 _LOGGER = logging.getLogger(__name__)
+_DIAGNOSTIC_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}", re.ASCII)
 type _RpcPhase = Literal["open", "resume", "begin", "finish"]
 
 _EFFECT = TypeAdapter(dict[str, JsonValue])
@@ -38,6 +40,28 @@ def _log_rpc_failure(phase: _RpcPhase, reason: str) -> None:
             "phase": phase,
             "reason": reason,
         },
+    )
+
+
+def _response_failure(response: httpx.Response) -> GolError:
+    """Reads bounded correlation fields from the authenticated worker channel."""
+    occurrence_id = None
+    code = response.headers.get("x-galadril-error-code", "")
+    raw_occurrence = response.headers.get("x-galadril-error-occurrence-id", "")
+    if _DIAGNOSTIC_CODE.fullmatch(code) and len(raw_occurrence) == 36:
+        try:
+            occurrence_id = UUID(raw_occurrence)
+        except ValueError:
+            pass
+    kind = (
+        GolUnavailable
+        if response.status_code >= 500 or response.status_code == 429
+        else GolDenied
+    )
+    return kind(
+        "GOL operation unavailable",
+        diagnostic_code=code if occurrence_id is not None else None,
+        occurrence_id=occurrence_id,
     )
 
 
@@ -113,10 +137,7 @@ class GatewayGolClient:
             ) as response:
                 if response.status_code != 200:
                     _log_rpc_failure(phase, f"http_{response.status_code}")
-                if response.status_code >= 500 or response.status_code == 429:
-                    raise GolUnavailable("GOL runtime unavailable")
-                if response.status_code != 200:
-                    raise GolDenied("GOL operation unavailable")
+                    raise _response_failure(response)
                 content = bytearray()
                 async for chunk in response.aiter_bytes():
                     if len(content) + len(chunk) > 2 * 1024 * 1024:

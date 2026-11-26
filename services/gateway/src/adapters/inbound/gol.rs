@@ -10,6 +10,8 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use galadril_telemetry::contract::{ErrorCode, emit_gol_worker_failed};
+use uuid::Uuid;
 pub(crate) use wire::enforce_content_length;
 
 use crate::adapters::inbound::graphql::server::GatewayServices;
@@ -92,11 +94,51 @@ pub async fn effect(
 }
 
 fn failure(error: RuntimeError) -> Response {
-    let status = match error {
-        RuntimeError::Invalid => StatusCode::BAD_REQUEST,
-        RuntimeError::Denied => StatusCode::FORBIDDEN,
-        RuntimeError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+    let code = match error {
+        RuntimeError::Invalid => ErrorCode::InvalidInput,
+        RuntimeError::Denied => ErrorCode::AccessDenied,
+        RuntimeError::Unavailable => ErrorCode::Unavailable,
     };
-    tracing::warn!(status = status.as_u16(), "GOL worker request unavailable");
-    wire::failure(status)
+    let status = StatusCode::from_u16(code.http_status())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut buffer = Uuid::encode_buffer();
+    let occurrence: &str =
+        Uuid::new_v4().hyphenated().encode_lower(&mut buffer);
+    emit_gol_worker_failed(code, occurrence);
+    (
+        status,
+        [
+            (header::CACHE_CONTROL.as_str(), "no-store"),
+            ("x-galadril-error-code", code.as_str()),
+            ("x-galadril-error-occurrence-id", occurrence),
+        ],
+        "GOL operation unavailable",
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_failures_carry_safe_correlation_fields() -> anyhow::Result<()> {
+        let response = failure(RuntimeError::Denied);
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get("x-galadril-error-code"),
+            Some(&axum::http::HeaderValue::from_static("access_denied"))
+        );
+        let value = response
+            .headers()
+            .get("x-galadril-error-occurrence-id")
+            .ok_or_else(|| {
+            anyhow::anyhow!("missing failure occurrence")
+        })?;
+        assert_eq!(
+            uuid::Uuid::parse_str(value.to_str()?)?.get_version(),
+            Some(uuid::Version::Random)
+        );
+        Ok(())
+    }
 }
