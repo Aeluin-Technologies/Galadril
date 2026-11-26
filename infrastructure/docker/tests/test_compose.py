@@ -25,6 +25,28 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_expensive_profiling_is_opt_in_and_backends_are_local(self) -> None:
+        telemetry = services("observability.yaml")
+        for service in ("profiler", "pyroscope"):
+            self.assertEqual(
+                mapping(telemetry[service])["profiles"],
+                ["observability-benchmark", "observability-diagnostic"],
+            )
+        for service in (
+            "otel-collector",
+            "tempo",
+            "mimir",
+            "loki",
+            "pyroscope",
+            "grafana",
+        ):
+            self.assertTrue(
+                all(
+                    str(port).startswith("127.0.0.1:")
+                    for port in mapping(telemetry[service])["ports"]
+                )
+            )
+
     def test_gol_workload_key_is_private_to_gateway_and_vision(self) -> None:
         for filename, service in (
             ("dashboard.yaml", "gateway"),

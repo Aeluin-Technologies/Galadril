@@ -13,7 +13,7 @@ py_library(
 py_test(
     name = "collectors_test",
     size = "large",
-    srcs = ["test_collectors.py"],
+    srcs = ["test_collectors.py", "otel_sampling.py"],
     data = [
         "//infrastructure/docker:compose",
         "//infrastructure/docker:compose_configuration",

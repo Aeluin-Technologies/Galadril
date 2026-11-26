@@ -61,10 +61,35 @@ processors:
     check_interval: 1s
     limit_mib: 512
     spike_limit_mib: 128
-  filter/health_checks:
-    error_mode: ignore
-    trace_conditions:
-      - 'span.attributes["galadril.health_check"] == true and span.status.code != STATUS_CODE_ERROR'
+  # Compose runs one receiving Collector, so every span of a trace reaches this buffer.
+  tail_sampling:
+    decision_wait: ${env:GALADRIL_TRACE_DECISION_WAIT:-90s}
+    num_traces: ${env:GALADRIL_TRACE_BUFFER_TRACES:-4000}
+    expected_new_traces_per_sec: ${env:GALADRIL_TRACE_EXPECTED_PER_SECOND:-40}
+    maximum_trace_size_bytes: ${env:GALADRIL_TRACE_MAX_BYTES:-65536}
+    decision_cache:
+      sampled_cache_size: 10000
+      non_sampled_cache_size: 40000
+    policies:
+      - name: canonical-failure
+        type: string_attribute
+        string_attribute:
+          key: galadril.error.code
+          values: [ifc_violation, concurrent_conflict, unavailable, deadline_exceeded, invalid_result, internal]
+      - name: unclassified-failure
+        type: ottl_condition
+        ottl_condition:
+          error_mode: ignore
+          span:
+            - 'status.code == STATUS_CODE_ERROR and attributes["galadril.error.code"] == nil'
+      - name: slow-execution
+        type: latency
+        latency:
+          threshold_ms: ${env:GALADRIL_TRACE_SLOW_MS:-5000}
+      - name: ordinary
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: ${env:GALADRIL_TRACE_SUCCESS_SAMPLE_PERCENT:-2}
   filter/operational_logs:
     error_mode: propagate
     log_conditions:
@@ -72,15 +97,20 @@ processors:
       - 'log.attributes["event.name"] != nil and IsMatch(log.attributes["event.name"], "^galadril[.]audit[.]")'
       - 'log.attributes["event.name"] == "authorization.check"'
       - 'log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "allow"'
+      - 'log.severity_number < SEVERITY_NUMBER_WARN and log.attributes["galadril.error.code"] == nil and log.event_name != "galadril.gateway.authorization.check"'
   transform/operational_privacy:
     error_mode: propagate
     trace_statements:
       - delete_matching_keys(span.attributes, "^galadril[.]audit[.]")
-      - delete_matching_keys(spanevent.attributes, "^galadril[.]audit[.]")
+      - delete_key(span.attributes, "db.query.text")
+      - delete_key(span.attributes, "db.statement")
+      - delete_matching_keys(span.attributes, "^(http[.](request|response)[.]header[.]|db[.]query[.]parameter[.])")
+      - set(span.status.message, "")
+      - delete_matching_keys(spanevent.attributes, "^(galadril[.]audit[.]|exception[.])")
     metric_statements:
       - delete_matching_keys(datapoint.attributes, "^galadril[.]audit[.]")
     log_statements:
-      - delete_matching_keys(log.attributes, "^galadril[.]audit[.]")
+      - delete_matching_keys(log.attributes, "^(galadril[.]audit[.]|exception[.])")
       - 'set(log.attributes["event.name"], log.event_name) where IsMatch(log.event_name, "^galadril[.]")'
       - 'set(log.severity_text, "ERROR") where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "error"'
       - 'set(log.severity_number, SEVERITY_NUMBER_ERROR) where log.event_name == "galadril.gateway.authorization.check" and log.attributes["galadril.authorization.decision"] == "error"'
@@ -111,7 +141,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource, filter/health_checks, transform/operational_privacy, batch]
+      processors: [memory_limiter, resource, transform/operational_privacy, tail_sampling, batch]
       exporters: [otlp/tempo]
     metrics:
       receivers: [

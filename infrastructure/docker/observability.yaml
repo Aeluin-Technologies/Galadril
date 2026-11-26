@@ -1,13 +1,29 @@
+x-observability-logging: &observability-logging
+  driver: local
+  options:
+    max-size: ${GALADRIL_TELEMETRY_CONTAINER_LOG_SIZE:-10m}
+    max-file: "${GALADRIL_TELEMETRY_CONTAINER_LOG_FILES:-2}"
+
 services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.162.0
     container_name: otel-collector
+    cpus: ${GALADRIL_OTEL_COLLECTOR_CPUS:-1}
+    mem_limit: ${GALADRIL_OTEL_COLLECTOR_MEMORY:-768m}
+    logging: *observability-logging
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      GALADRIL_TRACE_DECISION_WAIT: ${GALADRIL_TRACE_DECISION_WAIT:-90s}
+      GALADRIL_TRACE_BUFFER_TRACES: ${GALADRIL_TRACE_BUFFER_TRACES:-4000}
+      GALADRIL_TRACE_EXPECTED_PER_SECOND: ${GALADRIL_TRACE_EXPECTED_PER_SECOND:-40}
+      GALADRIL_TRACE_MAX_BYTES: ${GALADRIL_TRACE_MAX_BYTES:-65536}
+      GALADRIL_TRACE_SLOW_MS: ${GALADRIL_TRACE_SLOW_MS:-5000}
+      GALADRIL_TRACE_SUCCESS_SAMPLE_PERCENT: ${GALADRIL_TRACE_SUCCESS_SAMPLE_PERCENT:-2}
     volumes:
       - ../observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      - "4317:4317"
+      - "127.0.0.1:4317:4317"
     depends_on:
       tempo:
         condition: service_started
@@ -25,49 +41,79 @@ services:
   tempo:
     image: grafana/tempo:3.1.0
     container_name: tempo
+    cpus: ${GALADRIL_TEMPO_CPUS:-1}
+    mem_limit: ${GALADRIL_TEMPO_MEMORY:-768m}
+    logging: *observability-logging
     restart: unless-stopped
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
       - ../observability/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/var/tempo
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
 
   mimir:
     image: grafana/mimir:3.2.2
     container_name: mimir
+    cpus: ${GALADRIL_MIMIR_CPUS:-1}
+    mem_limit: ${GALADRIL_MIMIR_MEMORY:-1g}
+    logging: *observability-logging
     restart: unless-stopped
-    command: ["-config.file=/etc/mimir.yaml"]
+    command:
+      - -config.file=/etc/mimir.yaml
+      - -compactor.blocks-retention-period=${GALADRIL_METRIC_RETENTION:-168h}
+      - -ingester.max-global-series-per-user=${GALADRIL_METRIC_MAX_SERIES:-50000}
+      - -ingester.max-global-exemplars-per-user=${GALADRIL_METRIC_EXEMPLARS:-5000}
     volumes:
       - ../observability/mimir.yaml:/etc/mimir.yaml:ro
       - mimir-data:/data
     ports:
-      - "9009:9009"
+      - "127.0.0.1:9009:9009"
 
   loki:
     image: grafana/loki:3.7.8
     container_name: loki
+    cpus: ${GALADRIL_LOKI_CPUS:-1}
+    mem_limit: ${GALADRIL_LOKI_MEMORY:-768m}
+    logging: *observability-logging
     restart: unless-stopped
-    command: ["-config.file=/etc/loki/local-config.yaml"]
+    command: ["-config.file=/etc/loki/galadril.yaml", "-store.retention=${GALADRIL_LOG_RETENTION:-72h}"]
+    volumes:
+      - ../observability/loki.yaml:/etc/loki/galadril.yaml:ro
+      - loki-data:/tmp/loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
 
   pyroscope:
     image: grafana/pyroscope:2.3.2
     container_name: pyroscope
+    profiles: [observability-benchmark, observability-diagnostic]
+    cpus: ${GALADRIL_PYROSCOPE_CPUS:-1}
+    mem_limit: ${GALADRIL_PYROSCOPE_MEMORY:-768m}
+    logging: *observability-logging
     restart: unless-stopped
+    command: ["-retention-period=${GALADRIL_PROFILE_RETENTION:-24h}"]
     volumes:
       - pyroscope-data:/data
     ports:
-      - "4040:4040"
+      - "127.0.0.1:4040:4040"
 
   profiler:
     image: grafana/alloy:v1.20.1
     container_name: profiler
+    profiles: [observability-benchmark, observability-diagnostic]
+    cpus: ${GALADRIL_PROFILER_CPUS:-1}
+    mem_limit: ${GALADRIL_PROFILER_MEMORY:-512m}
+    logging: *observability-logging
     restart: unless-stopped
     user: root
     pid: host
     privileged: true
+    environment:
+      GALADRIL_PROFILE_TARGETS: ${GALADRIL_PROFILE_TARGETS:-/?(gateway|vision)}
+      GALADRIL_PROFILE_CPU_HZ: ${GALADRIL_PROFILE_CPU_HZ:-19}
+      GALADRIL_PROFILE_OFF_CPU: ${GALADRIL_PROFILE_OFF_CPU:-0}
+      GALADRIL_PROFILE_INTERVAL: ${GALADRIL_PROFILE_INTERVAL:-60s}
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -87,6 +133,9 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.18.1
     container_name: postgres-exporter
+    cpus: ${GALADRIL_POSTGRES_EXPORTER_CPUS:-0.25}
+    mem_limit: ${GALADRIL_POSTGRES_EXPORTER_MEMORY:-128m}
+    logging: *observability-logging
     restart: unless-stopped
     environment:
       DATA_SOURCE_URI: postgres:5432/galadril_dev?sslmode=disable
@@ -99,12 +148,14 @@ services:
   grafana:
     image: grafana/grafana:13.2.3-slim
     container_name: grafana
+    cpus: ${GALADRIL_GRAFANA_CPUS:-1}
+    mem_limit: ${GALADRIL_GRAFANA_MEMORY:-768m}
+    logging: *observability-logging
     restart: unless-stopped
     depends_on:
       - mimir
       - tempo
       - loki
-      - pyroscope
     volumes:
       - ../observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
       - ../observability/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/galadril.yaml:ro
@@ -112,12 +163,13 @@ services:
       - ../observability/dashboards/community:/var/lib/grafana/dashboards/community:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3005:3000"
+      - "127.0.0.1:3005:3000"
 
 volumes:
   alloy-data:
   alloy-symbol-cache:
   grafana-data:
+  loki-data:
   mimir-data:
   pyroscope-data:
   tempo-data:
