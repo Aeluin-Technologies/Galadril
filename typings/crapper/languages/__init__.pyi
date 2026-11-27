@@ -1,0 +1,19 @@
+"""Type contract for Crapper functions returned by the pinned analyzers."""
+
+from typing import Protocol
+
+class Function(Protocol):
+    @property
+    def namespace(self) -> str: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def complexity(self) -> int: ...
+    @property
+    def start_line(self) -> int: ...
+    @property
+    def end_line(self) -> int: ...
+
+def functions_in_file(
+    language: str, source: str, path: str, project_root: str
+) -> list[Function]: ...

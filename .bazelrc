@@ -38,6 +38,7 @@ build:ci --verbose_failures
 build:ci --announce_rc
 
 # Enable BuildBuddy automatically whenever --config=ci is used.
+common:ci --lockfile_mode=error
 build:ci --config=remote
 build:ci --build_metadata=ROLE=CI
 build:ci --bes_results_url=https://app.buildbuddy.io/invocation/
@@ -65,7 +66,6 @@ test:ci-presubmit --test_tag_filters=-periodic,-benchmark,-image-layout
 test:ci-validation --test_tag_filters=integration,-benchmark
 test:ci-validation --nocache_test_results
 test:ci-benchmark --nocache_test_results
-coverage:ci-coverage --test_tag_filters=-integration,-requires-docker,-benchmark,-image-layout
 
 # Only matters for tests that actually execute locally.
 test:ci --local_test_jobs=HOST_CPUS*0.75
@@ -79,3 +79,16 @@ build:release --strip=never
 build:release --@rules_rust//rust/settings:lto=thin
 build:release --@rules_rust//rust/settings:extra_rustc_flags=-Ccodegen-units=1
 build:release --stamp
+
+# Request both non-mutating Rust checks from the existing rules_rust toolchain.
+build:engineering-rust --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect,@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:engineering-rust --output_groups=+clippy_checks,+rustfmt_checks
+build:engineering-rust --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dunsafe_op_in_unsafe_fn
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::undocumented_unsafe_blocks
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::unwrap_used
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::expect_used
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::panic
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::indexing_slicing
+build:engineering-rust --@rules_rust//rust/settings:clippy_flag=-Dclippy::let_underscore_must_use

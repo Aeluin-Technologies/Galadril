@@ -5,8 +5,6 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -64,9 +62,60 @@ jobs:
             --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" \
             --execution_log_compact_file="$RUNNER_TEMP/database-image.exec.zst"
 
+  engineering:
+    name: Engineering checks
+    runs-on: ubuntu-latest
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_ORG_API_KEY }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bazel
+        id: bazel
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Architecture and suppression checks
+        run: |
+          bazel run //build/quality:check --config=ci --config=ci-test \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" -- architecture
+
+      - name: Python formatting, lint and strict typing
+        if: always() && steps.bazel.outcome == 'success'
+        run: |
+          bazel run //build/quality:python_check --config=ci --config=ci-test \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" -- python
+
+      - name: Rustfmt, Clippy and Rustc
+        if: always() && steps.bazel.outcome == 'success'
+        run: |
+          rust_targets=$(bazel query --lockfile_mode=error 'kind("rust_(binary|library|proc_macro|static_library|shared_library|test) rule", //... except set(//build/quality/fixtures:format_violation //build/quality/fixtures:lint_violation //build/quality/fixtures:type_violation //build/quality/fixtures:bad_docs))')
+          test -n "$rust_targets"
+          mapfile -t targets <<< "$rust_targets"
+          bazel build "${targets[@]}" --config=ci --config=ci-test --config=engineering-rust --keep_going \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+
+      - name: Verify Rust checks reject intentional violations
+        if: always() && steps.bazel.outcome == 'success'
+        run: |
+          bash build/quality/fixtures/verify-rust.sh --config=ci --config=ci-test \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+
+      - name: Rustdoc
+        if: always() && steps.bazel.outcome == 'success'
+        run: |
+          bazel build //build/quality:rust_docs --config=ci --config=ci-test --keep_going \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+
   publish:
     name: Publish images
-    needs: [test, database-image]
+    needs: [test, database-image, engineering, coverage]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -99,7 +148,6 @@ jobs:
 
   coverage:
     name: Coverage
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     env:
@@ -120,34 +168,29 @@ jobs:
           repository-cache: true
 
       - name: Generate coverage
+        id: bazel_coverage
         run: |
-          bazel coverage //... \
-            --config=ci \
-            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" \
-            --config=ci-test \
-            --config=ci-coverage \
-            --combined_report=lcov \
-            --instrumentation_filter=//... \
-            --instrument_test_targets
+          bash build/quality/collect-coverage.sh "$RUNNER_TEMP/galadril-coverage" \
+            --config=ci --config=ci-test \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
 
-      - name: Debug coverage files
+      - name: Block missing coverage and CRAP above 30
+        if: always() && steps.bazel_coverage.outcome != 'skipped' && !cancelled()
         run: |
-          echo "Coverage files:"
-          find bazel-out -name "*coverage*" -type f || true
-          echo "First lines of report:"
-          head -100 bazel-out/_coverage/_coverage_report.dat || true
+          bazel run //build/quality:check --config=ci --config=ci-test \
+            --remote_header="x-buildbuddy-api-key=$BUILDBUDDY_API_KEY" -- crap \
+            --artifact "$RUNNER_TEMP/galadril-coverage" \
+            --output "$RUNNER_TEMP/galadril-coverage/crap.json"
 
       - name: Compute coverage
+        if: always() && steps.bazel_coverage.outcome == 'success'
         id: coverage
         run: |
-          REPORT="bazel-out/_coverage/_coverage_report.dat"
+          REPORT="$RUNNER_TEMP/galadril-coverage/coverage.lcov"
 
-          if [ ! -f "$REPORT" ]; then
-            echo "coverage=0" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
+          test -s "$REPORT"
 
-          LINES_FOUND=$(grep -c '^DA:' "$REPORT" || echo 0)
+          LINES_FOUND=$(grep -c '^DA:' "$REPORT")
           LINES_HIT=$(awk -F',' '/^DA:/ {if ($2 > 0) hit++} END {print hit + 0}' "$REPORT")
 
           PERCENT=$(awk \
@@ -172,6 +215,7 @@ jobs:
           cat coverage.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Coverage PR comment
+        if: github.event_name == 'pull_request' && steps.coverage.outcome == 'success' && !cancelled()
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: bazel-coverage

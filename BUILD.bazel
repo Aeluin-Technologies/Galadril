@@ -4,6 +4,7 @@ licenses(["notice"])  # BSD-3-Clause
 
 exports_files([
     ".bazelrc",
+    "pyproject.toml",
     "VERSION.txt",
     "CODEOWNERS",
     "rustfmt.toml",

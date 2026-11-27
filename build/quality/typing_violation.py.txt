@@ -1,0 +1,18 @@
+"""A deliberately invalid input for the analyzer contract test."""
+
+from typing import Any
+import json
+
+
+def explicit(value: Any) -> object:
+    return value
+
+
+def inferred(raw: str) -> object:
+    return json.loads(raw)
+
+
+def untyped(value) -> object:
+    return value
+
+BAD=[1,2,3]

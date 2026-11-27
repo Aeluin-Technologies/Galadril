@@ -1,0 +1,3 @@
+let candidates = tests(//...) in
+($candidates except attr(tags, "[\[ ](manual|integration|requires-docker|benchmark|image-layout)[,\]]", $candidates))
+union //services/gateway:gateway_test

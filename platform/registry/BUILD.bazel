@@ -1,3 +1,4 @@
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
@@ -86,3 +87,5 @@ filegroup(
     srcs = ["src/authoring.rs", "src/gol_service.rs"],
     visibility = ["//tests/architecture:__pkg__"],
 )
+
+engineering_rust_docs(["registry"])

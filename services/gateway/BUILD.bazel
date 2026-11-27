@@ -1,3 +1,4 @@
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_deps")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
@@ -344,3 +345,5 @@ filegroup(
     ],
     visibility = ["//tests/architecture:__pkg__"],
 )
+
+engineering_rust_docs(["gateway", "auth_fixture"])

@@ -39,6 +39,7 @@ manifest:
     authzed.api.v1alpha1.watchresources_service_pb2_grpc: authzed
     av: av
     avro: avro
+    basedpyright: basedpyright
     beartype: beartype
     boto3: boto3
     botocore: botocore
@@ -63,6 +64,25 @@ manifest:
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
+    cuda.bindings.cudla: cuda_bindings
+    cuda.bindings.cufile: cuda_bindings
+    cuda.bindings.cycudla: cuda_bindings
+    cuda.bindings.cycufile: cuda_bindings
+    cuda.bindings.cydriver: cuda_bindings
+    cuda.bindings.cynvfatbin: cuda_bindings
+    cuda.bindings.cynvjitlink: cuda_bindings
+    cuda.bindings.cynvml: cuda_bindings
+    cuda.bindings.cynvrtc: cuda_bindings
+    cuda.bindings.cynvvm: cuda_bindings
+    cuda.bindings.cyruntime: cuda_bindings
+    cuda.bindings.driver: cuda_bindings
+    cuda.bindings.nvfatbin: cuda_bindings
+    cuda.bindings.nvjitlink: cuda_bindings
+    cuda.bindings.nvml: cuda_bindings
+    cuda.bindings.nvrtc: cuda_bindings
+    cuda.bindings.nvvm: cuda_bindings
+    cuda.bindings.runtime: cuda_bindings
+    cuda.bindings.utils: cuda_bindings
     cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
@@ -241,6 +261,7 @@ manifest:
     mypy_boto3_s3: mypy_boto3_s3
     narwhals: narwhals
     networkx: networkx
+    nodejs_wheel: nodejs_wheel_binaries
     numba: numba
     numpy: numpy
     omegaconf: omegaconf
@@ -360,6 +381,7 @@ manifest:
     responses: responses
     rich: rich
     rpds: rpds_py
+    ruff: ruff
     s3transfer: s3transfer
     safetensors: safetensors
     scikit_build_core: scikit_build_core
@@ -408,6 +430,23 @@ manifest:
     torchvision: torchvision
     tqdm: tqdm
     transformers: transformers
+    tree_sitter: tree_sitter
+    tree_sitter_python: tree_sitter_python
+    tree_sitter_rust: tree_sitter_rust
+    tree_sitter_typescript: tree_sitter_typescript
+    triton.backends: triton
+    triton.compiler: triton
+    triton.errors: triton
+    triton.experimental: triton
+    triton.instrumentation.libGPUInstrumentationTestLib: triton
+    triton.knobs: triton
+    triton.language: triton
+    triton.plugins.libMLIRDialectPlugin: triton
+    triton.plugins.libTritonPluginsTestLib: triton
+    triton.profiler: triton
+    triton.runtime: triton
+    triton.testing: triton
+    triton.tools: triton
     truststore: truststore
     typer: typer
     typing_extensions: typing_extensions
@@ -426,4 +465,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: c526f6ea2cacbb80f4b143511da0f1ead2525ccb73357dc26164b11bdda24c8c
+integrity: 90b507d0e9b131ad55ef28e7e28973b58e4c5e7bee345f810a7c02fb5697ef92

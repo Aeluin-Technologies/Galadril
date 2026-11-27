@@ -1,3 +1,4 @@
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
@@ -9,3 +10,5 @@ rust_library(
     visibility = ["//platform/ontology/rust:__pkg__"],
     deps = all_crate_deps(normal = True),
 )
+
+engineering_rust_docs(["golc_wire"])

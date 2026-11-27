@@ -1,0 +1,72 @@
+# gazelle:ignore
+
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_library", "py_unittest_test")
+
+exports_files([
+    "crapper-grammars.patch",
+    "crapper.BUILD.bazel",
+])
+
+py_library(
+    name = "policy",
+    srcs = [
+        "check.py",
+        "coverage_records.py",
+        "evidence.py",
+        "metrics.py",
+        "tools.py",
+    ],
+    imports = ["."],
+    deps = [
+        "@crapper",
+        "@pip//pydantic",
+        "@pip//tree_sitter",
+        "@pip//tree_sitter_python",
+        "@pip//tree_sitter_rust",
+        "@pip//tree_sitter_typescript",
+    ],
+)
+
+py_binary(
+    name = "check",
+    srcs = ["main.py"],
+    main = "main.py",
+    deps = [":policy"],
+)
+
+py_unittest_test(
+    name = "check_test",
+    size = "small",
+    srcs = ["check_test.py", "coverage_test.py"],
+    data = ["typing_violation.py.txt", "//:pyproject.toml"],
+    deps = [":policy", "@pip//basedpyright", "@pip//coverage", "@pip//ruff"],
+)
+
+filegroup(
+    name = "rust_docs",
+    testonly = True,
+    srcs = [
+        "//platform/document-compiler:engineering_docs",
+        "//platform/ontology/rust:engineering_docs",
+        "//platform/ontology/rust/wire:engineering_docs",
+        "//platform/registry:engineering_docs",
+        "//platform/telemetry:engineering_docs",
+        "//plugins/utils/tracker:engineering_docs",
+        "//services/document-compiler:engineering_docs",
+        "//services/gateway:engineering_docs",
+        "//services/intake:engineering_docs",
+        "//services/registry:engineering_docs",
+    ],
+)
+
+py_binary(
+    name = "python_check",
+    srcs = ["main.py"],
+    main = "main.py",
+    deps = [
+        ":policy",
+        "@pip//basedpyright",
+        "@pip//galadril",
+        "@pip//ruff",
+    ],
+)

@@ -1,0 +1,3 @@
+"""Type contract for the pinned Crapper scoring function."""
+
+def crap_score(complexity: int, coverage_pct: float | None) -> float | None: ...
