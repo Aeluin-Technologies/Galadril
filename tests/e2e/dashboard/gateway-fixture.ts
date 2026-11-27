@@ -60,10 +60,10 @@ async function respond(request: IncomingMessage, response: ServerResponse) {
     let text = "";
     for await (const chunk of request) text += stringField(chunk);
     const { query, variables } = operation(JSON.parse(text));
-    const search =
-      variables.search === undefined ? "" : stringField(variables.search);
     let data: Record<string, unknown>;
     if (!query.includes("mutation")) {
+      const search =
+        variables.search == null ? "" : stringField(variables.search);
       data = {};
       if (query.includes("ssoSettings"))
         data.ssoSettings = query.includes("organization_name:")
