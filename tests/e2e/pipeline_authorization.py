@@ -34,6 +34,7 @@ _QUERY_FIELDS = frozenset(
         "generationEvents",
         "golOntologies",
         "golOntologyCanManage",
+        "golOntologyPackages",
         "golOntologyWorkspace",
         "golOntologySymbols",
         "golOntologySchema",
@@ -65,6 +66,7 @@ _MUTATION_FIELDS = frozenset(
         "deleteConversation",
         "deleteMessage",
         "deletePipeline",
+        "installGolOntologyPackage",
         "saveGolOntology",
         "validateGolOntology",
         "publishGolOntology",
@@ -165,7 +167,16 @@ async def _assert_public_api_inventory(
             for field in require_sequence(root.get("fields"), root_name)
         }
 
-    assert field_names("queryType") == _QUERY_FIELDS | {
+    def assert_fields(
+        root_name: str, expected: frozenset[str] | set[str]
+    ) -> None:
+        actual = field_names(root_name)
+        assert actual == expected, (
+            f"{root_name} inventory differs: missing={sorted(expected - actual)}, "
+            f"unexpected={sorted(actual - expected)}"
+        )
+
+    expected_queries = _QUERY_FIELDS | {
         "pengoloIdentity",
         "pengoloModels",
         "pengoloOpenai",
@@ -183,7 +194,8 @@ async def _assert_public_api_inventory(
         "evidencePage",
         "pengoloEvents",
     }
-    assert field_names("mutationType") == _MUTATION_FIELDS | {
+    assert_fields("queryType", expected_queries)
+    expected_mutations = _MUTATION_FIELDS | {
         "emailOperation",
         "updatePengoloOpenai",
         "updatePengoloPreferences",
@@ -208,12 +220,14 @@ async def _assert_public_api_inventory(
         "deletePengoloFile",
         "pengoloDownload",
     }
-    assert field_names("subscriptionType") == {
+    assert_fields("mutationType", expected_mutations)
+    expected_subscriptions = {
         "ask",
         "pengoloStream",
         "pengoloIdentityChanges",
         "pengoloLibraryChanges",
     }
+    assert_fields("subscriptionType", expected_subscriptions)
     expected_admin_queries = {
         "auditEvents",
         "ssoSettings",

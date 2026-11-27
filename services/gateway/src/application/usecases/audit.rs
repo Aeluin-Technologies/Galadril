@@ -37,10 +37,26 @@ pub enum AuditAction {
     ScribeDatabaseQuery,
     PublishOntology,
     SaveOntologyDraft,
+    #[allow(
+        dead_code,
+        reason = "GOL authoring uses the draft-save audit action"
+    )]
     AuthorOntology,
     DeleteOntology,
+    #[allow(
+        dead_code,
+        reason = "GOL has no public source restoration operation"
+    )]
     RestoreOntology,
+    #[allow(
+        dead_code,
+        reason = "The current Registry binding path has no dedicated audit action"
+    )]
     BindOntology,
+    #[allow(
+        dead_code,
+        reason = "GOL retires the active generation as part of audited deletion"
+    )]
     RetireOntology,
     RequestStagingUpload,
     CompleteUpload,
@@ -141,6 +157,10 @@ impl AuditTarget {
 
     /// Associates an immutable publication identifier with every audit
     /// outcome.
+    #[allow(
+        dead_code,
+        reason = "Production publication allocates its generation after audit begins"
+    )]
     pub fn with_publication_id(
         mut self,
         publication_id: impl Into<String>,
