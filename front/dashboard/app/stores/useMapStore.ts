@@ -22,7 +22,7 @@ export const useMapStore = defineStore("mapStore", () => {
       const response = await fetch(path);
       if (!response.ok) throw new Error(`Map "${mapName}" not found.`);
 
-      const geoJson = await response.json();
+      const geoJson = await response.text();
 
       registerMap(mapName, geoJson);
 

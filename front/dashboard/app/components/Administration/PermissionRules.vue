@@ -147,9 +147,9 @@ const {
           </p>
           <UiButton
             type="button"
-            @click="ruleStep = 2"
             variant="primary"
             class="mt-5"
+            @click="ruleStep = 2"
             >{{ $t("authentication.continue") }}</UiButton
           ></template
         >
@@ -199,7 +199,7 @@ const {
             <UiButton type="button" variant="secondary" @click="ruleStep = 1">{{
               $t("administration.copy.back")
             }}</UiButton
-            ><UiButton type="button" @click="reviewRule" variant="primary">{{
+            ><UiButton type="button" variant="primary" @click="reviewRule">{{
               $t("administration.copy.review_rule")
             }}</UiButton>
           </div></template
@@ -252,7 +252,7 @@ const {
             <UiButton type="button" variant="secondary" @click="ruleStep = 2">{{
               $t("administration.copy.back")
             }}</UiButton
-            ><UiButton type="button" @click="saveRule" variant="primary">{{
+            ><UiButton type="button" variant="primary" @click="saveRule">{{
               $t("administration.copy.save_rule")
             }}</UiButton>
           </div></template
@@ -334,14 +334,14 @@ const {
         <UiButton
           type="button"
           variant="ghost"
-          @click="editPolicy(policy)"
           :loading="busy"
+          @click="editPolicy(policy)"
           >{{ $t("ui.actions.edit") }}</UiButton
         ><UiButton
           type="button"
           variant="secondary"
-          @click="savePolicy({ ...policy, active: !policy.active })"
           :loading="busy"
+          @click="savePolicy({ ...policy, active: !policy.active })"
           >{{
             policy.active
               ? $t("administration.copy.pause_rule")

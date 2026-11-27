@@ -108,8 +108,8 @@ const {
           v-if="connection.enabled"
           type="button"
           variant="secondary"
-          @click="disable(connection.domain)"
           :loading="busy"
+          @click="disable(connection.domain)"
           >{{ $t("administration.copy.disconnect") }}</UiButton
         >
       </div> </UiCard
@@ -187,8 +187,8 @@ const {
               type="button"
               variant="secondary"
               :disabled="!domain"
-              @click="requestDomain"
               class="mt-4 me-3 mb-1"
+              @click="requestDomain"
               >{{
                 $t("administration.copy.get_verification_instructions")
               }}</UiButton
@@ -228,9 +228,9 @@ const {
             <UiButton
               type="button"
               :disabled="!challenge"
-              @click="providerStep = 2"
               variant="primary"
               class="mt-5"
+              @click="providerStep = 2"
               >{{ $t("authentication.continue") }}</UiButton
             >
           </div>
@@ -271,10 +271,10 @@ const {
             <UiButton
               type="button"
               variant="secondary"
-              @click="detectProvider"
               :loading="busy"
               :disabled="!detectionAddress"
               class="mt-4"
+              @click="detectProvider"
               >{{
                 busy
                   ? $t("administration.copy.checking_provider")
@@ -352,8 +352,8 @@ const {
               <div class="mt-4 flex flex-wrap gap-3">
                 <UiButton
                   type="button"
-                  @click="useDetectedProvider"
                   variant="primary"
+                  @click="useDetectedProvider"
                   >{{
                     $t("administration.copy.use_detected_settings")
                   }}</UiButton
@@ -505,8 +505,8 @@ const {
                 :disabled="
                   protocol === 'oidc' ? !providerAddressValid : !metadata.trim()
                 "
-                @click="reviewConnection"
                 variant="primary"
+                @click="reviewConnection"
                 >{{ $t("administration.copy.review_connection") }}</UiButton
               >
             </div>

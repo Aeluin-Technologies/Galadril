@@ -1,7 +1,8 @@
+import { graphQL } from "./graphql-fixture.ts";
 import { required } from "./support.ts";
 import assert from "node:assert/strict";
 import { testEvent } from "./nitro-fixture.ts";
-import { record } from "../shared/records.ts";
+import { parseObject, record } from "../shared/records.ts";
 import type { EventHandler, H3Error } from "h3";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
@@ -150,10 +151,10 @@ test("authentication transport stops oversized upstream streams before reading t
 });
 
 test("Nuxt has no database driver, connection setting or SQL implementation", async () => {
-  const pkg = JSON.parse(
+  const pkg = parseObject(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   );
-  assert.equal(pkg.dependencies.pg, undefined);
+  assert.equal(record(pkg.dependencies).pg, undefined);
   for (const path of await sourceFiles(
     new URL("../server/", import.meta.url),
   )) {
@@ -183,7 +184,7 @@ test("private GraphQL uses variables and rejects redirects, upstream errors and 
         client.key,
       );
       assert.equal(typeof options.body, "string");
-      const payload = JSON.parse(String(options.body));
+      const payload = graphQL(JSON.parse(String(options.body)));
       assert.equal(payload.variables.user, "alice");
       assert.match(payload.query, /activeUser/);
       return new Response(JSON.stringify({ data: { activeUser: "alice" } }));
@@ -272,7 +273,7 @@ test("WebAuthn binary material and counter preconditions survive the GraphQL bou
   );
   assert.equal(required(calls[1]).variables.previousCounter, "7");
   assert.equal(
-    JSON.parse(String(required(calls[1]).variables.credential)).publicKey,
+    parseObject(required(calls[1]).variables.credential).publicKey,
     "AwQ",
   );
 });
@@ -415,4 +416,13 @@ test("OAuth token requests get a bounded CPU allowance without replaying the exc
     AbortSignal.timeout = timeout;
     globalThis.fetch = fetch;
   }
+});
+
+await test("GraphQL fixtures decode only typed operation envelopes", () => {
+  assert.deepEqual(graphQL({ query: "query { value }" }), {
+    query: "query { value }",
+    variables: {},
+  });
+  assert.throws(() => graphQL({ query: 42 }));
+  assert.throws(() => graphQL({ query: "query { value }", variables: [] }));
 });

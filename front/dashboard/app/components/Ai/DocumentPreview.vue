@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { pengoloMutation } from "~/utils/pengolo-api";
-import {
-  ArrowDownTrayIcon,
-  EllipsisHorizontalIcon,
-} from "@heroicons/vue/24/outline";
+import { ArrowDownTrayIcon } from "@heroicons/vue/24/outline";
 const props = defineProps<{
   file: { id: string; name?: string; mime?: string; size?: number } | null;
   temporarySession?: string;
@@ -14,8 +11,6 @@ const { t } = useI18n();
 const account = useAccount();
 const source = shallowRef<Blob>();
 const signing = ref(false);
-const loadDocumentSigning = () => import("./DocumentSigning.vue");
-const DocumentSigning = defineAsyncComponent(loadDocumentSigning);
 const loading = ref(false),
   error = ref(""),
   url = ref(""),
@@ -181,7 +176,7 @@ onDeactivated(clear);
 onBeforeUnmount(clear);
 </script>
 <template>
-  <DocumentSigning
+  <LazyAiDocumentSigning
     v-if="signing && source && file"
     :source="source"
     :name="title"

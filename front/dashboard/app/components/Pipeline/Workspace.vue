@@ -472,11 +472,11 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
     >
     <div
       v-show="view === 'edit'"
+      v-if="!loading && (!props.pipelineId || artifact)"
       id="pipeline-panel-edit"
       role="tabpanel"
       aria-labelledby="pipeline-tab-edit"
       class="flex min-h-0 min-w-0 flex-1 flex-col"
-      v-if="!loading && (!props.pipelineId || artifact)"
     >
       <PipelineToolbar
         :blocks="nodes.length"
@@ -562,8 +562,8 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
             }"
             :fit-view-params="{ padding: 0.2, maxZoom: 1 }"
             :min-zoom="0.1"
-            @nodes-initialized="flow.fitView({ padding: 0.2, maxZoom: 1 })"
             :delete-key-code="null"
+            @nodes-initialized="flow.fitView({ padding: 0.2, maxZoom: 1 })"
             @connect="editor.connect"
             @node-click="({ node }) => configure(node.id)"
             @node-drag-stop="editor.remember"
@@ -633,12 +633,12 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
         <PipelineBlockSettings
           v-if="configuring && current"
           :key="`${current.id}:${configurationVersion}`"
+          v-model="configuring"
           :issues="
             editor.diagnostics.value.filter(
               (issue) => issue.nodeId === current?.id,
             )
           "
-          v-model="configuring"
           :node="current"
           :failed="failure"
           :nodes="nodes"

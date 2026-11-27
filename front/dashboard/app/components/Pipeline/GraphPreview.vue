@@ -80,9 +80,9 @@ const graph = computed(() => {
         :nodes-connectable="false"
         :elements-selectable="true"
         :delete-key-code="null"
-        @node-click="({ node }) => (selected = node.id)"
         :fit-view-params="{ padding: 0.3, maxZoom: 1 }"
         fit-view-on-init
+        @node-click="({ node }) => (selected = node.id)"
         ><Background :gap="24" :size="0.6" />
         <template #node-custom="node: NodeProps<EditorNodeData>">
           <div

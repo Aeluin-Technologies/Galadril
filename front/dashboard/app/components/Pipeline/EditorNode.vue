@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isScheduled } from "~/utils/pipeline";
+import { isScheduled, branchLabels } from "~/utils/pipeline";
 import { Handle, Position } from "@vue-flow/core";
 import {
   PencilSquareIcon,
@@ -12,7 +12,6 @@ import {
   AdjustmentsHorizontalIcon,
   ExclamationCircleIcon,
 } from "@heroicons/vue/24/outline";
-import { branchLabels } from "~/utils/pipeline";
 import { readConditions } from "~/utils/pipeline-conditions";
 import { nodeCategory, pipelinePalette } from "~/utils/pipeline-visuals";
 import type { EditorNodeData } from "~/composables/usePipelineEditor";

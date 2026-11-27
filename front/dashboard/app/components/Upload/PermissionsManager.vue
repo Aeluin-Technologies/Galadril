@@ -101,9 +101,9 @@ function removePermission(index: number): void {
       <UiButton
         v-for="role in availablePresetRoles"
         :key="role"
-        @click="addPermission(role)"
         type="button"
         variant="ghost"
+        @click="addPermission(role)"
       >
         + {{ role }}
       </UiButton>
@@ -136,7 +136,6 @@ function removePermission(index: number): void {
         />
         <UiInput
           v-model="targetId"
-          @keydown.enter="addPermission()"
           type="text"
           :placeholder="
             targetType === 'user'
@@ -144,6 +143,7 @@ function removePermission(index: number): void {
               : $t('storage.permissions.placeholder_role')
           "
           class="w-full placeholder:text-muted"
+          @keydown.enter="addPermission()"
         />
       </div>
 
@@ -161,10 +161,10 @@ function removePermission(index: number): void {
 
       <div class="sm:col-span-2">
         <UiButton
-          @click="addPermission()"
           type="button"
           variant="ghost"
           class="w-full flex items-center justify-center space-x-1"
+          @click="addPermission()"
         >
           <PlusIcon class="w-3.5 h-3.5" />
           <span>{{ $t("storage.permissions.add") }}</span>
@@ -223,11 +223,11 @@ function removePermission(index: number): void {
         </div>
 
         <UiIconButton
-          @click="removePermission(idx)"
           type="button"
           variant="danger"
           :icon="XMarkIcon"
           :label="$t('ui.actions.close')"
+          @click="removePermission(idx)"
         />
       </div>
     </div>

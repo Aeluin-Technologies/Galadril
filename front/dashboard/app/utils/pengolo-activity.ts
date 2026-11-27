@@ -159,9 +159,22 @@ function identifier(value: unknown): value is string {
     /^[A-Za-z0-9_.-]+$/.test(value)
   );
 }
-function optionalId(value: unknown): boolean {
+function optionalId(value: unknown): value is string | null | undefined {
   return value == null || identifier(value);
 }
+function isMember<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values,
+): value is Values[number] {
+  return values.some((candidate) => value === candidate);
+}
+
+function count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+const pythonStatuses = ["running", "completed", "failed"] as const;
+
 function taskStatus(value: unknown): value is TaskStatus {
   return (
     typeof value === "string" &&
@@ -185,8 +198,8 @@ function planTask(value: unknown): PlanTask | null {
     id: value.id,
     content: value.content,
     status: value.status,
-    active_form: (value.active_form as string) ?? "",
-    parent_id: (value.parent_id as string) ?? null,
+    active_form: value.active_form ?? "",
+    parent_id: value.parent_id ?? null,
   };
 }
 function question(value: unknown): AgentQuestion | null {
@@ -215,7 +228,7 @@ function question(value: unknown): AgentQuestion | null {
       return null;
     options.push({
       label: option.label,
-      description: (option.description as string) ?? null,
+      description: option.description ?? null,
     });
   }
   if (new Set(options.map((option) => option.label)).size !== options.length)
@@ -257,14 +270,14 @@ export function parseActivity(content: string): AgentActivity | null {
         !fields(value, ["type", "id", "name", "status"]) ||
         !identifier(value.id) ||
         !identifier(value.name) ||
-        !["started", "completed", "failed"].includes(String(value.status))
+        !isMember(value.status, ["started", "completed", "failed"])
       )
         return null;
       return {
         type: "tool_status",
         id: value.id,
         name: value.name,
-        status: value.status as ToolActivity["status"],
+        status: value.status,
       };
     }
     case "usage": {
@@ -281,19 +294,11 @@ export function parseActivity(content: string): AgentActivity | null {
         ])
       )
         return null;
-      const counts = [
-        value.requests,
-        value.tool_calls,
-        value.input_tokens,
-        value.output_tokens,
-      ];
       if (
-        !counts.every(
-          (count) =>
-            typeof count === "number" &&
-            Number.isSafeInteger(count) &&
-            count >= 0,
-        ) ||
+        !count(value.requests) ||
+        !count(value.tool_calls) ||
+        !count(value.input_tokens) ||
+        !count(value.output_tokens) ||
         typeof value.elapsed_seconds !== "number" ||
         !Number.isFinite(value.elapsed_seconds) ||
         value.elapsed_seconds < 0 ||
@@ -305,19 +310,19 @@ export function parseActivity(content: string): AgentActivity | null {
         ) ||
         !(
           value.stop_reason === null ||
-          ["budget", "timeout", "error"].includes(String(value.stop_reason))
+          isMember(value.stop_reason, ["budget", "timeout", "error"])
         )
       )
         return null;
       return {
         type: "usage",
-        requests: value.requests as number,
-        tool_calls: value.tool_calls as number,
-        input_tokens: value.input_tokens as number,
-        output_tokens: value.output_tokens as number,
+        requests: value.requests,
+        tool_calls: value.tool_calls,
+        input_tokens: value.input_tokens,
+        output_tokens: value.output_tokens,
         elapsed_seconds: value.elapsed_seconds,
         cost_usd: value.cost_usd,
-        stop_reason: value.stop_reason as UsageActivity["stop_reason"],
+        stop_reason: value.stop_reason,
       };
     }
     case "web_research": {
@@ -407,22 +412,25 @@ export function parseActivity(content: string): AgentActivity | null {
     case "billing":
       if (
         !fields(value, ["type", "provider", "reason"]) ||
-        !["chatgpt", "api"].includes(String(value.provider)) ||
-        !["connected", "not_connected", "quota", "model_unavailable"].includes(
-          String(value.reason),
-        )
+        !isMember(value.provider, ["chatgpt", "api"]) ||
+        !isMember(value.reason, [
+          "connected",
+          "not_connected",
+          "quota",
+          "model_unavailable",
+        ])
       )
         return null;
       return {
         type: "billing",
-        provider: value.provider as "chatgpt" | "api",
-        reason: value.reason as
-          "connected" | "not_connected" | "quota" | "model_unavailable",
+        provider: value.provider,
+        reason: value.reason,
       };
     case "python": {
       if (
         !fields(value, ["type", "id", "channel", "data"]) ||
         !identifier(value.id) ||
+        !isMember(value.channel, ["code", "output", "image", "status"]) ||
         typeof value.data !== "string"
       )
         return null;
@@ -433,12 +441,12 @@ export function parseActivity(content: string): AgentActivity | null {
             ? value.data.length <= 2048 &&
               /^[A-Za-z0-9+/]*={0,2}$/.test(value.data)
             : value.channel === "status" &&
-              ["running", "completed", "failed"].includes(value.data);
+              isMember(value.data, pythonStatuses);
       return valid
         ? {
             type: "python",
             id: value.id,
-            channel: value.channel as "code" | "output" | "image" | "status",
+            channel: value.channel,
             data: value.data,
           }
         : null;
@@ -446,28 +454,27 @@ export function parseActivity(content: string): AgentActivity | null {
     case "warning":
       if (
         !fields(value, ["type", "source"]) ||
-        typeof value.source !== "string" ||
-        !warningSources.includes(value.source as WarningSource)
+        !isMember(value.source, warningSources)
       )
         return null;
-      return { type: "warning", source: value.source as WarningSource };
+      return { type: "warning", source: value.source };
     case "phase":
       if (
         !fields(value, ["type", "phase", "agent_id"]) ||
-        typeof value.phase !== "string" ||
-        !["thinking", "writing", "tool", "agent", "waiting"].includes(
-          value.phase,
-        ) ||
+        !isMember(value.phase, [
+          "thinking",
+          "writing",
+          "tool",
+          "agent",
+          "waiting",
+        ]) ||
         !optionalId(value.agent_id)
       )
         return null;
       return {
         type: "phase",
-        phase: value.phase as Extract<
-          AgentActivity,
-          { type: "phase" }
-        >["phase"],
-        agent_id: (value.agent_id as string) ?? null,
+        phase: value.phase,
+        agent_id: value.agent_id ?? null,
       };
     case "plan": {
       if (
@@ -481,7 +488,7 @@ export function parseActivity(content: string): AgentActivity | null {
         ? {
             type: "plan",
             operation: value.operation as "upsert" | "delete",
-            agent_id: (value.agent_id as string) ?? null,
+            agent_id: value.agent_id ?? null,
             task,
           }
         : null;
@@ -580,9 +587,10 @@ export function projectActivities(
         };
         python.set(activity.id, execution);
       }
-      if (activity.channel === "status")
-        execution.status = activity.data as PythonExecution["status"];
-      else {
+      if (activity.channel === "status") {
+        if (isMember(activity.data, pythonStatuses))
+          execution.status = activity.data;
+      } else {
         const maximum =
           activity.channel === "code"
             ? 16384

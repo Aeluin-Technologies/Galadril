@@ -1,3 +1,4 @@
+import { record } from "../../shared/records.ts";
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloChats } from "~/stores/usePengoloChats";
@@ -12,7 +13,6 @@ import { usePengoloOpenai } from "~/stores/usePengoloOpenai";
 import {
   pengoloOperation,
   invalidatePengoloRequests,
-  type WorkspaceIdentity,
 } from "~/utils/pengolo-api";
 import { invalidatesWorkspace } from "~/utils/pengolo";
 
@@ -55,8 +55,14 @@ export default defineNuxtPlugin((nuxt) => {
         "identity",
         () => ({ query: pengoloOperation("IdentityChanges") }),
         (data) => {
-          const identity = data.pengoloIdentityChanges as WorkspaceIdentity;
-          if (generation !== epoch) return;
+          const identity = record(data.pengoloIdentityChanges);
+          if (
+            generation !== epoch ||
+            typeof identity.version !== "string" ||
+            typeof identity.webSearchAvailable !== "boolean" ||
+            typeof identity.administrator !== "boolean"
+          )
+            return;
           if (
             workspace.identity &&
             workspace.identity.version !== identity.version

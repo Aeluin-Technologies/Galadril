@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { parseObject, record } from "../../shared/records.ts";
 import {
   KeyUsageFlags,
   KeyUsagesExtension,
@@ -25,6 +26,34 @@ export interface SigningVault {
   certificate: string;
   password: KeyWrap;
   passkey?: PasskeyWrap;
+}
+
+function keyWrap(value: unknown): KeyWrap {
+  const { salt, nonce, ciphertext } = record(value);
+  if (
+    typeof salt !== "string" ||
+    typeof nonce !== "string" ||
+    typeof ciphertext !== "string"
+  )
+    throw new Error("Invalid signing vault");
+  return { salt, nonce, ciphertext };
+}
+
+/** Decode the persisted cryptographic envelope before any key operation. */
+export function parseSigningVault(payload: string): SigningVault {
+  const { version, certificate, password, passkey } = parseObject(payload);
+  if (version !== 1 || typeof certificate !== "string")
+    throw new Error("Invalid signing vault");
+  const vault: SigningVault = {
+    version,
+    certificate,
+    password: keyWrap(password),
+  };
+  if (passkey === undefined) return vault;
+
+  const credential = record(passkey).credential;
+  if (typeof credential !== "string") throw new Error("Invalid signing vault");
+  return { ...vault, passkey: { ...keyWrap(passkey), credential } };
 }
 
 export type UnlockFactor =

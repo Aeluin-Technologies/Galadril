@@ -1,7 +1,13 @@
+import { graphQL } from "./graphql-fixture.ts";
+import { text, parseObject } from "../shared/records.ts";
 import { expect } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
-import type { AuthoringState } from "../app/utils/pipeline.ts";
+import {
+  parseDefinition,
+  type AuthoringState,
+  type Definition,
+} from "../app/utils/pipeline.ts";
 
 test("block diagnostics stay local while review, publication and deployment remain separate", async ({
   page,
@@ -12,7 +18,7 @@ test("block diagnostics stay local while review, publication and deployment rema
     published: string | null = null;
   let deleted = false,
     conflict = false;
-  let definition = {
+  let definition: Definition = {
     name: "Correspondence",
     sources: [
       {
@@ -57,33 +63,33 @@ test("block diagnostics stay local while review, publication and deployment rema
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     if (query.includes("pipelineDiagnostics"))
       return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (query.includes("authorPipeline")) {
       expect(variables.expected).toBe(revision);
-      const command = JSON.parse(variables.command);
+      const command = parseObject(variables.command);
       if (conflict)
         return route.fulfill({
           json: { data: null, errors: [{ extensions: { code: "CONFLICT" } }] },
         });
       if (command.operation === "save_draft") {
-        definition = JSON.parse(variables.definition);
+        definition = parseDefinition(variables.definition);
         lifecycle = "draft";
         authoring.approval = null;
       }
       if (command.operation === "create_branch")
-        authoring.branches[command.branch] = {
+        authoring.branches[text(command.branch)] = {
           definition,
           base_definition: definition,
           base_revision_id: revision,
-          parent_branch: command.from_branch,
+          parent_branch: text(command.from_branch),
           author_id: "author",
           updated_at_ms: 1,
         };
       if (command.operation === "propose_merge")
-        authoring.proposals[command.source_branch] = {
-          source_branch: command.source_branch,
+        authoring.proposals[text(command.source_branch)] = {
+          source_branch: text(command.source_branch),
           source_hash: "reviewed",
           target_hash: "reviewed",
           author_id: "author",
@@ -167,7 +173,7 @@ test("block diagnostics stay local while review, publication and deployment rema
             pipelineDefinition: {
               ...artifact(),
               rebasePreview: JSON.stringify({
-                definition: JSON.parse(variables.definition),
+                definition: parseDefinition(variables.definition),
                 conflicts: [],
               }),
             },
@@ -416,7 +422,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     if (body.query.includes("pipelineDiagnostics"))
       return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (body.query.includes("scribeModels"))
@@ -472,7 +478,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
             },
       });
     if (body.query.includes("pipelineComposition")) {
-      const authored = JSON.parse(body.variables.definition);
+      const authored = parseDefinition(body.variables.definition);
       composedRevision = authored.pipeline.find(
         (step: { type: string }) => step.type === "pipeline",
       )?.pipeline_ref?.revision_id;
@@ -635,7 +641,7 @@ test("the model picker finds installed algorithms by purpose and refuses stale v
   page,
 }, testInfo) => {
   let stale = false;
-  let composedStep: Record<string, unknown> | undefined;
+  let composedStep: Definition["pipeline"][number] | undefined;
   const capability = {
     id: "fixture.algorithm.count",
     pluginId: "fixture",
@@ -672,7 +678,7 @@ test("the model picker finds installed algorithms by purpose and refuses stale v
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     if (body.query.includes("pipelineDiagnostics"))
       return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (body.query.includes("pipelineCapabilities"))
@@ -688,7 +694,7 @@ test("the model picker finds installed algorithms by purpose and refuses stale v
         },
       });
     if (body.query.includes("pipelineComposition")) {
-      const definition = JSON.parse(body.variables.definition);
+      const definition = parseDefinition(body.variables.definition);
       composedStep = definition.pipeline[0];
       return route.fulfill({
         json: {
@@ -878,16 +884,16 @@ test("email sources, business filters and template replies use readable plugin o
       }
     | undefined;
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     if (body.query.includes("pipelineDiagnostics"))
       return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (body.query.includes("pipelineComposition")) {
-      const definition = JSON.parse(body.variables.definition);
+      const definition = parseDefinition(body.variables.definition);
       return route.fulfill({
         json: {
           data: {
             pipelineComposition: {
-              definition: body.variables.definition,
+              definition: text(body.variables.definition),
               blocks: definition.sources.length + definition.pipeline.length,
               transfers: 0,
             },
@@ -911,11 +917,11 @@ test("email sources, business filters and template replies use readable plugin o
       });
     if (body.query.includes("authorPipeline")) {
       saved = {
-        pipeline_id: body.variables.id,
-        name: body.variables.name,
+        pipeline_id: text(body.variables.id),
+        name: text(body.variables.name),
         head_revision_id: "a".repeat(32),
         published_revision_id: null,
-        definition: body.variables.definition,
+        definition: text(body.variables.definition),
         authoring: JSON.stringify({
           branches: {},
           proposals: {},
@@ -1041,10 +1047,10 @@ test("email sources, business filters and template replies use readable plugin o
   await expect(page).toHaveURL(/\/pipeline\/pipeline-/);
   await expect(page.locator('[data-step-kind="filter"]')).toBeVisible();
   expect(saved).toBeDefined();
-  const definition = JSON.parse(saved?.definition ?? "{}");
+  const definition = parseDefinition(saved?.definition);
   expect(
     definition.pipeline.find((step: { type: string }) => step.type === "filter")
-      .params.conditions,
+      ?.params?.conditions,
   ).toEqual([
     { field: "recipient", operator: "equals", value: "help@example.org" },
     { field: "subject", operator: "contains", value: "Invoice" },
@@ -1053,9 +1059,9 @@ test("email sources, business filters and template replies use readable plugin o
     definition.pipeline.find(
       (step: { capability_id?: string }) =>
         step.capability_id === "utils.algorithm.compose_reply",
-    ).params.template,
+    )?.params?.template,
   ).toBe("Hello {{ sender }}, about {{ subject }}.");
-  expect(Object.keys(definition.editor.positions)).toHaveLength(4);
+  expect(Object.keys(definition.editor?.positions ?? {})).toHaveLength(4);
   await page.screenshot({
     path: testInfo.outputPath("email-pipeline-desktop.png"),
     fullPage: true,

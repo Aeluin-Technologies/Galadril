@@ -159,11 +159,11 @@ const triggerGlobalSearch = () => {
                 v-if="step.actionType === 'search'"
                 variant="ghost"
                 :disabled="!step.active"
-                @click="step.active && triggerGlobalSearch()"
                 :class="[
                   'space-x-1.5',
                   step.active ? '' : 'pointer-events-none',
                 ]"
+                @click="step.active && triggerGlobalSearch()"
               >
                 <MagnifyingGlassIcon class="w-3.5 h-3.5 stroke-[2.5]" />
                 <span>{{ step.label }}</span>

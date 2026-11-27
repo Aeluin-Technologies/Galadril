@@ -1,7 +1,9 @@
+import { graphQL } from "./graphql-fixture.ts";
+import { record, text } from "../shared/records.ts";
 import { expect } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
-import { record } from "../shared/records.ts";
+
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import JSZip from "jszip";
@@ -90,7 +92,7 @@ test("library selection groups actions, hides completed progress and starts an a
     }),
   );
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     let data: Record<string, unknown> = {};
     if (query.includes("query Workspace"))
       data = {
@@ -118,12 +120,12 @@ test("library selection groups actions, hides completed progress and starts an a
     else if (query.includes("pengoloDownload"))
       data = {
         pengoloDownload: {
-          url: `/fixture-file/${variables.input.id.startsWith("1") ? "1" : "2"}`,
+          url: `/fixture-file/${text(record(variables.input).id).startsWith("1") ? "1" : "2"}`,
         },
       };
     else if (query.includes("deletePengoloFile")) {
       deleted++;
-      files = files.filter((file) => file.id !== variables.input.id);
+      files = files.filter((file) => file.id !== record(variables.input).id);
       data = { deletePengoloFile: true };
     } else if (query.includes("pengoloChats"))
       data = { pengoloChats: { items: [], after: null } };
@@ -299,7 +301,7 @@ test("projects use colored Heroicons and confirm owner deletion", async ({
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     let data: Record<string, unknown> = {};
     if (query.includes("query Workspace"))
       data = {
@@ -382,14 +384,20 @@ test("projects use colored Heroicons and confirm owner deletion", async ({
         .map((animation) => animation.finished),
     );
   });
-  const initialPosition = await advanced.evaluate(
-    (element) => (element as HTMLElement).offsetTop,
-  );
+  const initialPosition = await advanced.evaluate((element) => {
+    if (!(element instanceof HTMLElement))
+      throw new Error("Missing layout element");
+    return element.offsetTop;
+  });
   await editor
     .getByRole("button", { name: "Customize project appearance", exact: true })
     .click();
   expect(
-    await advanced.evaluate((element) => (element as HTMLElement).offsetTop),
+    await advanced.evaluate((element) => {
+      if (!(element instanceof HTMLElement))
+        throw new Error("Missing layout element");
+      return element.offsetTop;
+    }),
   ).toEqual(initialPosition);
   await editor
     .getByRole("textbox", { name: "Project name", exact: true })
@@ -498,7 +506,7 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
     });
   });
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     let data: Record<string, unknown> = {};
     if (query.includes("query Workspace")) {
       data = {
@@ -535,13 +543,15 @@ test("sign Tectonic PDFs with the same encrypted account key", async ({
       };
     } else if (query.includes("pengoloDownload(")) {
       data = {
-        pengoloDownload: { url: `/signing-fixture/${variables.input.id}` },
+        pengoloDownload: {
+          url: `/signing-fixture/${record(variables.input).id}`,
+        },
       };
     } else if (query.includes("createPengoloSigningVault(")) {
       expect(envelope).toBeNull();
       expect(typeof variables.envelope).toBe("string");
       expect(variables.envelope).not.toContain(password);
-      envelope = variables.envelope;
+      envelope = text(variables.envelope);
       enrollments++;
       data = { createPengoloSigningVault: true };
     } else if (query.includes("pengoloDocumentProfile")) {

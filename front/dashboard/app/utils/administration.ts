@@ -135,11 +135,13 @@ class AdministrationFailure extends Error {
 function incompatibleSchema(errors: unknown) {
   return (
     Array.isArray(errors) &&
-    errors.some(
-      (error) =>
-        typeof error?.message === "string" &&
-        /^Unknown (field|argument|type)\b/.test(error.message),
-    )
+    errors.some((error: unknown) => {
+      const { message } = record(error);
+      return (
+        typeof message === "string" &&
+        /^Unknown (field|argument|type)\b/.test(message)
+      );
+    })
   );
 }
 

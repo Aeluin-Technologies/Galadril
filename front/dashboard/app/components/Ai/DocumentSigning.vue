@@ -20,7 +20,11 @@ import {
   signPdf,
 } from "~/utils/pdf-signing";
 import { parseSignatureInk } from "~/utils/signature-ink";
-import { createSigningVault, unlockSigningKey } from "~/utils/signing-vault";
+import {
+  createSigningVault,
+  parseSigningVault,
+  unlockSigningKey,
+} from "~/utils/signing-vault";
 import type { SigningVault } from "~/utils/signing-vault";
 import {
   enrollSigningPasskey,
@@ -110,7 +114,7 @@ onMounted(async () => {
     selectedField.value = available[0]?.name ?? "";
     placement.value = available[0]?.placement;
     selectedMark.value = savedMarks[0]?.id ?? "";
-    vault.value = stored === null ? null : JSON.parse(stored);
+    vault.value = stored === null ? null : parseSigningVault(stored);
   } catch {
     if (!signal.aborted) error.value = t("documentSigning.unavailable");
   } finally {
@@ -197,7 +201,7 @@ async function confirmSigning() {
           {},
           signal,
         );
-        if (current() && existing) vault.value = JSON.parse(existing);
+        if (current() && existing) vault.value = parseSigningVault(existing);
         throw new Error("Signing vault already exists");
       }
       vault.value = created;

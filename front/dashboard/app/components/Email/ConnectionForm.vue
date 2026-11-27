@@ -12,7 +12,7 @@ const props = withDefaults(
     account?: EmailAccount;
     mode?: "identity" | "servers" | "collection";
   }>(),
-  { mode: "identity" },
+  { mode: "identity", account: undefined },
 );
 const identity = computed(() => !props.account || props.mode === "identity");
 const servers = computed(() => !props.account || props.mode === "servers");

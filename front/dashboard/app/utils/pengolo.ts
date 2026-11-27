@@ -95,9 +95,7 @@ function cacheValueBytes(value: unknown, budget: number): number {
       for (const key in value) {
         if (!Object.hasOwn(value, key)) continue;
         bytes +=
-          24 +
-          key.length * 2 +
-          measure((value as Record<string, unknown>)[key], depth + 1);
+          24 + key.length * 2 + measure(Reflect.get(value, key), depth + 1);
         if (bytes > budget) return Infinity;
       }
     }
@@ -341,7 +339,8 @@ export function compatibleAgent(
   const pending = [...agent.data.skillIds];
   const visited = new Set<string>();
   while (pending.length) {
-    const id = pending.pop()!;
+    const id = pending.pop();
+    if (id === undefined) break;
     if (visited.has(id)) continue;
     visited.add(id);
     const item = catalog.find((entry) => entry.id === id);
@@ -362,7 +361,7 @@ export function compatibleAgent(
 export function documentScore(score: number | null): string | null {
   return score !== null && Number.isFinite(score) ? score.toFixed(2) : null;
 }
-const indexingLabels: Record<string, string> = {
+const indexingLabels = {
   queued: "Waiting to index",
   reading: "Reading file",
   parsing: "Parsing and chunking",
@@ -372,7 +371,11 @@ const indexingLabels: Record<string, string> = {
   retrying: "Waiting to retry",
   failed: "Indexing interrupted",
   completed: "Document indexed",
-};
+} satisfies Record<string, string>;
+
+function hasIndexingLabel(stage: string): stage is keyof typeof indexingLabels {
+  return Object.hasOwn(indexingLabels, stage);
+}
 
 /** Progress describes processing stages rather than model accuracy or an ETA. */
 export function indexingState(data: {
@@ -389,14 +392,14 @@ export function indexingState(data: {
   if (
     progress &&
     progress.stage !== "completed" &&
-    Object.hasOwn(indexingLabels, progress.stage) &&
+    hasIndexingLabel(progress.stage) &&
     Number.isInteger(progress.percent) &&
     progress.percent >= 0 &&
     progress.percent <= 99
   ) {
     return {
       ...progress,
-      label: indexingLabels[progress.stage]!,
+      label: indexingLabels[progress.stage],
       active: progress.stage !== "failed",
       reasonKey:
         progress.stage === "failed" &&
@@ -412,20 +415,20 @@ export function indexingState(data: {
   )
     return {
       stage: "completed",
-      label: indexingLabels.completed!,
+      label: indexingLabels.completed,
       percent: 100,
       active: false,
     };
   if (data.retrieval?.status === "failed")
     return {
       stage: "failed",
-      label: indexingLabels.failed!,
+      label: indexingLabels.failed,
       percent: 0,
       active: false,
     };
   return {
     stage: "queued",
-    label: indexingLabels.queued!,
+    label: indexingLabels.queued,
     percent: 0,
     active: true,
   };
@@ -473,7 +476,7 @@ export function modelDisplayName(name: string): string {
   return name.replace(
     /^gpt-(\d+(?:\.\d+)*)(?:-(astra|terra|sol|luna|codex|mini|nano|pro))?$/i,
     (_match: string, version: string, variant: string | undefined) =>
-      `GPT-${version}${variant ? ` ${variant[0]!.toUpperCase()}${variant.slice(1).toLowerCase()}` : ""}`,
+      `GPT-${version}${variant ? ` ${variant.charAt(0).toUpperCase()}${variant.slice(1).toLowerCase()}` : ""}`,
   );
 }
 

@@ -147,17 +147,17 @@ async function save() {
       />
       <UiSearchSelect
         :model-value="profile.skill_ids"
-        @update:model-value="
-          (value) => {
-            if (Array.isArray(value)) profile.skill_ids = value;
-          }
-        "
         :label="$t('email.skills')"
         :search-label="$t('email.searchSkills')"
         :empty-label="$t('email.noMatches')"
         :options="skills"
         multiple
         :disabled="!can(account, 'edit')"
+        @update:model-value="
+          (value) => {
+            if (Array.isArray(value)) profile.skill_ids = value;
+          }
+        "
       />
       <UiTextarea
         v-model="profile.prompt"

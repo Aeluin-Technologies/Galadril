@@ -1,6 +1,4 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import {
   PlusIcon,
   ArrowUpIcon,
@@ -13,7 +11,7 @@ import {
   XMarkIcon,
   CheckIcon,
 } from "@heroicons/vue/24/outline";
-import { useElementSize, onClickOutside } from "@vueuse/core";
+import { onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloModels } from "~/stores/usePengoloModels";
@@ -23,6 +21,8 @@ import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
 import { modelDisplayName, sealedSkill } from "~/utils/pengolo";
+
+const { t } = useI18n();
 const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{
   submit: [shareWithIsolatedReviewers: boolean];
@@ -156,7 +156,8 @@ function select(file: FileRecord) {
   picker.value = false;
 }
 async function upload(event: Event) {
-  const input = event.target as HTMLInputElement;
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
   const files = Array.from(input.files ?? []);
   input.value = "";
   menu.value = false;
@@ -210,8 +211,8 @@ function submitPrompt() {
         <UiIconButton
           :icon="XMarkIcon"
           :label="$t('pengolo.copy.remove_value0', { value0: file.data.name })"
-          @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
           :disabled="busy"
+          @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
         />
       </div>
     </div>
@@ -221,10 +222,10 @@ function submitPrompt() {
           variant="ghost"
           type="button"
           :aria-expanded="menu"
-          @click="menu = !menu"
           :icon="PlusIcon"
           :label="$t('pengolo.copy.add_files_and_tools')"
           :loading="busy"
+          @click="menu = !menu"
         /><Transition name="p-pop"
           ><div
             v-if="menu"
@@ -362,15 +363,15 @@ function submitPrompt() {
         $t("pengolo.copy.uploading")
       }}</span>
       <UiIconButton
-        variant="primary"
         v-if="busy"
+        variant="primary"
         type="button"
-        @click="emit('stop')"
         :icon="StopIcon"
         :label="$t('pengolo.copy.stop_generation')"
+        @click="emit('stop')"
       /><UiIconButton
-        variant="primary"
         v-else
+        variant="primary"
         type="submit"
         :tooltip="false"
         :disabled="

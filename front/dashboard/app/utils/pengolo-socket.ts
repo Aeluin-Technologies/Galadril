@@ -1,3 +1,5 @@
+import { parseObject, record, records } from "../../shared/records.ts";
+
 interface Operation {
   query: string;
   variables?: Record<string, unknown>;
@@ -5,6 +7,16 @@ interface Operation {
 interface Failure {
   extensions?: { code?: string };
   message?: string;
+}
+function failures(value: unknown): Failure[] {
+  return records(value).map((error) => {
+    const { message } = error;
+    const { code } = record(error.extensions);
+    return {
+      ...(typeof message === "string" ? { message } : {}),
+      ...(typeof code === "string" ? { extensions: { code } } : {}),
+    };
+  });
 }
 interface Subscription {
   operation: () => Operation;
@@ -65,12 +77,7 @@ export function createPengoloSocket(
     current.onmessage = (event) => {
       if (current !== socket) return;
       try {
-        const frame = JSON.parse(String(event.data)) as {
-          type: string;
-          id?: string;
-          payload?:
-            { data?: Record<string, unknown>; errors?: Failure[] } | Failure[];
-        };
+        const frame = parseObject(String(event.data));
         if (frame.type === "ping") {
           current.send(JSON.stringify({ type: "pong" }));
           return;
@@ -84,21 +91,29 @@ export function createPengoloSocket(
             send(id, subscription);
           return;
         }
-        const subscription = frame.id ? subscriptions.get(frame.id) : undefined;
+        const id = frame.id;
+        if (typeof id !== "string") return;
+        const subscription = subscriptions.get(id);
         if (!subscription) return;
         if (frame.type === "error") {
-          subscription.error(Array.isArray(frame.payload) ? frame.payload : []);
+          subscription.error(failures(frame.payload));
           current.close();
         } else if (
           frame.type === "next" &&
           frame.payload &&
           !Array.isArray(frame.payload)
         ) {
-          if (frame.payload.errors?.length)
-            subscription.error(frame.payload.errors);
-          else if (frame.payload.data) subscription.next(frame.payload.data);
+          const payload = record(frame.payload);
+          const errors = failures(payload.errors);
+          if (errors.length) subscription.error(errors);
+          else if (
+            payload.data &&
+            typeof payload.data === "object" &&
+            !Array.isArray(payload.data)
+          )
+            subscription.next(record(payload.data));
         } else if (frame.type === "complete") {
-          subscriptions.delete(frame.id!);
+          subscriptions.delete(id);
           if (!subscriptions.size) disconnect();
         }
       } catch {

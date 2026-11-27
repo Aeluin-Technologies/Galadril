@@ -18,6 +18,12 @@ js_library(
     visibility = ["//visibility:private"],
 )
 
+js_library(
+    name = "graphql_fixture",
+    srcs = ["tests/graphql-fixture.ts", "tests/support.ts"],
+    visibility = ["//visibility:private"],
+)
+
 js_test(
     name = "pengolo_library_test",
     data = ["app/utils/pengolo-library.ts"],
@@ -37,6 +43,7 @@ js_test(
     chdir = "front/dashboard",
     copy_data_to_bin = False,
     data = [
+        ":graphql_fixture",
         "tests/email-ui.spec.ts",
         "tests/library-ui.spec.ts",
         ":signing_fixture",
@@ -64,6 +71,7 @@ js_test(
     name = "pipeline_test",
     copy_data_to_bin = False,
     data = [
+        "tests/support.ts",
         "app/utils/pipeline.ts",
         "app/utils/pipeline-authoring.ts",
         "app/utils/pipeline-review.ts",
@@ -80,7 +88,7 @@ js_test(
     args = ["ontology-ui.spec.ts"],
     chdir = "front/dashboard",
     copy_data_to_bin = False,
-    data = ["tests/ontology-ui.spec.ts", "tests/playwright-pipeline.config.ts", ":ui_sources", "//front:testing_support"],
+    data = [":graphql_fixture", "tests/ontology-ui.spec.ts", "tests/playwright-pipeline.config.ts", ":ui_sources", "//front:testing_support"],
     entry_point = "tests/run-pipeline-ui.ts",
     env = {"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"},
     exec_properties = {
@@ -97,7 +105,7 @@ js_test(
     args = ["pipeline-ui.spec.ts"],
     chdir = "front/dashboard",
     copy_data_to_bin = False,
-    data = ["tests/pipeline-ui.spec.ts", "tests/playwright-pipeline.config.ts", ":ui_sources", "//front:testing_support"],
+    data = [":graphql_fixture", "tests/pipeline-ui.spec.ts", "tests/playwright-pipeline.config.ts", ":ui_sources", "//front:testing_support"],
     entry_point = "tests/run-pipeline-ui.ts",
     env = {"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"},
     exec_properties = {
@@ -113,6 +121,7 @@ js_test(
     timeout = "long",
     chdir = "front/dashboard",
     data = [
+        ":graphql_fixture",
         "tests/email-ui.spec.ts",
         "tests/email-profile.spec.ts",
         "tests/library-ui.spec.ts",
@@ -140,6 +149,7 @@ js_test(
     chdir = "front/dashboard",
     copy_data_to_bin = False,
     data = [
+        ":graphql_fixture",
         "tests/ontology-ui.spec.ts",
         "tests/email-ui.spec.ts",
         "tests/email-profile.spec.ts",
@@ -170,6 +180,7 @@ js_test(
     chdir = "front/dashboard",
     copy_data_to_bin = False,
     data = [
+        ":graphql_fixture",
         "tests/pipeline-ui.spec.ts",
         "tests/ontology-ui.spec.ts",
         "tests/email-profile.spec.ts",
@@ -213,7 +224,7 @@ js_test(
 
 js_test(
     name = "pengolo_socket_test",
-    data = ["app/utils/pengolo-socket.ts"],
+    data = ["tests/support.ts", "shared/records.ts", "app/utils/pengolo-socket.ts"],
     entry_point = "tests/pengolo-socket.test.ts",
 )
 
@@ -234,6 +245,8 @@ js_test(
 js_test(
     name = "pengolo_test",
     data = [
+        "app/utils/pengolo-replay.ts",
+        "shared/records.ts",
         "tests/support.ts",
         "app/utils/pengolo.ts",
         "app/utils/pengolo-search.ts",
@@ -300,6 +313,7 @@ js_test(
         "package.json",
         "tests/admin.test.ts",
         "tests/boundaries.test.ts",
+        ":graphql_fixture",
         "tests/passkey.test.ts",
         "tests/restore.test.ts",
         "tests/session.test.ts",
@@ -412,6 +426,7 @@ js_test(
     copy_data_to_bin = False,
     data = [
         "tests/dashboard-ui.spec.ts",
+        ":graphql_fixture",
         "tests/playwright-ui.config.ts",
         ":ui_sources",
         "//front:testing_support",
@@ -428,7 +443,7 @@ js_test(
 js_test(
     name = "native_resolver_test",
     entry_point = "tests/native-resolver.test.ts",
-    data = [":node_modules/@nuxt/eslint"],
+    data = ["shared/records.ts", ":node_modules/@nuxt/eslint"],
 )
 
 js_test(
@@ -456,7 +471,7 @@ js_test(
 js_test(
     name = "redaction_test",
     entry_point = "tests/redaction.test.ts",
-    data = ["app/utils/pengolo-redaction.ts"],
+    data = ["app/utils/pengolo-redaction.ts", "shared/records.ts"],
 )
 
 js_test(
@@ -465,6 +480,7 @@ js_test(
         "app/utils/pdf-signing.ts",
         "app/utils/signature-ink.ts",
         "app/utils/signing-vault.ts",
+        "shared/records.ts",
         ":signing_fixture",
         ":node_modules/@libpdf/core",
         ":node_modules/@peculiar/x509",

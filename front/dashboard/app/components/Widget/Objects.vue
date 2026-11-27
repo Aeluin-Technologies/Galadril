@@ -2,7 +2,7 @@
 import { ArrowUpRightIcon } from "@heroicons/vue/24/outline";
 
 defineProps({
-  title: String,
+  title: { type: String, default: undefined },
   items: {
     type: Array,
     default: () => [],

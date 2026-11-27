@@ -1,11 +1,7 @@
 import { defineStore } from "pinia";
 import { createRequestCache } from "~/utils/pengolo";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
-import {
-  pengoloMutation,
-  pengoloRequest,
-  type ProjectRecord,
-} from "~/utils/pengolo-api";
+import { pengoloMutation, type ProjectRecord } from "~/utils/pengolo-api";
 
 export const usePengoloProjects = defineStore("pengoloProjects", () => {
   const items = ref<ProjectRecord[]>([]);

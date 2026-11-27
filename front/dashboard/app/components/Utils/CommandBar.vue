@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SearchHit } from "~/composables/useCommandPaletteSearch";
 import { useCommandBarLogic } from "~/composables/useCommandBar";
 import {
   MagnifyingGlassIcon,
@@ -8,7 +9,7 @@ import {
   ArrowPathIcon,
 } from "@heroicons/vue/24/outline";
 
-const emit = defineEmits(["select"]);
+const emit = defineEmits<{ select: [item: SearchHit] }>();
 
 const {
   isCommandOpen,
@@ -47,22 +48,22 @@ const {
     >
       <div
         v-if="isCommandOpen"
-        @click="closeCommand"
         class="fixed inset-0 bg-foreground/40 backdrop-blur-[2px] z-[100] flex justify-center pt-32 p-4"
+        @click="closeCommand"
       >
         <div
-          @click.stop
           role="dialog"
           aria-modal="true"
           aria-label="Search Galadril"
           class="bg-surface border border-border w-full max-w-[620px] h-fit rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+          @click.stop
         >
           <div
             v-if="localAlertMessage"
             class="bg-danger-subtle border-b border-danger px-4 py-3 text-xs text-danger flex items-center justify-between"
           >
             <span>{{ localAlertMessage }}</span>
-            <UiButton @click="localAlertMessage = null" variant="danger">
+            <UiButton variant="danger" @click="localAlertMessage = null">
               X
             </UiButton>
           </div>
@@ -116,11 +117,7 @@ const {
           </div>
 
           <div class="max-h-[380px] overflow-y-auto p-2">
-            <p
-              v-if="searchFailed"
-              role="alert"
-              class="p-3 text-sm text-danger"
-            >
+            <p v-if="searchFailed" role="alert" class="p-3 text-sm text-danger">
               Search could not be completed. Try again.
             </p>
             <div
@@ -160,12 +157,14 @@ const {
                 </div>
 
                 <div
-                  @mouseenter="activeIndex = index"
-                  @click="selectItem(item)"
                   :class="[
                     'flex items-center px-3 py-3 rounded-xl cursor-pointer transition-colors group relative',
-                    activeIndex === index ? 'bg-primary-subtle' : 'hover:bg-primary-subtle',
+                    activeIndex === index
+                      ? 'bg-primary-subtle'
+                      : 'hover:bg-primary-subtle',
                   ]"
+                  @mouseenter="activeIndex = index"
+                  @click="selectItem(item)"
                 >
                   <component
                     :is="getHitIcon(item)"
@@ -218,10 +217,10 @@ const {
                         'isHistoryItem' in item &&
                         item.isHistoryItem
                       "
-                      @click="handleRemoveHistory(index, $event)"
                       variant="danger"
                       :icon="XMarkIcon"
                       :label="$t('ui.actions.close')"
+                      @click="handleRemoveHistory(index, $event)"
                     />
                   </div>
                 </div>
@@ -271,7 +270,7 @@ const {
     </div>
 
     <template #footer>
-      <UiButton @click="isSuccessModalOpen = false" variant="primary">
+      <UiButton variant="primary" @click="isSuccessModalOpen = false">
         {{ $t("storage.upload.success_btn") }}
       </UiButton>
     </template>

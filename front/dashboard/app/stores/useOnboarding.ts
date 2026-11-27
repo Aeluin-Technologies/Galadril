@@ -1,3 +1,4 @@
+import { parseObject } from "../../shared/records.ts";
 import { defineStore } from "pinia";
 
 export const useOnboardingStore = defineStore("onboarding", {
@@ -15,13 +16,15 @@ export const useOnboardingStore = defineStore("onboarding", {
         const data = localStorage.getItem("galadril_onboarding_state");
         if (data) {
           try {
-            const parsed = JSON.parse(data);
-            this.hasIngestedData = parsed.hasIngestedData ?? false;
-            this.hasCreatedPipeline = parsed.hasCreatedPipeline ?? false;
-            this.hasBuiltDashboard = parsed.hasBuiltDashboard ?? false;
+            const parsed = parseObject(data);
+            this.hasIngestedData = parsed.hasIngestedData === true;
+            this.hasCreatedPipeline = parsed.hasCreatedPipeline === true;
+            this.hasBuiltDashboard = parsed.hasBuiltDashboard === true;
             this.currentTutorialStepIndex =
-              parsed.currentTutorialStepIndex ?? 0;
-            this.isTutorialCompleted = parsed.isTutorialCompleted ?? false;
+              typeof parsed.currentTutorialStepIndex === "number"
+                ? parsed.currentTutorialStepIndex
+                : 0;
+            this.isTutorialCompleted = parsed.isTutorialCompleted === true;
           } catch (e) {
             console.error("Onboarding error:", e);
           }

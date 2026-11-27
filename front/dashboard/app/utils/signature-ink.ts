@@ -18,7 +18,8 @@ function parseTrace(value: unknown): Point[][] {
     return stroke.map((point: unknown): Point => {
       if (!Array.isArray(point) || point.length !== 2)
         throw new Error("Invalid signing point");
-      const [x, y] = point;
+      const coordinates: readonly unknown[] = point;
+      const [x, y] = coordinates;
       if (
         typeof x !== "number" ||
         typeof y !== "number" ||

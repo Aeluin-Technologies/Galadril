@@ -1,3 +1,5 @@
+import { graphQL } from "./graphql-fixture.ts";
+import { record, text, parseObject } from "../shared/records.ts";
 import { expect } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 
@@ -26,10 +28,10 @@ for (const scenario of ["ready", "stale", "forbidden"] as const) {
       socket.onMessage(() => {}),
     );
     await page.route("**/graphql", (route) => {
-      const { query, variables } = route.request().postDataJSON();
+      const { query, variables } = graphQL(route.request().postDataJSON());
       if (!query.includes("emailOperation"))
         return route.fulfill({ json: { data: {} } });
-      const request = JSON.parse(variables.request);
+      const request = parseObject(variables.request);
       let result: unknown = null;
       if (request.operation === "accounts")
         result = [
@@ -78,11 +80,11 @@ for (const scenario of ["ready", "stale", "forbidden"] as const) {
             ],
           },
         };
-      if (["approve", "send"].includes(request.operation)) {
+      if (["approve", "send"].includes(text(request.operation))) {
         expect(request.account).toBe(accountId);
         expect(request.draft).toBe(draftId);
         expect(request.revision).toBe(1);
-        actions.push(request.operation);
+        actions.push(text(request.operation));
         status = request.operation === "approve" ? "approved" : "sent";
       }
       return route.fulfill({ json: { data: { emailOperation: result } } });
@@ -153,9 +155,9 @@ for (const scenario of ["ready", "stale", "forbidden"] as const) {
           new URL(response.url()).pathname !== "/graphql"
         )
           return false;
-        const payload = request.postDataJSON();
+        const payload = graphQL(request.postDataJSON());
         if (!payload?.query?.includes("emailOperation")) return false;
-        const operation = JSON.parse(payload.variables.request);
+        const operation = parseObject(payload.variables.request);
         return (
           operation.operation === "draft" &&
           operation.account === accountId &&
@@ -257,13 +259,13 @@ test("email profile offers named skills and a safe HTML signature preview", asyn
     },
   });
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     if (query.includes("pengoloOpenai"))
       return route.fulfill({
         json: { data: { pengoloOpenai: { enabled: false, accounts: [] } } },
       });
     if (query.includes("emailOperation")) {
-      const request = JSON.parse(variables.request);
+      const request = parseObject(variables.request);
       if (request.operation === "tracking_status")
         return route.fulfill({
           json: { data: { emailOperation: '{"available":true}' } },
@@ -300,8 +302,8 @@ test("email profile offers named skills and a safe HTML signature preview", asyn
         });
       if (request.operation === "messages") {
         mailRequests.push({
-          before: request.before ?? 0,
-          query: request.query ?? "",
+          before: typeof request.before === "number" ? request.before : 0,
+          query: typeof request.query === "string" ? request.query : "",
         });
         const items = request.query
           ? [
@@ -407,7 +409,7 @@ test("email profile offers named skills and a safe HTML signature preview", asyn
                   : request.operation === "reveal"
                     ? { username: "private-login", auth: "password" }
                     : { ok: true };
-      if (request.operation === "save_profile") saved = request.profile;
+      if (request.operation === "save_profile") saved = record(request.profile);
       return route.fulfill({
         json: { data: { emailOperation: JSON.stringify(response) } },
       });
@@ -826,9 +828,9 @@ for (const senderCount of [1, 2]) {
       }),
     );
     await page.route("**/graphql", (route) => {
-      const { query, variables } = route.request().postDataJSON();
+      const { query, variables } = graphQL(route.request().postDataJSON());
       if (query.includes("emailOperation")) {
-        const request = JSON.parse(variables.request);
+        const request = parseObject(variables.request);
         let value: unknown = { ok: true };
         if (request.operation === "proposal_status")
           value = { status: draft?.status ?? "new" };
@@ -913,8 +915,10 @@ for (const senderCount of [1, 2]) {
           value = draft;
         }
         if (request.operation === "save_draft") {
-          expect(request.content.bcc).toEqual(["hidden@example.org"]);
-          expect(request.content.reply_source).toEqual(proposal.reply_source);
+          expect(record(request.content).bcc).toEqual(["hidden@example.org"]);
+          expect(record(request.content).reply_source).toEqual(
+            proposal.reply_source,
+          );
           draft = {
             id: proposal.id,
             revision: 1,
@@ -1186,9 +1190,7 @@ for (const senderCount of [1, 2]) {
       .getByRole("button", { name: "Hide details", exact: true })
       .click();
     expect(sendCount).toBe(1);
-    expect((draft?.content as { track_opens?: boolean }).track_opens).toBe(
-      true,
-    );
+    expect(record(draft?.content).track_opens).toBe(true);
     await page.reload();
     await expect(page.getByText("Email sent", { exact: true })).toBeVisible();
     await expect(
@@ -1224,11 +1226,11 @@ test("SMTP-only setup infers sending without IMAP and hides receiving controls",
   let saved: Record<string, unknown> | undefined;
   const calls: string[] = [];
   await page.route("**/graphql", (route) => {
-    const input = route.request().postDataJSON();
+    const input = graphQL(route.request().postDataJSON());
     if (!input.query.includes("emailOperation"))
       return route.fulfill({ json: { data: {} } });
-    const operation = JSON.parse(input.variables.request);
-    calls.push(operation.operation);
+    const operation = parseObject(input.variables.request);
+    calls.push(text(operation.operation));
     let result: unknown = [];
     if (operation.operation === "discover")
       result = {
@@ -1259,7 +1261,7 @@ test("SMTP-only setup infers sending without IMAP and hides receiving controls",
         username: "smtp-user",
         password: "fixture-only",
       });
-      saved = operation.config;
+      saved = record(operation.config);
       result = { ok: true };
     }
     if (operation.operation === "accounts" && saved)

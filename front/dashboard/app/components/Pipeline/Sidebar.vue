@@ -1,28 +1,92 @@
 <script setup lang="ts">
-const props = defineProps<{
-  activeNode: any;
-  hasIncoming: boolean;
-}>();
+import type { GraphNode, NodeConfig } from "~/utils/pipeline";
 
-const emit = defineEmits(["close"]);
+type Node = GraphNode & {
+  data: { config: NodeConfig & { connector?: string } };
+};
+defineProps<{ hasIncoming: boolean }>();
+const activeNode = defineModel<Node | null>("activeNode");
+const emit = defineEmits<{ close: [] }>();
+
+function updateConfig(changes: Partial<Node["data"]["config"]>) {
+  const node = activeNode.value;
+  if (!node) return;
+
+  activeNode.value = {
+    ...node,
+    data: { ...node.data, config: { ...node.data.config, ...changes } },
+  };
+}
+
+function option(
+  key: "topic" | "match_pattern" | "schema_path" | "model" | "connector",
+) {
+  return computed({
+    get: () => activeNode.value?.data.config[key],
+    set: (value: string | undefined) => updateConfig({ [key]: value }),
+  });
+}
+
+function updateParameter(key: string, value: string | number | undefined) {
+  const params = activeNode.value?.data.config.params;
+  if (!params) return;
+
+  if (value === undefined) {
+    updateConfig({
+      params: Object.fromEntries(
+        Object.entries(params).filter(([name]) => name !== key),
+      ),
+    });
+  } else {
+    updateConfig({ params: { ...params, [key]: value } });
+  }
+}
+
+function parameter(key: string) {
+  return computed({
+    get: () => {
+      const value = activeNode.value?.data.config.params?.[key];
+      return typeof value === "string" ? value : undefined;
+    },
+    set: (value: string | undefined) => updateParameter(key, value),
+  });
+}
+
+const topic = option("topic");
+const matchPattern = option("match_pattern");
+const schemaPath = option("schema_path");
+const model = option("model");
+const connector = option("connector");
+const action = parameter("action");
+const entityType = parameter("entity_type");
+const cron = parameter("cron");
+const lookback = parameter("lookback");
+const threshold = computed({
+  get: () => {
+    const value = activeNode.value?.data.config.params?.threshold;
+    return typeof value === "number" ? value : undefined;
+  },
+  set: (value: number | undefined) => updateParameter("threshold", value),
+});
 
 const regexError = computed(() => {
-  if (props.activeNode?.data?.stepType !== "source") return false;
-  const pattern = props.activeNode.data.config?.match_pattern;
-  if (!pattern) return false;
-  try {
-    new RegExp(pattern);
+  if (activeNode.value?.data.stepType !== "source" || !matchPattern.value)
     return false;
-  } catch (e) {
+
+  try {
+    new RegExp(matchPattern.value);
+    return false;
+  } catch {
     return true;
   }
 });
 
-const thresholdError = computed(() => {
-  if (props.activeNode?.data?.stepType !== "resolve") return false;
-  const threshold = props.activeNode.data.config?.params?.threshold;
-  return threshold < 0 || threshold > 1;
-});
+const thresholdError = computed(
+  () =>
+    activeNode.value?.data.stepType === "resolve" &&
+    threshold.value !== undefined &&
+    (threshold.value < 0 || threshold.value > 1),
+);
 </script>
 
 <template>
@@ -52,7 +116,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.source.topic") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.topic"
+            v-model="topic"
             :options="[
               { label: 'raw-images'.trim(), value: 'raw-images' },
               { label: 'processed-events'.trim(), value: 'processed-events' },
@@ -67,14 +131,11 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.source.regex") }}</label
           >
           <UiInput
-            v-model="activeNode.data.config.match_pattern"
+            v-model="matchPattern"
             placeholder="ex: ^images(/|%2F)"
             :class="['w-full', regexError ? '' : '']"
           />
-          <p
-            v-if="regexError"
-            class="text-[10px] text-danger font-medium mt-1"
-          >
+          <p v-if="regexError" class="text-[10px] text-danger font-medium mt-1">
             {{ $t("pipeline.config.errors.invalid_regex") }}
           </p>
         </div>
@@ -84,7 +145,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.source.schema") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.schema_path"
+            v-model="schemaPath"
             :options="[
               {
                 label: ' schemas/avro/image.avsc '.trim(),
@@ -116,7 +177,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.inference.model") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.model"
+            v-model="model"
             :options="[
               {
                 label: ' FaceRecognitionModel '.trim(),
@@ -141,7 +202,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.inference.action") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.params.action"
+            v-model="action"
             :options="[
               { label: 'embed'.trim(), value: 'embed' },
               { label: 'classify'.trim(), value: 'classify' },
@@ -165,11 +226,11 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.resolve.threshold") }}</label
           >
           <UiInput
+            v-model.number="threshold"
             type="number"
             min="0"
             max="1"
             step="0.01"
-            v-model.number="activeNode.data.config.params.threshold"
             :class="['w-full', thresholdError ? '' : '']"
           />
           <p
@@ -185,7 +246,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.resolve.entity_type") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.params.entity_type"
+            v-model="entityType"
             :options="[
               { label: 'PERSON'.trim(), value: 'PERSON' },
               { label: 'VEHICLE'.trim(), value: 'VEHICLE' },
@@ -211,13 +272,11 @@ const thresholdError = computed(() => {
             $t("pipeline.config.causal.autonomous_plan")
           }}</span>
           <div>
-            <label class="block text-primary-foreground font-medium mb-1 text-[10px]">{{
-              $t("pipeline.config.causal.cron")
-            }}</label>
-            <UiInput
-              v-model="activeNode.data.config.params.cron"
-              class="w-full"
-            />
+            <label
+              class="block text-primary-foreground font-medium mb-1 text-[10px]"
+              >{{ $t("pipeline.config.causal.cron") }}</label
+            >
+            <UiInput v-model="cron" class="w-full" />
           </div>
         </div>
         <div
@@ -232,7 +291,7 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.causal.lookback") }}</label
           >
           <UiSelect
-            v-model="activeNode.data.config.params.lookback"
+            v-model="lookback"
             :options="[
               { label: '1d'.trim(), value: '1d' },
               { label: '7d'.trim(), value: '7d' },
@@ -254,8 +313,8 @@ const thresholdError = computed(() => {
             >{{ $t("pipeline.config.sink.connector") }}</label
           >
           <UiSelect
+            v-model="connector"
             disabled
-            v-model="activeNode.data.config.connector"
             :options="[
               {
                 label: String(
@@ -272,10 +331,10 @@ const thresholdError = computed(() => {
 
     <template #footer>
       <UiButton
-        @click="emit('close')"
         :disabled="regexError || thresholdError"
         variant="ghost"
         :class="['w-full', regexError || thresholdError ? '' : '']"
+        @click="emit('close')"
       >
         {{ $t("pipeline.config.save_close") }}
       </UiButton>

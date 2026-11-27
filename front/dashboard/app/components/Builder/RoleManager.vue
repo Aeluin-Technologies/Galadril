@@ -1,19 +1,13 @@
-<script setup>
+<script setup lang="ts">
 import { XMarkIcon } from "@heroicons/vue/24/outline";
 
-const props = defineProps({
-  modelValue: {
-    type: Array,
-    required: true,
-  },
-});
-
-const emit = defineEmits(["update:modelValue"]);
+const props = defineProps<{ modelValue: string[] }>();
+const emit = defineEmits<{ "update:modelValue": [roles: string[]] }>();
 
 const availableRoles = ["Admin", "Manager", "Analyst", "Viewer"];
 const roleInput = ref("");
 
-const addRole = (role) => {
+const addRole = (role?: string) => {
   const r = role || roleInput.value.trim();
   if (r && !props.modelValue.includes(r)) {
     emit("update:modelValue", [...props.modelValue, r]);
@@ -21,7 +15,7 @@ const addRole = (role) => {
   roleInput.value = "";
 };
 
-const removeRole = (role) => {
+const removeRole = (role: string) => {
   emit(
     "update:modelValue",
     props.modelValue.filter((r) => r !== role),
@@ -42,20 +36,20 @@ const removeRole = (role) => {
       >
         {{ role }}
         <UiIconButton
-          @click="removeRole(role)"
           variant="ghost"
           :icon="XMarkIcon"
           :label="$t('ui.actions.close')"
           class="ml-1.5"
+          @click="removeRole(role)"
         />
       </span>
     </div>
     <div class="flex items-center gap-3">
       <UiInput
         v-model="roleInput"
-        @keydown.enter="addRole()"
         :placeholder="$t('builder.roles.placeholder')"
         class="flex-1"
+        @keydown.enter="addRole()"
       />
       <div class="text-sm text-muted">
         {{ $t("builder.roles.or_choose") }}
@@ -63,8 +57,8 @@ const removeRole = (role) => {
       <UiButton
         v-for="r in availableRoles.filter((ar) => !modelValue.includes(ar))"
         :key="r"
-        @click="addRole(r)"
         variant="ghost"
+        @click="addRole(r)"
       >
         + {{ r }}
       </UiButton>

@@ -73,7 +73,7 @@ export function invalidatePengoloRequests(): void {
   requestEpoch++;
 }
 
-export async function pengoloData<T>(
+export async function pengoloData<T extends object>(
   query: string,
   variables: Record<string, unknown> = {},
   allowUnavailableChat = false,
@@ -81,7 +81,7 @@ export async function pengoloData<T>(
 ): Promise<T> {
   const epoch = requestEpoch;
   const response = await $fetch<{
-    data?: Record<string, unknown>;
+    data?: T;
     errors?: Array<{
       path?: Array<string | number>;
       extensions?: { code?: string };
@@ -96,7 +96,9 @@ export async function pengoloData<T>(
   if (
     (response.errors?.length &&
       !(allowUnavailableChat && unavailableActiveChat(response.errors))) ||
-    !response.data
+    !response.data ||
+    typeof response.data !== "object" ||
+    Array.isArray(response.data)
   ) {
     if (import.meta.client && invalidatesWorkspace(response.errors ?? []))
       window.dispatchEvent(new Event("pengolo-access-invalidated"));
@@ -104,7 +106,7 @@ export async function pengoloData<T>(
       "Pengolo could not complete this request. Your access may have changed.",
     );
   }
-  return response.data as T;
+  return response.data;
 }
 
 export async function pengoloRequest<T>(
@@ -118,7 +120,9 @@ export async function pengoloRequest<T>(
     false,
     signal,
   );
-  return Object.values(data)[0] as T;
+  const result = Object.values(data)[0];
+  if (result === undefined) throw new Error("Missing Pengolo operation result");
+  return result;
 }
 
 export function pengoloMutation<T>(

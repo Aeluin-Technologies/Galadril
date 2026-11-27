@@ -1,3 +1,4 @@
+import { record } from "../../shared/records.ts";
 import {
   startAuthentication,
   startRegistration,
@@ -44,8 +45,8 @@ export function useSessionState() {
     } catch (failure: unknown) {
       if (sessionFailureAction(failure) === "reauthenticate") {
         const code =
-          (failure as { code?: string }).code ||
-          (failure as { data?: { data?: { code?: string } } }).data?.data?.code;
+          record(failure).code ||
+          record(record(record(failure).data).data).code;
         open.value = false;
         resolvePending?.();
         pending = undefined;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CloudArrowUpIcon, DocumentIcon } from "@heroicons/vue/24/outline";
 import { useS3Upload } from "~/composables/useS3Upload";
-import { type IamPermission } from "~/composables/useIamPermissions";
+import type { IamPermission } from "~/composables/useIamPermissions";
 
 const props = defineProps({
   isOpen: Boolean,
@@ -36,7 +36,9 @@ watch(
 );
 
 function handleFileChange(e: Event) {
-  const files = (e.target as HTMLInputElement).files;
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const files = input.files;
   if (files && files.length > 0) {
     selectedFile.value = files[0] || null;
   }
@@ -97,8 +99,8 @@ function handleClose() {
 
       <div
         v-if="!selectedFile"
-        @click="fileInputRef?.click()"
         class="border-2 border-dashed border-border hover:border-focus bg-canvas/50 hover:bg-primary-subtle/20 rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center group"
+        @click="fileInputRef?.click()"
       >
         <CloudArrowUpIcon
           class="w-10 h-10 text-muted group-hover:text-primary-foreground transition-colors mb-2"
@@ -134,14 +136,14 @@ function handleClose() {
     </div>
 
     <template #footer>
-      <UiButton @click="handleClose" :disabled="isUploading" variant="ghost">
+      <UiButton :disabled="isUploading" variant="ghost" @click="handleClose">
         {{ $t("actions.cancel") }}
       </UiButton>
       <UiButton
-        @click="processFinalUpload"
         :disabled="!selectedFile || isUploading"
         variant="primary"
         class="flex items-center space-x-2"
+        @click="processFinalUpload"
       >
         <span
           v-if="isUploading"

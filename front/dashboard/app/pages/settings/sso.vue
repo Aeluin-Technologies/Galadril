@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import SettingsNavigation from "~/components/Settings/Navigation.vue";
-const { t } = useI18n();
 
 import { reactive, toRefs } from "vue";
+const { t } = useI18n();
 definePageMeta({ middleware: ["administrator"] });
 useHead({ title: () => t("administration.copy.administration_galadril") });
 const activeSection = ref("organization");
@@ -59,9 +59,9 @@ const {
 </script>
 <template>
   <section
-    data-administration
-    ref="panel"
     :id="activeSection"
+    ref="panel"
+    data-administration
     :aria-label="$t('administration.copy.administration')"
     class="h-full min-h-0 overflow-y-auto bg-canvas"
   >
@@ -126,13 +126,13 @@ const {
             v-if="failed && !settings"
             type="button"
             variant="secondary"
+            :loading="busy"
             @click="
               run(async () => {
                 await refresh();
                 await refreshPeople();
               }, '')
             "
-            :loading="busy"
             >{{ $t("administration.copy.try_again") }}</UiButton
           >
           <template v-if="settings">
@@ -212,14 +212,14 @@ const {
         ><UiButton
           type="button"
           variant="secondary"
-          @click="pending = undefined"
           :loading="busy"
+          @click="pending = undefined"
           >{{ $t("builder.config_modal.buttons.cancel") }}</UiButton
         ><UiButton
           type="button"
-          @click="applyConfirmed"
           variant="primary"
           :loading="busy"
+          @click="applyConfirmed"
           >{{
             busy
               ? $t("administration.copy.applying")

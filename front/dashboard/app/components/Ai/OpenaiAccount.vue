@@ -95,8 +95,8 @@ onBeforeUnmount(() => account.stop());
           :disabled="
             account.busy || (account.status?.accounts.length ?? 0) >= 4
           "
-          @click="account.update('CONNECT')"
           variant="primary"
+          @click="account.update('CONNECT')"
           >Continue with ChatGPT</UiButton
         >
       </div>

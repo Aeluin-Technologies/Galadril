@@ -2,7 +2,7 @@
 import { ExclamationTriangleIcon } from "@heroicons/vue/24/outline";
 
 defineProps({
-  title: String,
+  title: { type: String, default: undefined },
   alerts: {
     type: Array,
     default: () => [],
@@ -30,9 +30,7 @@ defineProps({
           >
             {{ alert.title }}
           </span>
-          <span class="text-[10px] text-muted font-mono">{{
-            alert.time
-          }}</span>
+          <span class="text-[10px] text-muted font-mono">{{ alert.time }}</span>
         </div>
         <p class="text-[11px] text-muted mb-2">{{ alert.meta }}</p>
         <span

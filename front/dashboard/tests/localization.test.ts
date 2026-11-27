@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { test } from "node:test";
 import { parse } from "vue/compiler-sfc";
 import { baseCompile } from "@intlify/message-compiler";
-import { record } from "../shared/records.ts";
+import { parseObject, record } from "../shared/records.ts";
 import type { SFCTemplateBlock } from "vue/compiler-sfc";
 type TemplateChildNode = NonNullable<
   SFCTemplateBlock["ast"]
@@ -18,10 +18,13 @@ test("command palette uses the translated Message label", () => {
     "utf8",
   );
   assert.ok(source.includes('t("command_palette.item_types.message")'));
-  const messages = JSON.parse(
+  const messages = parseObject(
     readFileSync(resolve(root, "i18n/en-US.json"), "utf8"),
   );
-  assert.equal(messages.command_palette.item_types.message, "Message");
+  assert.equal(
+    record(record(messages.command_palette).item_types).message,
+    "Message",
+  );
 });
 const folders = ["app/pages", "app/components/Administration"];
 const files = folders.flatMap((folder) =>
@@ -99,7 +102,7 @@ test("Vue pages and affected features obtain visible copy from nuxt-i18n", () =>
 });
 
 test("literal translation references resolve in the English catalog", () => {
-  const messages = JSON.parse(
+  const messages = parseObject(
     readFileSync(resolve(root, "i18n/en-US.json"), "utf8"),
   );
   for (const file of files) {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useMapStore } from "@/stores/useMapStore";
-import { use } from "echarts/core";
+import { use, format } from "echarts/core";
+import { record } from "../../../shared/records.ts";
 import { CanvasRenderer } from "echarts/renderers";
 import { ScatterChart, LinesChart } from "echarts/charts";
 import {
@@ -35,6 +36,26 @@ interface MapPoint {
   value: [number, number];
   meta: PointMeta;
   targetCoords?: [number, number];
+}
+
+function pointMeta(value: unknown): PointMeta | undefined {
+  const { id, status, severity, country, issue, target } = record(value);
+  if (
+    (typeof id !== "string" && typeof id !== "number") ||
+    typeof status !== "string" ||
+    typeof country !== "string" ||
+    (severity !== "critical" && severity !== "warning" && severity !== "normal")
+  )
+    return;
+
+  return {
+    id,
+    status,
+    severity,
+    country,
+    ...(typeof issue === "string" ? { issue } : {}),
+    ...(typeof target === "string" ? { target } : {}),
+  };
 }
 
 const severityColors: Record<PointMeta["severity"], string> = {
@@ -103,16 +124,18 @@ const chartOptions = computed(() => {
       shadowBlur: 10,
       shadowColor: "rgba(0,0,0,0.1)",
       textStyle: { color: "#18181b" },
-      formatter: (params: any) => {
-        if (!params.data || params.seriesType === "lines") return "";
-        const meta = params.data.meta as PointMeta;
+      formatter: (params: unknown) => {
+        const point = record(params);
+        const data = record(point.data);
+        const meta = pointMeta(data.meta);
+        if (!meta || point.seriesType === "lines") return "";
         const color = severityColors[meta.severity] || "#d4d4d8";
         return `
           <div style="padding: 4px;">
-            <div style="font-weight: 800; font-size: 12px; text-transform: uppercase; margin-bottom: 4px; color: #18181b;">${params.data.name}</div>
+            <div style="font-weight: 800; font-size: 12px; text-transform: uppercase; margin-bottom: 4px; color: #18181b;">${format.encodeHTML(String(data.name ?? ""))}</div>
             <div style="font-size: 11px; color: #71717a; font-weight: 500;">
               ${t("map_component.status.tooltip_status")} : 
-              <span style="color: ${color}; font-weight: 700;">${meta.status}</span>
+              <span style="color: ${color}; font-weight: 700;">${format.encodeHTML(meta.status)}</span>
             </div>
           </div>
         `;
@@ -140,10 +163,10 @@ const chartOptions = computed(() => {
         data: points,
         symbolSize: 14,
         itemStyle: {
-          color: (params: any) =>
-            severityColors[
-              params.data?.meta?.severity as PointMeta["severity"]
-            ] || "#d4d4d8",
+          color: (params: unknown) => {
+            const meta = pointMeta(record(record(params).data).meta);
+            return meta ? severityColors[meta.severity] : "#d4d4d8";
+          },
           borderColor: "#fff",
           borderWidth: 2,
           shadowBlur: 6,
@@ -161,13 +184,19 @@ const chartOptions = computed(() => {
   };
 });
 
-const onChartClick = async (params: any) => {
-  if (params.componentType === "series" && params.data?.meta) {
-    emit("select-node", params.data.meta);
+const onChartClick = async (params: unknown) => {
+  const point = record(params);
+  const meta = pointMeta(record(point.data).meta);
+  if (point.componentType === "series" && meta) {
+    emit("select-node", meta);
     return;
   }
-  if (params.componentType === "geo" && currentMap.value === "World") {
-    const countryName = params.name;
+  if (
+    point.componentType === "geo" &&
+    currentMap.value === "World" &&
+    typeof point.name === "string"
+  ) {
+    const countryName = point.name;
     const success = await mapStore.loadMapData(
       countryName,
       `/geo/${countryName.toLowerCase()}.json`,
@@ -211,9 +240,9 @@ onMounted(async () => {
 
       <UiButton
         v-if="currentMap !== 'World'"
-        @click="resetMap"
         variant="ghost"
         class="w-fit uppercase flex items-center gap-2"
+        @click="resetMap"
       >
         <span>←</span> {{ $t("map_component.controls.back_to_global") }}
       </UiButton>
@@ -225,8 +254,8 @@ onMounted(async () => {
         :key="currentMap"
         :option="chartOptions"
         autoresize
-        @click="onChartClick"
         class="w-full h-full"
+        @click="onChartClick"
       />
       <div
         v-else
@@ -234,7 +263,7 @@ onMounted(async () => {
       >
         <div
           class="w-8 h-8 border-4 border-border border-t-zinc-900 rounded-full animate-spin"
-        ></div>
+        />
         <span
           class="text-[10px] text-muted uppercase font-black tracking-widest"
         >

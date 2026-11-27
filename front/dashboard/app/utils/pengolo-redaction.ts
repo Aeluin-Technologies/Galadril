@@ -1,3 +1,4 @@
+import { record } from "../../shared/records.ts";
 export const MAX_REDACTION_BYTES = 16 * 1024 * 1024;
 const MAX_WIRE_BYTES = 24 * 1024 * 1024;
 export type RedactionRule = {
@@ -93,7 +94,7 @@ async function boundedJson(response: Response): Promise<unknown> {
 function resultDocument(value: unknown, mime: string): RedactedDocument {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("Invalid redaction response");
-  const result = value as Record<string, unknown>;
+  const result = record(value);
   if (
     result.mime !== mime ||
     result.requires_review !== true ||

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import DOMPurify from "dompurify";
 import { ClipboardDocumentIcon, CheckIcon } from "@heroicons/vue/24/outline";
 import { parseActivity, type EmailProposal } from "~/utils/pengolo-activity";
 import {
@@ -44,6 +43,7 @@ const activityRun = computed(() => {
     (props.streaming || run.events.some((event) => event.kind === "activity"))
   )
     return run;
+  return undefined;
 });
 async function recover() {
   const chat = chats.active;
@@ -137,19 +137,7 @@ const rendered = computed(() => {
     checkpoints.value,
     props.streaming,
   );
-  return {
-    ...result,
-    blocks: result.blocks.map((block) =>
-      block.kind === "markdown"
-        ? {
-            ...block,
-            html: DOMPurify.sanitize(block.html, {
-              ADD_ATTR: ["target", "referrerpolicy"],
-            }),
-          }
-        : block,
-    ),
-  };
+  return result;
 });
 const references = computed(() =>
   (props.message.evidence ?? []).filter(
@@ -360,6 +348,12 @@ async function checkTask(event: Event) {
         :fallback-status="toolStatus"
       />
       <AiExecutionHistory
+        v-else-if="
+          message.role === 'assistant' &&
+          message.generationId &&
+          !streaming &&
+          (!!message.activityKinds?.length || !!checkpoints.length)
+        "
         :has-web-research="message.activityKinds?.includes('web_research')"
         :operations="[
           ...new Set(
@@ -371,12 +365,6 @@ async function checkTask(event: Event) {
         :has-other-activity="
           !!checkpoints.length ||
           message.activityKinds?.some((kind) => kind !== 'question')
-        "
-        v-else-if="
-          message.role === 'assistant' &&
-          message.generationId &&
-          !streaming &&
-          (!!message.activityKinds?.length || !!checkpoints.length)
         "
         :generation-id="message.generationId"
         :temporary="ui.temporary"
@@ -410,7 +398,7 @@ async function checkTask(event: Event) {
         @change="checkTask"
       >
         <template v-for="(block, index) in rendered.blocks" :key="index">
-          <div v-if="block.kind === 'markdown'" v-html="block.html" />
+          <AiSafeHtml v-if="block.kind === 'markdown'" :html="block.html" />
           <AiChart v-else-if="block.kind === 'chart'" :chart="block.chart" />
           <template v-else-if="block.kind === 'checkpoint'">
             <details v-if="streaming" class="p-thinking">
@@ -452,8 +440,8 @@ async function checkTask(event: Event) {
       <div v-if="message.fileIds?.length" class="p-file-chips">
         <AiDocumentAttachment
           v-for="id in message.fileIds"
-          :key="id"
           :id="id"
+          :key="id"
           :temporary-session="ui.temporary ? chats.active?.id : undefined"
         />
       </div>

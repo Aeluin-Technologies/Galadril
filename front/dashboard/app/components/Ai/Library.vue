@@ -193,7 +193,8 @@ onBeforeUnmount(() => {
   active.value = false;
 });
 async function upload(event: Event) {
-  const input = event.target as HTMLInputElement;
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
   const files = Array.from(input.files ?? []);
   input.value = "";
   await uploads.importFiles(files, props.projectId ?? null);
@@ -226,8 +227,8 @@ async function download(file: FileRecord) {
           type="search"
           placeholder="Search your files…" /></label
       ><UiButton
-        variant="secondary"
         v-if="!picker"
+        variant="secondary"
         type="button"
         :disabled="library.uploading > 0"
         @click="fileInput?.click()"
@@ -428,8 +429,8 @@ async function download(file: FileRecord) {
       />
     </div>
     <UiButton
-      variant="secondary"
       v-if="library.after"
+      variant="secondary"
       type="button"
       :disabled="library.loading"
       @click="library.load(projectId ?? null, search, true)"

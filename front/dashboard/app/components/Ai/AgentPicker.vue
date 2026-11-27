@@ -1,12 +1,21 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import { usePengoloAgents, type Specialist } from "~/stores/usePengoloAgents";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
-import { ScaleIcon, UserGroupIcon, CheckIcon, InformationCircleIcon } from "@heroicons/vue/24/outline";
+import {
+  ScaleIcon,
+  UserGroupIcon,
+  CheckIcon,
+  InformationCircleIcon,
+} from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
-import { compatibleAgent, executionCapabilityAllowed, sealedSkill } from "~/utils/pengolo";
+import {
+  compatibleAgent,
+  executionCapabilityAllowed,
+  sealedSkill,
+} from "~/utils/pengolo";
+
+const { t } = useI18n();
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -175,11 +184,15 @@ async function remove(agent: Specialist) {
             <span class="min-w-0 flex-1 whitespace-normal text-left">
               <strong class="flex items-center gap-2 text-foreground">
                 {{ team.name }}
-                <span v-if="teams.usesPrivateProcessing(team)"
+                <span
+                  v-if="teams.usesPrivateProcessing(team)"
                   :title="$t('pengolo.execution.privateProcessing')"
                   :aria-label="$t('pengolo.execution.privateProcessing')"
                   @click.stop
-                ><InformationCircleIcon class="size-4 text-muted" aria-hidden="true" /></span>
+                  ><InformationCircleIcon
+                    class="size-4 text-muted"
+                    aria-hidden="true"
+                /></span>
               </strong>
               <span class="mt-1 block text-sm font-normal text-muted">{{
                 team.description
@@ -290,17 +303,17 @@ async function remove(agent: Specialist) {
       >
       <UiSearchSelect
         :model-value="skillIds"
-        @update:model-value="
-          (value) => {
-            if (Array.isArray(value) && value.length <= 8) skillIds = value;
-          }
-        "
         :label="$t('pengolo.copy.skills')"
         :search-label="$t('email.searchSkills')"
         :empty-label="$t('email.noMatches')"
         :options="skillOptions"
         multiple
         :disabled="saving || loading"
+        @update:model-value="
+          (value) => {
+            if (Array.isArray(value) && value.length <= 8) skillIds = value;
+          }
+        "
       />
       <UiButton
         type="submit"

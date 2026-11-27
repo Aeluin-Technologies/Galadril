@@ -126,8 +126,9 @@ function update(
 ) {
   const field = fields.value.find((field) => field.key === key);
   if (value === "" && !field?.required) {
-    const next = { ...values.value };
-    delete next[key];
+    const next = Object.fromEntries(
+      Object.entries(values.value).filter(([name]) => name !== key),
+    );
     failed.value = false;
     publish(next);
     text.value = JSON.stringify(next, null, 2);

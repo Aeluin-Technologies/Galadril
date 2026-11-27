@@ -1,24 +1,25 @@
-<script setup>
-const props = defineProps({
-  isOpen: Boolean,
-  widget: Object,
-});
+<script setup lang="ts">
+import type { WidgetConfig, WidgetLayout } from "~/types/widget-layout";
 
-const emit = defineEmits(["close", "save"]);
-const formData = ref({});
+const props = withDefaults(
+  defineProps<{ isOpen?: boolean; widget?: WidgetLayout }>(),
+  {
+    widget: undefined,
+  },
+);
+const emit = defineEmits<{ close: []; save: [widget: WidgetLayout] }>();
+const formData = ref<WidgetConfig>({});
 
 watch(
   () => props.widget,
   (newWidget) => {
-    if (newWidget) {
-      formData.value = JSON.parse(JSON.stringify(newWidget.config || {}));
-      if (newWidget.config.icon) formData.value.icon = newWidget.config.icon;
-    }
+    if (newWidget) formData.value = { ...newWidget.config };
   },
   { immediate: true },
 );
 
 const handleSave = () => {
+  if (!props.widget) return;
   emit("save", { ...props.widget, config: formData.value });
   emit("close");
 };
@@ -81,10 +82,10 @@ const handleSave = () => {
     </div>
 
     <template #footer>
-      <UiButton @click="emit('close')" variant="ghost">
+      <UiButton variant="ghost" @click="emit('close')">
         {{ $t("builder.config_modal.buttons.cancel") }}
       </UiButton>
-      <UiButton @click="handleSave" variant="primary">
+      <UiButton variant="primary" @click="handleSave">
         {{ $t("builder.config_modal.buttons.save") }}
       </UiButton>
     </template>

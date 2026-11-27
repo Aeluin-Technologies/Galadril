@@ -73,6 +73,9 @@ function selectWithKeyboard(event: KeyboardEvent) {
         type="button"
         variant="secondary"
         :aria-busy="busy"
+        :icon="ArrowPathIcon"
+        :label="$t('administration.copy.reload_access_map')"
+        :loading="busy"
         @click="
           perform(
             loadGraph,
@@ -80,14 +83,12 @@ function selectWithKeyboard(event: KeyboardEvent) {
             $t('administration.copy.the_access_map_could_not_be_loaded_try'),
           )
         "
-        :icon="ArrowPathIcon"
-        :label="$t('administration.copy.reload_access_map')"
-        :loading="busy"
       />
     </div>
     <UiButton
       v-if="peopleAfter"
       variant="secondary"
+      :loading="busy"
       @click="
         perform(
           () => moreDirectory('users'),
@@ -95,12 +96,12 @@ function selectWithKeyboard(event: KeyboardEvent) {
           $t('administration.copy.more_people_could_not_be_loaded'),
         )
       "
-      :loading="busy"
       >{{ $t("administration.copy.load_more_people") }}</UiButton
     >
     <UiButton
       v-if="rolesAfter"
       variant="secondary"
+      :loading="busy"
       @click="
         perform(
           () => moreDirectory('roles'),
@@ -108,7 +109,6 @@ function selectWithKeyboard(event: KeyboardEvent) {
           $t('administration.copy.more_roles_could_not_be_loaded'),
         )
       "
-      :loading="busy"
       >{{ $t("administration.copy.load_more_roles") }}</UiButton
     >
     <label class="sr-only" for="access-search">{{

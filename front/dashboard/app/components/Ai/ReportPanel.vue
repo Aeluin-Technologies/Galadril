@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import DOMPurify from "dompurify";
 import { useEventListener } from "@vueuse/core";
 import { pengoloRequest } from "~/utils/pengolo-api";
 import { renderPengoloMarkdown } from "~/utils/pengolo-markdown";
@@ -27,22 +26,14 @@ const title = computed(
     agents.items.find((agent) => agent.id === report.value?.agentId)?.data
       .name || t("pengolo.report.title"),
 );
-const blocks = computed(() =>
-  renderPengoloMarkdown(
-    report.value?.content ?? "",
-    "specialist-report",
-    false,
-    t("pengolo.scrollableTable"),
-  ).blocks.map((block) =>
-    block.kind === "markdown"
-      ? {
-          ...block,
-          html: DOMPurify.sanitize(block.html, {
-            ADD_ATTR: ["target", "referrerpolicy"],
-          }),
-        }
-      : block,
-  ),
+const blocks = computed(
+  () =>
+    renderPengoloMarkdown(
+      report.value?.content ?? "",
+      "specialist-report",
+      false,
+      t("pengolo.scrollableTable"),
+    ).blocks,
 );
 function clear() {
   controller?.abort();
@@ -108,7 +99,7 @@ onBeforeUnmount(clear);
     <UiAlert v-else-if="error" tone="danger">{{ error }}</UiAlert>
     <div v-else class="p-markdown">
       <template v-for="(block, index) in blocks" :key="index">
-        <div v-if="block.kind === 'markdown'" v-html="block.html" />
+        <AiSafeHtml v-if="block.kind === 'markdown'" :html="block.html" />
         <AiChart v-else-if="block.kind === 'chart'" :chart="block.chart" />
         <AiEvidenceBlock
           v-else-if="block.kind !== 'checkpoint'"

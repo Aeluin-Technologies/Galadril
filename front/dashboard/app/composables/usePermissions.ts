@@ -1,7 +1,4 @@
 import {
-  ArrowLeftIcon,
-  ArrowPathIcon,
-  ArrowRightIcon,
   ClockIcon,
   UserGroupIcon,
   ArrowDownTrayIcon,
@@ -55,7 +52,7 @@ export type PermissionProps = {
   };
   users: Person[];
   roles: Role[];
-  request: <T>(
+  request: <T extends object>(
     query: string,
     variables?: Record<string, unknown>,
   ) => Promise<T>;

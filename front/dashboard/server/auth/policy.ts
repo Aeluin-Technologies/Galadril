@@ -78,21 +78,23 @@ export function constantEqual(expected: unknown, actual: unknown) {
 
 export function validateConsent(value: unknown) {
   const request = record(value);
+  const scope: unknown = request.requested_scope;
   if (
     record(request.client).client_id !== "galadril-studio" ||
-    !Array.isArray(request.requested_scope) ||
-    !request.requested_scope.includes("openid") ||
-    request.requested_scope.length > 2 ||
-    new Set(request.requested_scope).size !== request.requested_scope.length ||
-    request.requested_scope.some(
-      (scope) => !["openid", "offline_access"].includes(scope),
+    !Array.isArray(scope) ||
+    !scope.includes("openid") ||
+    scope.length > 2 ||
+    new Set<unknown>(scope).size !== scope.length ||
+    !scope.every(
+      (item: unknown): item is string =>
+        item === "openid" || item === "offline_access",
     ) ||
     !Array.isArray(request.requested_access_token_audience) ||
     request.requested_access_token_audience.length !== 1 ||
     request.requested_access_token_audience[0] !== "galadril"
   )
     throw new Error("Invalid consent");
-  return { scope: [...request.requested_scope], audience: ["galadril"] };
+  return { scope: [...scope], audience: ["galadril"] };
 }
 
 export function accessClaims(value: unknown): AccessClaims {

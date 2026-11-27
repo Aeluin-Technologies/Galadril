@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { PDF, Standard14Font } from "@libpdf/core";
 import {
   createSigningVault,
+  parseSigningVault,
   unlockSigningKey,
 } from "../app/utils/signing-vault.ts";
 import { inspectSigningFields, signPdf } from "../app/utils/pdf-signing.ts";
@@ -27,7 +28,12 @@ test("password and PRF unlock the same non-exportable signing key", async () => 
     prf,
     salt: crypto.getRandomValues(new Uint8Array(32)),
   });
-  const stored: typeof vault = JSON.parse(JSON.stringify(vault));
+  const serialized = JSON.stringify(vault);
+  assert.throws(
+    () => parseSigningVault(JSON.stringify({ ...vault, password: [] })),
+    /Invalid signing vault/,
+  );
+  const stored = parseSigningVault(serialized);
   const byPassword = await unlockSigningKey(scope, stored, { password });
   const byPasskey = await unlockSigningKey(scope, stored, { prf });
   assert.equal(byPassword.extractable, false);

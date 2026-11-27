@@ -1,3 +1,4 @@
+import { parseObject } from "../../shared/records.ts";
 /** Visible, recently active tabs keep the session alive; background tabs never extend it. */
 import {
   shouldRefreshSession,
@@ -16,25 +17,21 @@ export default defineNuxtPlugin((nuxt) => {
   const checkpointKey = "galadril-session-check";
   function synchronize() {
     try {
-      const checkpoint = JSON.parse(
+      const checkpoint = parseObject(
         localStorage.getItem(checkpointKey) ?? "null",
-      ) as {
-        subject: string;
-        tenant: string;
-        expiresAt: number;
-        checkedAt: number;
-      } | null;
+      );
       if (
-        checkpoint &&
         account.value &&
         checkpoint.subject === account.value.subject &&
         checkpoint.tenant === account.value.tenant &&
+        typeof checkpoint.checkedAt === "number" &&
         Number.isFinite(checkpoint.checkedAt) &&
         checkpoint.checkedAt > lastCheck &&
         checkpoint.checkedAt <= Date.now()
       ) {
         lastCheck = checkpoint.checkedAt;
         if (
+          typeof checkpoint.expiresAt === "number" &&
           Number.isFinite(checkpoint.expiresAt) &&
           account.value.expiresAt !== checkpoint.expiresAt
         ) {

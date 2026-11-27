@@ -100,8 +100,10 @@ export function mcpAuthorization(query: URLSearchParams, clients: McpClient[]) {
     "code_challenge",
     "code_challenge_method",
     "nonce",
-  ])
-    if (query.has(key)) parameters.set(key, query.get(key)!);
+  ]) {
+    const value = query.get(key);
+    if (value !== null) parameters.set(key, value);
+  }
   parameters.set("scope", scope.join(" "));
   // Hydra 2.x ignores resource indicators; the trusted bridge binds its audience instead.
   parameters.set("audience", client.resource);
@@ -173,8 +175,8 @@ export async function ensureMcpClient(client: McpClient, admin: string) {
   }
   if (!response.ok) throw new Error("MCP OAuth registration unavailable");
   const existing = record(await response.json());
-  for (const field of Object.keys(definition) as (keyof typeof definition)[])
-    if (JSON.stringify(existing[field]) !== JSON.stringify(definition[field]))
+  for (const [field, value] of Object.entries(definition))
+    if (JSON.stringify(existing[field]) !== JSON.stringify(value))
       throw new Error("MCP OAuth registration differs from deployment policy");
 }
 

@@ -1,7 +1,4 @@
 <script setup lang="ts">
-const { t, locale } = useI18n();
-useHead(() => ({ htmlAttrs: { lang: locale.value } }));
-
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import {
   Bars3Icon,
@@ -28,6 +25,9 @@ import type {
   FileRecord,
 } from "~/utils/pengolo-api";
 import { latestWebSearchUsage } from "~/utils/pengolo";
+
+const { t, locale } = useI18n();
+useHead(() => ({ htmlAttrs: { lang: locale.value } }));
 const props = defineProps<{
   view?: "chat" | "library" | "scheduled";
   chatId?: string;
@@ -484,18 +484,18 @@ onUnmounted(() => {
             class="ms-auto"
             variant="ghost"
             type="button"
-            @click="ui.sidebarOpen = false"
             :icon="RectangleGroupIcon"
             :label="$t('pengolo.copy.collapse_pengolo_sidebar')"
+            @click="ui.sidebarOpen = false"
           />
         </div>
         <nav :aria-label="$t('pengolo.copy.pengolo_workspace')">
           <UiButton
             variant="ghost"
             type="button"
-            @click="newChat()"
             align="start"
             class="w-full new"
+            @click="newChat()"
           >
             <PencilSquareIcon />{{ $t("pengolo.copy.new_chat") }}</UiButton
           ><UiNavigationLink :active="view === 'scheduled'"
@@ -527,12 +527,12 @@ onUnmounted(() => {
               class="p-create-project"
               variant="ghost"
               type="button"
+              :icon="PlusIcon"
+              :label="$t('pengolo.copy.create_project')"
               @click="
                 editingProject = null;
                 creatingProject = true;
               "
-              :icon="PlusIcon"
-              :label="$t('pengolo.copy.create_project')"
             />
           </div>
           <Transition name="p-pop"
@@ -553,13 +553,13 @@ onUnmounted(() => {
                     <UiIconButton
                       variant="ghost"
                       type="button"
-                      @click="newChat(item.id)"
                       :icon="PlusIcon"
                       :label="
                         $t('pengolo.copy.new_chat_in_value0', {
                           value0: item.data.name,
                         })
                       "
+                      @click="newChat(item.id)"
                     /><UiNavigationLink
                       ><NuxtLink
                         :to="{
@@ -587,8 +587,8 @@ onUnmounted(() => {
                     :chat="chat"
                     @select="selectChat"
                   /><UiButton
-                    variant="ghost"
                     v-if="chats.cursors[item.id]"
+                    variant="ghost"
                     type="button"
                     @click="chats.load(true, item.id)"
                   >
@@ -641,8 +641,8 @@ onUnmounted(() => {
                 {{ $t("pengolo.copy.your_conversations_will_appear_here") }}
               </p>
               <UiButton
-                variant="ghost"
                 v-if="chats.after"
+                variant="ghost"
                 type="button"
                 :disabled="chats.loading"
                 @click="chats.load(true)"
@@ -666,9 +666,9 @@ onUnmounted(() => {
             v-if="!ui.sidebarOpen && !compact"
             variant="ghost"
             type="button"
-            @click="ui.sidebarOpen = true"
             :icon="Bars3Icon"
             :label="$t('pengolo.copy.open_pengolo_sidebar')"
+            @click="ui.sidebarOpen = true"
           />
           <AiProjectIcon
             v-if="project"
@@ -706,12 +706,12 @@ onUnmounted(() => {
         ><UiIconButton
           variant="ghost"
           type="button"
+          :icon="XMarkIcon"
+          :label="$t('pengolo.copy.dismiss_error')"
           @click="
             ui.error = '';
             models.error = '';
           "
-          :icon="XMarkIcon"
-          :label="$t('pengolo.copy.dismiss_error')"
         />
       </div>
       <section v-if="view === 'scheduled'" class="p-scheduled">

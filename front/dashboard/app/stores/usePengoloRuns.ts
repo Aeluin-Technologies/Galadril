@@ -1,3 +1,4 @@
+import { parseGenerationReplay } from "~/utils/pengolo-replay";
 import { defineStore } from "pinia";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloTransport } from "~/stores/usePengoloTransport";
@@ -85,7 +86,7 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
       (data) => {
         if (generation !== epoch) return;
         try {
-          apply(run, data.pengoloStream as GenerationReplay);
+          apply(run, parseGenerationReplay(data.pengoloStream));
         } catch {
           run.error = "Connection interrupted. Reconnecting…";
           usePengoloTransport().reconnect();
@@ -184,7 +185,9 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
     for (const run of Object.values(runs.value))
       if (run.temporary && run.chatId === chatId) {
         close(run.id);
-        delete runs.value[run.id];
+        runs.value = Object.fromEntries(
+          Object.entries(runs.value).filter(([id]) => id !== run.id),
+        );
       }
   }
   function clear() {

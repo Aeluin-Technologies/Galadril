@@ -128,9 +128,9 @@ const {
         <UiButton
           type="button"
           :disabled="!synchronization.connectionId"
-          @click="syncStep = 2"
           variant="primary"
           class="mt-5"
+          @click="syncStep = 2"
           >{{ $t("authentication.continue") }}</UiButton
         >
       </template>
@@ -192,13 +192,13 @@ const {
           type="button"
           variant="secondary"
           :disabled="synchronization.mappings.length >= 64"
+          class="mt-4"
           @click="
             synchronization.mappings.push({
               externalGroup: '',
               roleName: '',
             })
           "
-          class="mt-4"
           >{{ $t("administration.copy.add_a_group_match") }}</UiButton
         >
         <div class="mt-5 flex gap-3">
@@ -213,8 +213,8 @@ const {
                 (item) => !item.externalGroup || !item.roleName,
               )
             "
-            @click="syncStep = 3"
             variant="primary"
+            @click="syncStep = 3"
             >{{ $t("administration.copy.review_matches") }}</UiButton
           >
         </div>
@@ -249,8 +249,8 @@ const {
           ><UiButton
             type="button"
             :disabled="synchronization.enabled && !settings.permission_import"
-            @click="saveSynchronization"
             variant="primary"
+            @click="saveSynchronization"
             >{{ $t("administration.copy.save_synchronization") }}</UiButton
           >
         </div>

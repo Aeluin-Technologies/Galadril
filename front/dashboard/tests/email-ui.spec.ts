@@ -1,3 +1,5 @@
+import { graphQL } from "./graphql-fixture.ts";
+import { record, text, parseObject } from "../shared/records.ts";
 import { expect } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
@@ -28,19 +30,20 @@ test("account settings show the saved document profile and edit one row", async 
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     if (body.query.includes("pengoloHandwrittenSignatures")) {
       return route.fulfill({
         json: { data: { pengoloHandwrittenSignatures: [] } },
       });
     }
     if (body.query.includes("savePengoloDocumentProfile")) {
-      expect(body.variables.input).toEqual({
+      const expected = {
         ...profile,
         firstName: "Dominique",
         requireMcpEmailReview: profile.revision === 8,
-      });
-      profile = { ...body.variables.input, revision: profile.revision + 1 };
+      };
+      expect(body.variables.input).toEqual(expected);
+      profile = { ...expected, revision: profile.revision + 1 };
       return route.fulfill({
         json: { data: { savePengoloDocumentProfile: true } },
       });
@@ -132,16 +135,16 @@ test("personal instructions load, save and survive navigation without exposing a
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     if (body.query.includes("updatePengoloPreferences")) {
-      expect(Object.keys(body.variables.input).sort()).toEqual([
+      expect(Object.keys(record(body.variables.input)).sort()).toEqual([
         "instructions",
         "revision",
       ]);
-      expect(body.variables.input.revision).toBe(preferences.revision);
+      expect(record(body.variables.input).revision).toBe(preferences.revision);
       preferences = {
         revision: preferences.revision + 1,
-        instructions: body.variables.input.instructions,
+        instructions: text(record(body.variables.input).instructions),
       };
       return route.fulfill({
         json: { data: { updatePengoloPreferences: preferences } },
@@ -222,9 +225,9 @@ test("email setup shows progress and skips detected servers without unavailable 
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const input = route.request().postDataJSON();
+    const input = graphQL(route.request().postDataJSON());
     if (input.query.includes("emailOperation")) {
-      const request = JSON.parse(input.variables.request);
+      const request = parseObject(input.variables.request);
       if (request.operation === "discover") {
         requests.push(request);
         expect(Object.keys(request).sort()).toEqual(["domain", "operation"]);
@@ -529,10 +532,10 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const input = route.request().postDataJSON();
+    const input = graphQL(route.request().postDataJSON());
     if (input.query.includes("emailOperation")) {
-      const request = JSON.parse(input.variables.request);
-      operations.push(request.operation);
+      const request = parseObject(input.variables.request);
+      operations.push(text(request.operation));
       if (request.operation === "accounts")
         return route.fulfill({
           json: { data: { emailOperation: JSON.stringify([account]) } },
@@ -761,11 +764,11 @@ test("email references open authorized content and its thread without sending", 
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const input = route.request().postDataJSON();
+    const input = graphQL(route.request().postDataJSON());
     if (!input.query.includes("emailOperation"))
       return route.fulfill({ json: { data: {} } });
-    const request = JSON.parse(input.variables.request);
-    operations.push(request.operation);
+    const request = parseObject(input.variables.request);
+    operations.push(text(request.operation));
     let result: unknown;
     if (request.operation === "accounts")
       result = [
@@ -833,7 +836,9 @@ test("email references open authorized content and its thread without sending", 
   await dialog
     .getByRole("button", { name: "Show conversation", exact: true })
     .click();
-  await expect.poll(() => operations.includes("thread")).toBe(true);
+  await expect(
+    dialog.getByText("No collected messages are available.", { exact: true }),
+  ).toBeVisible();
   expect(operations).toEqual(["accounts", "messages", "message", "thread"]);
 });
 
@@ -860,21 +865,21 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON();
+    const { query, variables } = graphQL(route.request().postDataJSON());
     if (query.includes("createPengoloHandwrittenSignature")) {
-      trace = variables.input.trace;
-      const ink = JSON.parse(trace ?? "[]");
-      if (variables.input.label === "Imported mark") {
-        expect(ink.png).toMatch(/^[A-Za-z0-9_-]+$/);
-        expect(Buffer.from(ink.png, "base64url").readUInt32BE(12)).toBe(
-          0x49484452,
-        );
+      trace = text(record(variables.input).trace);
+      const ink: unknown = JSON.parse(trace);
+      if (record(variables.input).label === "Imported mark") {
+        expect(text(record(ink).png)).toMatch(/^[A-Za-z0-9_-]+$/);
+        expect(
+          Buffer.from(text(record(ink).png), "base64url").readUInt32BE(12),
+        ).toBe(0x49484452);
       } else {
         expect(ink).toHaveLength(1);
       }
       mark = {
         id,
-        label: variables.input.label,
+        label: text(record(variables.input).label),
         createdAt: 1,
         includeCaption: false,
       };
@@ -885,6 +890,8 @@ test("a handwritten mark can be saved, previewed, and removed", async ({
     if (query.includes("updatePengoloHandwrittenSignatureCaption")) {
       expect(variables.id).toBe(id);
       if (!mark) throw new Error("Missing fixture mark");
+      if (typeof variables.includeCaption !== "boolean")
+        throw new Error("Missing boolean caption setting");
       mark = { ...mark, includeCaption: variables.includeCaption };
       return route.fulfill({
         json: { data: { updatePengoloHandwrittenSignatureCaption: true } },
