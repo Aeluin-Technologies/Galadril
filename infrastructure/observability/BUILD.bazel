@@ -10,6 +10,7 @@ filegroup(
         "alloy.config",
         "grafana-dashboards.yaml",
         "grafana-datasources.yaml",
+        "loki.yaml",
         "otel-collector.yaml",
         "tempo.yaml",
     ] + glob(["dashboards/**/*.json"]),

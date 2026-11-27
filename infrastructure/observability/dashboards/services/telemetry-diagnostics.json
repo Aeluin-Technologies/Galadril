@@ -1,9 +1,9 @@
 {
   "uid": "galadril-telemetry-diagnostics",
   "id": null,
-  "title": "Galadril / Telemetry Diagnostics",
+  "title": "Observability Health",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
@@ -463,6 +463,157 @@
       },
       "options": {},
       "description": "Filtered by detected log level and literal text search. Trace IDs link to Tempo."
+    },
+    {
+      "title": "Collector span loss and refusal",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate({__name__=~\"otelcol_exporter_send_failed_spans(_total)?\",service=\"otel-collector\"}[$__rate_interval]))",
+          "legendFormat": "Export failed"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate({__name__=~\"otelcol_receiver_refused_spans(_total)?\",service=\"otel-collector\"}[$__rate_interval]))",
+          "legendFormat": "Input refused"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum(rate({__name__=~\"otelcol_processor_tail_sampling_sampling_trace_dropped_too_early(_total)?\",service=\"otel-collector\"}[$__rate_interval]))",
+          "legendFormat": "Traces evicted before decision"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 9
+    },
+    {
+      "title": "Collector memory",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "otelcol_process_memory_rss{service=\"otel-collector\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 10
+    },
+    {
+      "title": "Tail decisions by outcome",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum by (decision) (rate({__name__=~\"otelcol_processor_tail_sampling_global_count_traces_sampled(_total)?\",service=\"otel-collector\"}[$__rate_interval]))",
+          "legendFormat": "{{decision}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "id": 11
+    },
+    {
+      "title": "Late span age p95",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(otelcol_processor_tail_sampling_sampling_late_span_age_bucket{service=\"otel-collector\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "id": 12
     }
   ],
   "links": []

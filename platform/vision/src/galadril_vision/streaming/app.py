@@ -547,6 +547,10 @@ def _initialize_ray(config: VisionConfig) -> bool:
     address = _resolve_ray_address(config)
     if address is None:
         _inherit_ray_pythonpath()
+        metrics_port = os.getenv("RAY_METRICS_EXPORT_PORT")
+        metrics_options = (
+            {"_metrics_export_port": int(metrics_port)} if metrics_port else {}
+        )
         ray.init(
             address=None,
             namespace=config.ray.namespace,
@@ -562,6 +566,7 @@ def _initialize_ray(config: VisionConfig) -> bool:
                     _LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS
                 )
             },
+            **metrics_options,
         )
     else:
         ray.init(

@@ -1,0 +1,72 @@
+{
+  "uid": "galadril-error-analysis",
+  "title": "Error Analysis",
+  "description": "Operational failure events from the Galadril catalog. Occurrence IDs correlate repeated observations of one underlying failure.",
+  "tags": [
+    "galadril",
+    "provisioned"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "Failure observations by code and phase",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (service_name, galadril_error_code, galadril_vision_phase) (count_over_time({service_name=~\"galadril-.+\"} | galadril_error_code!=\"\" [$__auto]))",
+          "legendFormat": "{{service_name}} {{galadril_error_code}} {{galadril_vision_phase}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "title": "Correlated pipeline and authorization failures",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=~\"galadril-.+\"} | galadril_error_code!=\"\"",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2
+    }
+  ]
+}

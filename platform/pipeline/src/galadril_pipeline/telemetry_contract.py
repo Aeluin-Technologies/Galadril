@@ -69,6 +69,13 @@ class VisionResourceClass(StrEnum):
     CAUSAL = "causal"
 
 
+class VisionTimingPhase(StrEnum):
+    SERIALIZATION = "serialization"
+    RAY_ROUND_TRIP = "ray_round_trip"
+    EXECUTION = "execution"
+    PERSISTENCE = "persistence"
+
+
 ATTR_AUDIT_IFC_LABELS: Final = "galadril.audit.ifc_labels"
 ATTR_AUDIT_PERMISSIONS: Final = "galadril.audit.permissions"
 ATTR_AUDIT_PRINCIPAL_ID: Final = "galadril.audit.principal_id"
@@ -86,6 +93,7 @@ ATTR_VISION_OUTCOME: Final = "galadril.vision.outcome"
 ATTR_VISION_PHASE: Final = "galadril.vision.phase"
 ATTR_VISION_RESOURCE_CLASS: Final = "galadril.vision.resource_class"
 ATTR_VISION_RETRY_SCHEDULED: Final = "galadril.vision.retry_scheduled"
+ATTR_VISION_TIMING_PHASE: Final = "galadril.vision.timing_phase"
 SPAN_AMARTH_EFFECT_ESTIMATE: Final = "galadril.amarth.effect.estimate"
 SPAN_GATEWAY_AUTHORIZATION_EVALUATE: Final = (
     "galadril.gateway.authorization.evaluate"
@@ -106,6 +114,8 @@ EVENT_GOL_WORKER_FAILED: Final = "galadril.gol.worker.failed"
 EVENT_VISION_STEP_FAILED: Final = "galadril.vision.step.failed"
 METRIC_AUTH_ATTEMPTS: Final = "galadril.auth.attempts"
 METRIC_AUTH_ATTEMPTS_UNIT: Final = "{attempt}"
+METRIC_VISION_PHASE_DURATION: Final = "galadril.vision.phase.duration"
+METRIC_VISION_PHASE_DURATION_UNIT: Final = "s"
 METRIC_VISION_STEP_DURATION: Final = "galadril.vision.step.duration"
 METRIC_VISION_STEP_DURATION_UNIT: Final = "s"
 METRIC_VISION_STEP_MESSAGES: Final = "galadril.vision.step.messages"
@@ -307,6 +317,17 @@ def auth_attempts_attributes(
     return {
         "galadril.auth.operation": auth_operation,
         "galadril.auth.outcome": auth_outcome,
+    }
+
+
+def vision_phase_duration_attributes(
+    *,
+    vision_resource_class: VisionResourceClass,
+    vision_timing_phase: VisionTimingPhase,
+) -> dict[str, Attribute]:
+    return {
+        "galadril.vision.resource_class": vision_resource_class,
+        "galadril.vision.timing_phase": vision_timing_phase,
     }
 
 

@@ -23,6 +23,7 @@ from galadril_pipeline.telemetry_contract import (
     RetryPolicy,
     VisionOutcome,
     VisionPhase,
+    VisionTimingPhase,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -493,7 +494,16 @@ class CommandHandler:
                     )
                 self._routes.successors(command.step, result.output)
                 phase = VisionPhase.LEDGER
-                await self._ledger.complete(command, result)
+                persistence_started = time.perf_counter()
+                try:
+                    await self._ledger.complete(command, result)
+                finally:
+                    self._metrics.phase_completed(
+                        phase=VisionTimingPhase.PERSISTENCE,
+                        resource_class=command.resource_class,
+                        duration_seconds=time.perf_counter()
+                        - persistence_started,
+                    )
             except Exception as error:
                 failure = execution_failure(error, phase)
                 await self._ledger.fail(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import os
@@ -15,6 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from typing import NotRequired, TypedDict
 from uuid import UUID, uuid4
 
 from assertions import require_mapping
@@ -70,9 +72,38 @@ class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
 
 
-def _pipeline_failure_events(lines: Iterable[str]) -> str:
+def _trace_id(value: object) -> str | None:
+    """Normalizes OTLP JSON trace identifiers without exporting arbitrary strings."""
+    if not isinstance(value, str):
+        return None
+    try:
+        raw = (
+            bytes.fromhex(value)
+            if len(value) == 32
+            else base64.b64decode(value, validate=True)
+        )
+    except ValueError:
+        return None
+    return raw.hex() if len(raw) == 16 and any(raw) else None
+
+
+class PipelineFailureEvent(TypedDict):
+    """Carries catalog fields that can safely be attached to a failed test."""
+
+    event: str
+    code: ErrorCode
+    occurrence_id: str
+    trace_id: NotRequired[str]
+    phase: NotRequired[VisionPhase]
+    attempt: NotRequired[int]
+    retry_scheduled: NotRequired[bool]
+
+
+def _pipeline_failure_events(
+    lines: Iterable[str],
+) -> list[PipelineFailureEvent]:
     """Extracts only catalog values from Collector OTLP JSON log batches."""
-    recent: deque[str] = deque(maxlen=24)
+    recent: deque[PipelineFailureEvent] = deque(maxlen=24)
     for line in lines:
         try:
             envelope = json.loads(line)
@@ -92,38 +123,38 @@ def _pipeline_failure_events(lines: Iterable[str]) -> str:
                         for attr in record.get("attributes", [])
                     }
                     try:
-                        code = ErrorCode(
-                            attributes[ATTR_ERROR_CODE]["stringValue"]
+                        details = PipelineFailureEvent(
+                            event=event,
+                            code=ErrorCode(
+                                attributes[ATTR_ERROR_CODE]["stringValue"]
+                            ),
+                            occurrence_id=str(
+                                UUID(
+                                    attributes[ATTR_ERROR_OCCURRENCE_ID][
+                                        "stringValue"
+                                    ]
+                                )
+                            ),
                         )
-                        occurrence = UUID(
-                            attributes[ATTR_ERROR_OCCURRENCE_ID]["stringValue"]
-                        )
-                        details = [
-                            event,
-                            f"code={code}",
-                            f"occurrence_id={occurrence}",
-                        ]
+                        trace_id = _trace_id(record.get("traceId"))
+                        if trace_id is not None:
+                            details["trace_id"] = trace_id
                         if event == EVENT_VISION_STEP_FAILED:
-                            phase = VisionPhase(
+                            details["phase"] = VisionPhase(
                                 attributes[ATTR_VISION_PHASE]["stringValue"]
                             )
-                            attempt = int(
+                            details["attempt"] = int(
                                 attributes[ATTR_PIPELINE_ATTEMPT]["intValue"]
-                            )
-                            details.extend(
-                                (f"phase={phase}", f"attempt={attempt}")
                             )
                             retry = attributes.get(
                                 ATTR_VISION_RETRY_SCHEDULED, {}
                             ).get("boolValue")
                             if isinstance(retry, bool):
-                                details.append(
-                                    f"retry_scheduled={str(retry).lower()}"
-                                )
+                                details["retry_scheduled"] = retry
                     except (KeyError, TypeError, ValueError):
                         continue
-                    recent.append(" ".join(details))
-    return "\n".join(recent)
+                    recent.append(details)
+    return list(recent)
 
 
 def image_loader_command(loader: Path) -> tuple[str, str]:
@@ -757,7 +788,7 @@ class ComposeEnvironment:
         failure_events = await self.pipeline_failure_events()
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
-            f"\nPipeline failure events:\n{failure_events}"
+            f"\nPipeline failure events:\n{json.dumps(failure_events, indent=2)}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"
@@ -765,9 +796,8 @@ class ComposeEnvironment:
             f"\nIntake and Vision consumer offsets:\n{consumer_offsets}"
         )
 
-    async def pipeline_failure_events(self) -> str:
+    async def pipeline_failure_events(self) -> list[PipelineFailureEvent]:
         """Reads the bounded Collector file for correlated pipeline events."""
-        failure_events = ""
         with TemporaryDirectory() as temporary:
             log_path = Path(temporary) / "otlp.jsonl"
             await _run(
@@ -783,8 +813,56 @@ class ComposeEnvironment:
             )
             if log_path.is_file():
                 with log_path.open(encoding="utf-8") as logs:
-                    failure_events = _pipeline_failure_events(logs)
-        return failure_events
+                    return _pipeline_failure_events(logs)
+        return []
+
+    async def _postgres_diagnostics(self, filename: str) -> object:
+        """Reads bounded summaries without serializing SQL text or parameters."""
+        statement = runfile(f"database/diagnostics/{filename}.sql").read_text(
+            encoding="utf-8"
+        )
+        if filename == "statements":
+            query = statement.rstrip().removesuffix(";")
+            statement = (
+                "SELECT coalesce(json_agg(ranked ORDER BY total_rank), '[]'::json) "
+                f"FROM (\n{query}\n) AS ranked"
+            )
+        output = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "postgres",
+                "psql",
+                "--username=postgres",
+                "--dbname=galadril_dev",
+                "--no-psqlrc",
+                "--no-align",
+                "--tuples-only",
+                "--set=ON_ERROR_STOP=1",
+                "--command",
+                statement,
+            ),
+            environment=self._environment,
+            timeout_seconds=10.0,
+        )
+        return json.loads(output)
+
+    async def failure_artifact(self) -> dict[str, object]:
+        """Collects operational failure identifiers and bounded SQL data before teardown."""
+        keys = ("failure_events", "postgres", "dominant_statements")
+        events, snapshot, statements = await asyncio.gather(
+            self.pipeline_failure_events(),
+            self._postgres_diagnostics("snapshot"),
+            self._postgres_diagnostics("statements"),
+            return_exceptions=True,
+        )
+        values: tuple[object, ...] = (events, snapshot, statements)
+        return {
+            key: value
+            for key, value in zip(keys, values, strict=True)
+            if not isinstance(value, BaseException)
+        }
 
     async def close(self) -> None:
         """Removes containers, networks, and volumes created by this test."""
@@ -821,25 +899,74 @@ class ComposeEnvironment:
 async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
     """Yields one environment and emits diagnostics before teardown."""
     environment = ComposeEnvironment()
+    output = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
     primary_error: BaseException | None = None
+    phases: dict[str, float] = {}
+    started = monotonic()
     try:
-        await environment.load_images()
-        await environment.prepare_configuration()
-        await environment.start_core()
-        yield environment
+        for name, run in (
+            ("load_images", environment.load_images),
+            ("prepare_configuration", environment.prepare_configuration),
+            ("start_core", environment.start_core),
+        ):
+            phase_started = monotonic()
+            try:
+                await run()
+            finally:
+                phases[name] = monotonic() - phase_started
+        phase_started = monotonic()
+        try:
+            yield environment
+        finally:
+            phases["scenario"] = monotonic() - phase_started
     except BaseException as error:
         primary_error = error
-        try:
-            diagnostics = await environment.logs()
-        except Exception as diagnostic_error:
+        if output:
             error.add_note(
-                f"Unable to collect Docker Compose diagnostics: "
-                f"{diagnostic_error}"
+                "Structured diagnostics are available in integration-performance.json"
             )
         else:
-            error.add_note(diagnostics)
+            try:
+                diagnostics = await environment.logs()
+            except Exception as diagnostic_error:
+                error.add_note(
+                    f"Unable to collect Docker Compose diagnostics: {diagnostic_error}"
+                )
+            else:
+                error.add_note(diagnostics)
         raise
     finally:
+        if output:
+            failure_artifact: dict[str, object] = {}
+            if primary_error is not None:
+                try:
+                    failure_artifact = await environment.failure_artifact()
+                except Exception:
+                    print("Unable to collect incident diagnostics", flush=True)
+            try:
+                (Path(output) / "integration-performance.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "outcome": "failed"
+                            if primary_error is not None
+                            else "passed",
+                            "phases_seconds": phases,
+                            "elapsed_seconds": sum(phases.values()),
+                            "wall_seconds_before_teardown": monotonic()
+                            - started,
+                            "diagnostics": failure_artifact,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                print(
+                    "Unable to publish integration performance diagnostics",
+                    flush=True,
+                )
         try:
             await environment.close()
         except Exception as cleanup_error:

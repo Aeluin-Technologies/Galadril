@@ -7,6 +7,10 @@ datasources:
     access: proxy
     url: http://mimir:9009/prometheus
     isDefault: true
+    jsonData:
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
 
   - name: Tempo
     uid: tempo

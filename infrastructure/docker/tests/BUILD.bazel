@@ -13,7 +13,10 @@ py_library(
 py_test(
     name = "collectors_test",
     size = "large",
-    srcs = ["test_collectors.py"],
+    srcs = [
+        "otel_sampling.py",
+        "test_collectors.py",
+    ],
     data = [
         "//infrastructure/docker:compose",
         "//infrastructure/docker:compose_configuration",
@@ -57,7 +60,7 @@ py_test(
         "//front/dashboard:apollo/default.ts",
         "//build:multirun.bzl",
         "//infrastructure/docker:compose_configuration",
-        "//infrastructure/observability:tempo.yaml",
+        "//infrastructure/observability:collector_configuration",
     ],
     legacy_create_init = False,
     deps = ["@pip//pyyaml"],

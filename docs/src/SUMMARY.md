@@ -15,6 +15,7 @@
 
 - [Operations](operations/telemetry.md)
   - [Observability Contracts](operations/observability_contracts.md)
+  - [Performance and Incident Diagnostics](operations/observability_instrumentation.md)
   - [API Proxies](operations/proxies.md)
   - [Enterprise SSO](operations/enterprise_sso.md)
   - [Kubernetes and k3s](operations/kubernetes.md)

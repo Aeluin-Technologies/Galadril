@@ -10,6 +10,7 @@ from typing import cast
 import httpx
 from testcontainers.core.container import DockerContainer
 
+from infrastructure.docker.tests.otel_sampling import check_tail_sampling
 from infrastructure.docker.tests.test_models import model
 
 ROOT = Path(__file__).absolute().parents[2]
@@ -61,9 +62,21 @@ class CollectorConfigurationTest(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()["error"], "No query")
 
+    def test_tail_sampler_keeps_errors_and_slow_traces(self) -> None:
+        check_tail_sampling()
+
     def test_shipped_collectors_accept_their_configuration(self) -> None:
-        services = model("infrastructure/docker/docker-compose.yaml")
+        services = model(
+            "infrastructure/docker/docker-compose.yaml",
+            profiles=("observability-benchmark",),
+        )
         for name, source, target, command in (
+            (
+                "loki",
+                "loki.yaml",
+                "/etc/loki/galadril.yaml",
+                ["-config.file=/etc/loki/galadril.yaml", "-verify-config=true"],
+            ),
             (
                 "tempo",
                 "tempo.yaml",

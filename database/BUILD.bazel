@@ -7,7 +7,13 @@ load("//build:database.bzl", "database_build", "database_oci_layout")
 
 # gazelle:ignore
 
-exports_files(["Dockerfile", "ldconfig-retry.sh"])
+exports_files([
+    "Dockerfile",
+    "diagnostics/auto-explain.sql",
+    "diagnostics/snapshot.sql",
+    "diagnostics/statements.sql",
+    "ldconfig-retry.sh",
+])
 
 filegroup(
     name = "role_initialization",

@@ -287,6 +287,10 @@ py_library(
     name = "e2e_environment",
     testonly = True,
     srcs = ["environment.py"],
+    data = [
+        "//database:diagnostics/snapshot.sql",
+        "//database:diagnostics/statements.sql",
+    ],
     imports = ["."],
     deps = [
         ":e2e_assertions",
@@ -466,6 +470,7 @@ py_test(
         ":e2e_authentication",
         ":e2e_clients",
         ":e2e_environment",
+        ":pipeline_ingestion",
         "//platform/pipeline/src/galadril_pipeline",
         "@pip//pytest",
     ],
@@ -609,7 +614,14 @@ py_library(
     testonly = True,
     srcs = ["pipeline_ingestion.py"],
     imports = ["."],
-    deps = [":e2e_assertions", ":e2e_clients", ":gateway_scenario", "//platform/pipeline/src/galadril_pipeline", "@pip//pytest"],
+    deps = [
+        ":e2e_assertions",
+        ":e2e_clients",
+        ":e2e_environment",
+        ":gateway_scenario",
+        "//platform/pipeline/src/galadril_pipeline",
+        "@pip//pytest",
+    ],
 )
 
 py_library(

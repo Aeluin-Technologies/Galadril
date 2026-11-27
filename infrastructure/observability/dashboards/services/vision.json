@@ -1,6 +1,6 @@
 {
   "uid": "galadril-vision",
-  "title": "Galadril / Vision / Ray Pipelines",
+  "title": "Pipeline Performance",
   "description": "Galadril source-controlled dashboard. All UI labels in English; datasource UIDs are fixed.",
   "tags": [
     "galadril",
@@ -13,9 +13,9 @@
     "traces"
   ],
   "schemaVersion": 39,
-  "version": 6,
+  "version": 8,
   "editable": false,
-  "refresh": "30s",
+  "refresh": "10s",
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -24,6 +24,38 @@
   "graphTooltip": 1,
   "fiscalYearStartMonth": 0,
   "panels": [
+    {
+      "id": 27,
+      "title": "Recent request and pipeline traces",
+      "type": "table",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 11
+      },
+      "description": "Open a trace to see the service-by-service waterfall. Tempo receives retained spans after the Collector decision window.",
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ resource.service.name =~ \"galadril-gateway|galadril-intake|galadril-vision|galadril-ray-worker\" }",
+          "tableType": "traces",
+          "limit": 20
+        }
+      ]
+    },
     {
       "collapsed": false,
       "datasource": {
@@ -34,7 +66,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 11
       },
       "id": 19,
       "panels": [],
@@ -61,7 +93,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 1,
+        "y": 12,
         "w": 6,
         "h": 8
       },
@@ -127,7 +159,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 1,
+        "y": 12,
         "w": 6,
         "h": 8
       },
@@ -196,7 +228,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 12,
         "w": 6,
         "h": 8
       },
@@ -260,7 +292,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 1,
+        "y": 12,
         "w": 6,
         "h": 8
       },
@@ -328,7 +360,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 21
       },
       "id": 20,
       "panels": [],
@@ -355,7 +387,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -415,7 +447,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 11,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -475,7 +507,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 19,
+        "y": 30,
         "w": 12,
         "h": 8
       },
@@ -535,7 +567,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 19,
+        "y": 30,
         "w": 6,
         "h": 8
       },
@@ -583,7 +615,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 38,
         "w": 12,
         "h": 8
       },
@@ -643,7 +675,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 27,
+        "y": 38,
         "w": 12,
         "h": 9
       },
@@ -703,7 +735,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 48
       },
       "id": 21,
       "panels": [
@@ -718,7 +750,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 36,
+            "y": 47,
             "w": 12,
             "h": 10
           },
@@ -756,7 +788,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 49
       },
       "id": 22,
       "panels": [],
@@ -783,7 +815,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 50,
         "w": 6,
         "h": 8
       },
@@ -848,7 +880,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 39,
+        "y": 50,
         "w": 6,
         "h": 8
       },
@@ -918,7 +950,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 50,
         "w": 12,
         "h": 10
       },
@@ -955,7 +987,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 60,
         "w": 12,
         "h": 10
       },
@@ -991,7 +1023,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 71
       },
       "id": 23,
       "panels": [
@@ -1007,7 +1039,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 68,
+            "y": 79,
             "w": 12,
             "h": 14
           },
@@ -1040,7 +1072,7 @@
           },
           "gridPos": {
             "x": 12,
-            "y": 68,
+            "y": 79,
             "w": 12,
             "h": 14
           },
@@ -1070,6 +1102,147 @@
       ],
       "title": "Continuous profiling",
       "type": "row"
+    },
+    {
+      "title": "Vision command latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, galadril_vision_outcome) (rate(galadril_vision_step_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50 {{galadril_vision_outcome}}",
+          "exemplar": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, galadril_vision_outcome) (rate(galadril_vision_step_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{galadril_vision_outcome}}",
+          "exemplar": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, galadril_vision_outcome) (rate(galadril_vision_step_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99 {{galadril_vision_outcome}}",
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 72
+      },
+      "id": 24
+    },
+    {
+      "title": "Vision phase latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "Ray round trip includes execution, scheduling, and transport. Phase percentiles cannot be added or subtracted to obtain a critical path.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, galadril_vision_timing_phase) (rate(galadril_vision_phase_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50 {{galadril_vision_timing_phase}}",
+          "exemplar": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, galadril_vision_timing_phase) (rate(galadril_vision_phase_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{galadril_vision_timing_phase}}",
+          "exemplar": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, galadril_vision_timing_phase) (rate(galadril_vision_phase_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99 {{galadril_vision_timing_phase}}",
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 72
+      },
+      "id": 25
+    },
+    {
+      "title": "Mean time by phase and pool",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "expr": "sum by (galadril_vision_timing_phase, galadril_vision_resource_class) (rate(galadril_vision_phase_duration_seconds_sum[$__rate_interval])) / sum by (galadril_vision_timing_phase, galadril_vision_resource_class) (rate(galadril_vision_phase_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "{{galadril_vision_timing_phase}} {{galadril_vision_resource_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 80
+      },
+      "id": 26
     }
   ],
   "templating": {
@@ -1108,6 +1281,14 @@
     ]
   },
   "links": [
+    {
+      "title": "Kafka & Ray nodes",
+      "type": "link",
+      "url": "/d/galadril-kafka-ray",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
     {
       "title": "Gateway",
       "type": "link",

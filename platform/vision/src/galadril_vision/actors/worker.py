@@ -16,6 +16,7 @@ from galadril_pipeline.events import (
 from galadril_pipeline.telemetry_contract import (
     SPAN_VISION_STEP_EXECUTE,
     VisionPhase,
+    VisionTimingPhase,
     vision_step_execute_attributes,
 )
 from opentelemetry.trace import SpanKind, StatusCode
@@ -28,6 +29,7 @@ from galadril_vision.telemetry.context import (
 )
 from galadril_vision.telemetry.failures import record_failure
 from galadril_vision.telemetry.logging import configure_logging
+from galadril_vision.telemetry.metrics import PipelineMetrics
 from galadril_vision.telemetry.tracing import configure_telemetry
 
 
@@ -42,7 +44,7 @@ class CommandProcessor(Protocol):
 class PipelineActor:
     """Validates, traces, and executes commands inside a Ray worker process."""
 
-    __slots__ = ("_processor",)
+    __slots__ = ("_metrics", "_processor")
 
     def __init__(
         self,
@@ -65,6 +67,8 @@ class PipelineActor:
                 enable_json_format=True,
                 otlp_logger_provider=logger_provider,
             )
+
+        self._metrics = PipelineMetrics()
 
     async def execute(
         self,
@@ -99,6 +103,12 @@ class PipelineActor:
                     record_failure(command, failure, failure.phase, span=span)
                 else:
                     span.set_status(StatusCode.OK)
+                finally:
+                    self._metrics.phase_completed(
+                        phase=VisionTimingPhase.EXECUTION,
+                        resource_class=command.resource_class,
+                        duration_seconds=time.perf_counter() - started_at,
+                    )
 
         result = StepResult(
             correlation_id=command.correlation_id,

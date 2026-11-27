@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from testcontainers.core.container import DockerContainer
@@ -211,6 +213,54 @@ class DatabaseExtensionsTest(unittest.TestCase):
             ),
             "t",
         )
+
+    def test_diagnostics_detect_lock_wait_under_rls(self) -> None:
+        self.sql(
+            "CREATE ROLE diagnostics_actor; "
+            "CREATE TABLE diagnostics_fixture (tenant text, payload integer); "
+            "INSERT INTO diagnostics_fixture VALUES ('one', 1), ('two', 2); "
+            "ALTER TABLE diagnostics_fixture ENABLE ROW LEVEL SECURITY; "
+            "ALTER TABLE diagnostics_fixture FORCE ROW LEVEL SECURITY; "
+            "CREATE POLICY tenant_scope ON diagnostics_fixture "
+            "USING (tenant = current_setting('app.tenant_id')); "
+            "GRANT SELECT, UPDATE ON diagnostics_fixture TO diagnostics_actor"
+        )
+        scoped = "BEGIN; SET LOCAL ROLE diagnostics_actor; SET LOCAL app.tenant_id = one;"
+        self.assertIn(
+            "one",
+            self.sql(
+                scoped + " SELECT tenant FROM diagnostics_fixture; COMMIT"
+            ),
+        )
+        self.assertNotIn(
+            "two",
+            self.sql(
+                scoped + " SELECT tenant FROM diagnostics_fixture; COMMIT"
+            ),
+        )
+        lock = " SELECT * FROM diagnostics_fixture FOR UPDATE;"
+        snapshot = (ROOT / "database/diagnostics/snapshot.sql").read_text()
+        with ThreadPoolExecutor(max_workers=2) as sessions:
+            blocker = sessions.submit(
+                self.sql, scoped + lock + " SELECT pg_sleep(8); COMMIT"
+            )
+            deadline = time.monotonic() + 5
+            while "t" != self.sql(
+                "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE wait_event = 'PgSleep')"
+            ):
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.1)
+            waiter = sessions.submit(self.sql, scoped + lock + " COMMIT")
+            while True:
+                report = json.loads(self.sql(snapshot))
+                if report["blocked_sessions"] > 0:
+                    break
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.1)
+            blocker.result(timeout=10)
+            waiter.result(timeout=10)
+        self.assertIn("Lock", {entry["wait_type"] for entry in report["waits"]})
+        self.assertNotIn("diagnostics_fixture", json.dumps(report))
 
     def test_pg_wait_sampling_collects_wait_events(self) -> None:
         self.sql("SELECT pg_sleep(0.2)")

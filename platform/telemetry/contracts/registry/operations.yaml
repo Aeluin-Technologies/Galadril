@@ -60,6 +60,16 @@ groups:
         brief: Phase that identified a pipeline failure.
         stability: stable
         annotations: {galadril.cardinality: bounded, galadril.classification: operational}
+      - id: galadril.vision.timing_phase
+        type:
+          members:
+            - {id: serialization, stability: stable, brief: Encode the command before Ray submission.}
+            - {id: ray_round_trip, stability: stable, brief: Submit the command and await its reply including queue time and computation.}
+            - {id: execution, stability: stable, brief: Run the validated command inside the actor.}
+            - {id: persistence, stability: stable, brief: Commit successful execution state to the ledger.}
+        brief: Fixed timing boundary for a Vision command.
+        stability: stable
+        annotations: {galadril.cardinality: bounded, galadril.classification: operational}
       - id: galadril.vision.retry_scheduled
         type: boolean
         brief: The worker confirmed publication of a subsequent attempt.
@@ -167,4 +177,14 @@ groups:
     brief: In-flight Ray task attempts by pool.
     stability: stable
     attributes:
+      - {ref: galadril.vision.resource_class, requirement_level: required}
+  - id: metric.galadril.vision.phase.duration
+    type: metric
+    metric_name: galadril.vision.phase.duration
+    instrument: histogram
+    unit: s
+    brief: Wall time spent in a fixed Vision boundary. Ray round trip includes execution.
+    stability: stable
+    attributes:
+      - {ref: galadril.vision.timing_phase, requirement_level: required}
       - {ref: galadril.vision.resource_class, requirement_level: required}

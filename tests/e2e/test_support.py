@@ -21,6 +21,7 @@ import authentication as e2e_authentication
 import clients as e2e_clients
 import environment as e2e_environment
 import httpx
+import pipeline_ingestion as e2e_pipeline_ingestion
 import pytest
 from assertions import (
     complete_tempo_trace,
@@ -47,10 +48,17 @@ from environment import (
     runfile,
 )
 from galadril_pipeline.config import StepType
-from galadril_pipeline.events import EventStatus, ResourceClass, StepResult
+from galadril_pipeline.events import (
+    EventStatus,
+    Failure,
+    ResourceClass,
+    StepResult,
+)
 from galadril_pipeline.telemetry_contract import (
     SPAN_VISION_STEP_DISPATCH,
     SPAN_VISION_STEP_EXECUTE,
+    ErrorCode,
+    VisionPhase,
 )
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
@@ -1217,6 +1225,7 @@ def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
     entries = [
         {
             "eventName": "galadril.vision.step.failed",
+            "traceId": base64.b64encode(bytes.fromhex("ab" * 16)).decode(),
             "body": {"stringValue": "private receipt"},
             "attributes": [
                 {"key": key, "value": value}
@@ -1228,12 +1237,64 @@ def test_pipeline_diagnostics_retain_only_structured_failure_details() -> None:
     logs = json.dumps(
         {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
     )
-    assert e2e_environment._pipeline_failure_events(
-        [logs, "partial {"]
-    ).splitlines() == [
-        f"galadril.vision.step.failed code=access_denied occurrence_id={occurrence} "
-        "phase=handler attempt=1 retry_scheduled=false"
+    assert e2e_environment._pipeline_failure_events([logs, "partial {"]) == [
+        {
+            "event": "galadril.vision.step.failed",
+            "code": ErrorCode.ACCESS_DENIED,
+            "occurrence_id": occurrence,
+            "trace_id": "ab" * 16,
+            "phase": VisionPhase.HANDLER,
+            "attempt": 1,
+            "retry_scheduled": False,
+        }
     ]
+
+
+def test_pipeline_failure_correlation_accepts_otlp_trace_ids() -> None:
+    failure = Failure(code=ErrorCode.INTERNAL, phase=VisionPhase.EXECUTE)
+    entries: list[dict[str, object]] = []
+    for phase in (
+        VisionPhase.EXECUTE,
+        VisionPhase.DISPATCH,
+        VisionPhase.RESULT,
+    ):
+        attributes: list[dict[str, object]] = [
+            {
+                "key": "galadril.error.code",
+                "value": {"stringValue": failure.code},
+            },
+            {
+                "key": "galadril.error.occurrence_id",
+                "value": {"stringValue": str(failure.occurrence_id)},
+            },
+            {"key": "galadril.vision.phase", "value": {"stringValue": phase}},
+            {"key": "galadril.pipeline.attempt", "value": {"intValue": "0"}},
+        ]
+        if phase is VisionPhase.RESULT:
+            attributes.append(
+                {
+                    "key": "galadril.vision.retry_scheduled",
+                    "value": {"boolValue": False},
+                }
+            )
+        entries.append(
+            {
+                "eventName": "galadril.vision.step.failed",
+                "traceId": "ab" * 16,
+                "attributes": attributes,
+            }
+        )
+    logs = json.dumps(
+        {"resourceLogs": [{"scopeLogs": [{"logRecords": entries}]}]}
+    )
+    observations = e2e_environment._pipeline_failure_events([logs])
+    assert e2e_pipeline_ingestion._has_correlated_failure(observations, failure)
+    assert not e2e_pipeline_ingestion._has_correlated_failure(
+        observations[:-1], failure
+    )
+    assert not e2e_pipeline_ingestion._has_correlated_failure(
+        observations, failure.model_copy(update={"occurrence_id": uuid4()})
+    )
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
@@ -1419,10 +1480,12 @@ def test_vision_readiness_requires_every_runtime_consumer_group() -> None:
     )
 
 
-def test_environment_preserves_structured_application_log_bodies() -> None:
-    """Keeps fatal OTLP diagnostics visible in Bazel failure artifacts."""
+def test_environment_preserves_structured_failure_events_without_metric_dumps() -> (
+    None
+):
+    """Keeps structured failures while bounding Collector console output."""
     collector = E2E_OTEL_COLLECTOR.read_text(encoding="utf-8")
-    assert "verbosity: detailed" in collector
+    assert "verbosity: basic" in collector
     assert "filter/drop_debug:" in collector
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
@@ -1617,9 +1680,11 @@ def test_spicedb_probe_allowed_supports_canonical_resources() -> None:
 
 def test_environment_tears_down_after_startup_failure(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Prevents leaked containers when Compose fails before yielding."""
     calls: list[str] = []
+    monkeypatch.setenv("TEST_UNDECLARED_OUTPUTS_DIR", str(tmp_path))
 
     async def load_images(_environment: ComposeEnvironment) -> None:
         calls.append("load")
@@ -1631,17 +1696,48 @@ def test_environment_tears_down_after_startup_failure(
     async def prepare_configuration(_environment: ComposeEnvironment) -> None:
         calls.append("prepare")
 
+    async def raw_logs(_environment: ComposeEnvironment) -> str:
+        calls.append("raw_logs")
+        return "sensitive legacy diagnostics"
+
+    async def failure_artifact(
+        _environment: ComposeEnvironment,
+    ) -> dict[str, object]:
+        calls.append("snapshot")
+        return {
+            "postgres": {"blocked_sessions": 1},
+            "failure_events": ["catalog event"],
+        }
+
     async def close(_environment: ComposeEnvironment) -> None:
+        report = json.loads(
+            (tmp_path / "integration-performance.json").read_text()
+        )
+        assert report["outcome"] == "failed"
+        assert report["diagnostics"] == {
+            "postgres": {"blocked_sessions": 1},
+            "failure_events": ["catalog event"],
+        }
+        assert set(report["phases_seconds"]) == {
+            "load_images",
+            "prepare_configuration",
+            "start_core",
+        }
+        assert "startup failed" not in json.dumps(report)
         calls.append("close")
 
     monkeypatch.setattr(ComposeEnvironment, "__init__", lambda _self: None)
     monkeypatch.setattr(ComposeEnvironment, "load_images", load_images)
+    monkeypatch.setattr(ComposeEnvironment, "logs", raw_logs)
     monkeypatch.setattr(
         ComposeEnvironment,
         "prepare_configuration",
         prepare_configuration,
     )
     monkeypatch.setattr(ComposeEnvironment, "start_core", start_core)
+    monkeypatch.setattr(
+        ComposeEnvironment, "failure_artifact", failure_artifact, raising=False
+    )
     monkeypatch.setattr(ComposeEnvironment, "close", close)
 
     async def exercise() -> None:
@@ -1652,13 +1748,14 @@ def test_environment_tears_down_after_startup_failure(
                 )
 
     asyncio.run(exercise())
-    assert calls == ["load", "prepare", "start", "close"]
+    assert calls == ["load", "prepare", "start", "snapshot", "close"]
 
 
 def test_environment_preserves_failure_when_teardown_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keeps the actionable service failure when best-effort cleanup fails."""
+    """Keeps the actionable local failure when best-effort cleanup fails."""
+    monkeypatch.delenv("TEST_UNDECLARED_OUTPUTS_DIR", raising=False)
 
     async def succeed(_environment: ComposeEnvironment) -> None:
         return None
