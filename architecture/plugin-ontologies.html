@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-5450a004.js";
+            window.path_to_searchindex_js = "../searchindex-59dbb76f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4625744d.js"></script>
@@ -209,8 +209,95 @@ Registry resolves those imports and records compiled generation dependencies.
 Install and publish Law dependencies before their importing packages. Registry
 returns a dependency-unavailable diagnostic when an approved module/version is
 missing; the Python catalog does not fetch or flatten those modules.</p>
-<p>Installing sources, publishing them, and binding a pipeline block remain separate
-authorized operations. There is no historical JSON overlay materializer.</p>
+<h2 id="tenant-installation"><a class="header" href="#tenant-installation">Tenant installation</a></h2>
+<p>The deployed Scribe inventory serves packages discovered by
+<code>PluginRegistry.ontology_packages()</code> over its private <code>/plugin-ontologies</code>
+route. Previously, Gateway could fetch that inventory but none of the public
+GOL operations consumed it. <code>golOntologies</code> reads the tenant source catalog
+from Registry. A package that has never been installed has no lakeFS revision
+to list and no generation for RustFS or IFC to disclose.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Operation or field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>golOntologyPackages</code></td><td>Operator-deployed packages visible to callers with tenant creation permission and the source-authoring clearance. Returns names and package/plugin versions.</td></tr>
+<tr><td><code>installGolOntologyPackage</code></td><td>Creates a draft from the selected deployment version and records its origin in the tenant’s immutable lakeFS history. Repeating an install with the same origin and source bytes reuses the workspace. Supplying the current revision allows an explicit update from the same plugin when the installed base sources remain intact.</td></tr>
+<tr><td><code>golOntologies</code></td><td>Tenant-installed or tenant-authored workspaces that pass live disclosure. An active generation and its source revision identify publication independently of the current draft.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The dashboard offers installation to authorized authors and opens the resulting
+draft in the standard GOL editor. The same authorization, validation and
+publication workflow applies to all installed drafts. The standard pipeline
+editor can bind a published generation after its independent authorization
+checks. Law’s current publication order is <code>law.socle</code>, <code>law.ecritures</code>,
+<code>law.moyens</code>, <code>law.preuves</code>, <code>law.contentieux</code>, and the three branch modules.
+Utils has one package with the original five mail modules and
+<code>communication.delivery</code>.</p>
+<p>Installation takes place on explicit request from a tenant administrator.
+Gateway establishes the tenant parent relationship before the initial source
+commit. That relationship derives authority from the tenant and assigns no
+personal ownership. Registry serializes tenant mutations and checks source
+digests. An explicit update preserves the tenant’s catalog name, rejects
+customized sources and keeps previous revisions and generations addressable.
+The existing authoring route
+cannot accept browser-supplied provenance. Existing source records deserialize
+with empty origin. Existing generations and ESKG evidence keep their immutable
+references. A tenant can retire an ontology through the existing
+dependency-checked deletion workflow.</p>
+<p>Operator deployment controls package availability. Set
+<code>GALADRIL_PLUGIN_ALLOWLIST</code> on each plugin-discovering workload to a
+comma-separated list of packaged plugin IDs. The default <code>*</code> discovers all
+packaged manifests, and an empty value discovers none. Restart the affected
+workloads after changing the deployment inventory and stop any disabled
+plugin-specific workers. The package catalog follows the new inventory.
+Tenant-authored revisions, published artifacts and their evidence are retained.
+Automated tenant activation, identity revocation and draining in-flight work
+remain separate lifecycle work.</p>
+<h2 id="versioned-domain-contracts"><a class="header" href="#versioned-domain-contracts">Versioned domain contracts</a></h2>
+<p>The core Law packages at 0.5.0 represent filing revisions and claims, arguments attributed to their
+authors, allegations, evidence assessments and judicial findings. A procedural
+event records the underlying document, the observed instant when known and
+the recording instant. Notifications carry separate dispatch and receipt
+evidence. Deadline assessments keep their assumptions and the verified
+versions of normative sources. The only new Law invariant checks that a stored
+filing revision number is positive.</p>
+<p>Utils package 1.1.0 adds mailbox-local occurrences, IMAP synchronization
+checkpoints, observed correspondents, reply drafts and delivery receipts.
+Occurrences refer to a logical message and retain a reference to the original
+object. The GOL invariants reject zero UIDVALIDITY and zero message UIDs.
+Mailbox-local values require the Mailbox compartment and owner-bound access.
+The existing message and Bcc contracts retain their module version and
+authority pins. The email extractor produces exact GOL UTC instants for message
+dates with a verified offset. The new occurrence, checkpoint and reply
+contracts can be validated through GOLC. Existing runtime producers still
+persist those workflows through their current store APIs.</p>
+<p><code>law.correspondence</code> is an optional package with a declared Utils plugin
+version and imports pinned to the GOL modules it uses. It links a case to
+an authorized mailbox occurrence and optional attachment, allegation or
+argument through references. The stored link has both Legal and Mailbox
+compartments. Law’s other packages remain available without Utils. Registry
+still requires the exact published, authorized GOL dependencies to compile
+the integration package.</p>
+<h2 id="pipeline-resource-actions"><a class="header" href="#pipeline-resource-actions">Pipeline resource actions</a></h2>
+<p>The registered capability parameter schema can declare
+<code>x-galadril-resource-binding</code> version 1. A binding names the resource class
+and chooses the <code>select</code>, <code>decide</code>, or <code>execute</code> operation. The selected
+capability version is required in authored pipelines. Gateway resolves binding
+metadata from the live deployment catalog when handling a trusted connector
+request. It checks pipeline authorization and the deployed revision before
+returning a resource selection. A chain with an unavailable step returns no
+external action policy, so a missing decision cannot silently become an
+automatic send. The connector still owns its account grants, decision ledger,
+approvals, idempotency and external effect.</p>
+<p>The source editor uses <code>x-galadril-match-pattern</code> to substitute an escaped
+resource selector into a declared pattern. The plugin owns the pattern, the
+account configuration constraints and the delivery modes accepted by its
+capabilities. The native email bridge and email-specific UI controls still use
+the existing private Utils API. Pipelines with previously unpinned external
+capabilities must be republished with explicit versions.</p>
 <h1 id="runtime-consumption"><a class="header" href="#runtime-consumption">Runtime consumption</a></h1>
 <p>Vision opens <code>/internal/gol/runtime</code> through the configured trusted Gateway
 endpoint. A dedicated opaque admission, minted at an authenticated workload
