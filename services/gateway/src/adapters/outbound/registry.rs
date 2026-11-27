@@ -9,8 +9,9 @@ use tonic::Code;
 use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::control_plane_store::{
     ControlPlaneStore, GolCompileApproval, GolDependencyPreview,
-    GolDiagnostic, GolFile, GolPublication, GolSummary, GolValidation,
-    GolWorkspace, GolWrite, PipelineExecution, PipelineOntologyBinding,
+    GolDiagnostic, GolFile, GolPackageOrigin, GolPublication, GolSummary,
+    GolValidation, GolWorkspace, GolWrite, PipelineExecution,
+    PipelineOntologyBinding,
 };
 use crate::application::ports::pipeline_store::{
     NewPipelineRevision, PipelineDefinition, PipelineStore,
@@ -72,6 +73,11 @@ impl RegistryStore {
             active_generation: value.active_generation,
             active_source_revision: value.active_source_revision,
             status: value.status,
+            origin: value.origin.map(|origin| GolPackageOrigin {
+                plugin_id: origin.plugin_id,
+                plugin_version: origin.plugin_version,
+                package_version: origin.package_version,
+            }),
         }
     }
 
@@ -343,6 +349,11 @@ impl ControlPlaneStore for RegistryStore {
                     .collect(),
                 author: user.into(),
                 expected_revision: input.expected_revision.map(str::to_owned),
+                origin: input.origin.map(|origin| proto::GolPackageOrigin {
+                    plugin_id: origin.plugin_id,
+                    plugin_version: origin.plugin_version,
+                    package_version: origin.package_version,
+                }),
             })
             .await
             .map_err(Self::request_error)?

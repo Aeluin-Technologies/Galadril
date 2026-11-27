@@ -30,6 +30,157 @@ async fn a_new_tenant_has_an_empty_catalog_without_provisioning_storage()
     Ok(())
 }
 
+#[tokio::test]
+async fn plugin_installation_is_idempotent_and_preserves_tenant_edits()
+-> anyhow::Result<()> {
+    use galadril_registry::domain::Registry;
+    use galadril_registry::gol_service::{GolPackageOrigin, SaveGolOntology};
+
+    let registry = Registry::new(memory::MemoryStore::default());
+    let origin = GolPackageOrigin {
+        plugin_id: "fixture".into(),
+        plugin_version: "2.0.0".into(),
+        package_version: "1.0.0".into(),
+    };
+    let source = "ontology fixture.contract version \"1.0.0\" {}";
+    let write = |text: &str, expected_revision, origin| SaveGolOntology {
+        tenant_id: "tenant_a",
+        ontology_id: "fixture.contract",
+        display_name: "Fixture",
+        files: vec![GolFile {
+            path: "contract.gol".into(),
+            text: text.into(),
+        }],
+        author: "alice",
+        expected_revision,
+        origin,
+    };
+    let installed = registry
+        .save_gol_ontology(write(source, None, Some(origin.clone())))
+        .await?;
+    let retried = registry
+        .save_gol_ontology(write(source, None, Some(origin.clone())))
+        .await?;
+    assert_eq!(
+        retried.summary.source_revision,
+        installed.summary.source_revision
+    );
+    assert_eq!(retried.summary.origin.as_ref(), Some(&origin));
+    assert!(retried.summary.active_generation.is_none());
+    assert!(
+        registry
+            .list_gol_ontologies("tenant_b", 10)
+            .await?
+            .is_empty()
+    );
+
+    let edited = registry
+        .save_gol_ontology(write(
+            "ontology fixture.contract version \"1.0.1\" {}",
+            Some(&installed.summary.source_revision),
+            None,
+        ))
+        .await?;
+    assert_eq!(edited.summary.origin.as_ref(), Some(&origin));
+    assert!(
+        registry
+            .save_gol_ontology(write(source, None, Some(origin)))
+            .await
+            .is_err()
+    );
+    let current = registry
+        .gol_workspace("tenant_a", "fixture.contract", None)
+        .await?;
+    assert_eq!(
+        current.summary.source_revision,
+        edited.summary.source_revision
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn plugin_upgrade_is_compare_and_swap_on_unmodified_sources()
+-> anyhow::Result<()> {
+    use galadril_registry::domain::Registry;
+    use galadril_registry::gol_service::{GolPackageOrigin, SaveGolOntology};
+
+    let registry = Registry::new(memory::MemoryStore::default());
+    let write =
+        |version: &str, name, revision, packaged: bool| SaveGolOntology {
+            tenant_id: "tenant_a",
+            ontology_id: "fixture.contract",
+            display_name: name,
+            files: vec![GolFile {
+                path: "contract.gol".into(),
+                text: format!(
+                    "ontology fixture.contract version \"{version}\" {{}}"
+                ),
+            }],
+            author: "alice",
+            expected_revision: revision,
+            origin: packaged.then(|| GolPackageOrigin {
+                plugin_id: "fixture".into(),
+                plugin_version: version.into(),
+                package_version: version.into(),
+            }),
+        };
+    let install = registry
+        .save_gol_ontology(write("1.0.0", "Initial", None, true))
+        .await?;
+    let renamed = registry
+        .save_gol_ontology(write(
+            "1.0.0",
+            "Tenant name",
+            Some(&install.summary.source_revision),
+            false,
+        ))
+        .await?;
+    let updated = registry
+        .save_gol_ontology(write(
+            "1.1.0",
+            "New package title",
+            Some(&renamed.summary.source_revision),
+            true,
+        ))
+        .await?;
+    assert_eq!(updated.summary.display_name, "Tenant name");
+    let previous = registry
+        .gol_workspace(
+            "tenant_a",
+            "fixture.contract",
+            Some(&renamed.summary.source_revision),
+        )
+        .await?;
+    assert_eq!(
+        previous
+            .summary
+            .origin
+            .as_ref()
+            .map(|origin| origin.package_version.as_str()),
+        Some("1.0.0")
+    );
+    let customized = registry
+        .save_gol_ontology(write(
+            "1.1.1",
+            "Tenant name",
+            Some(&updated.summary.source_revision),
+            false,
+        ))
+        .await?;
+    assert!(
+        registry
+            .save_gol_ontology(write(
+                "1.2.0",
+                "Update",
+                Some(&customized.summary.source_revision),
+                true
+            ))
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
 #[test]
 fn metadata_grants_share_the_canonical_authorization_id_encoding() {
     use galadril_registry::gol::authorization_object_id;
@@ -150,6 +301,7 @@ async fn unfinished_sources_can_be_saved_but_not_published_without_authorities()
             }],
             author: "alice",
             expected_revision: None,
+            origin: None,
         })
         .await?;
     let workspace = registry
@@ -216,8 +368,8 @@ async fn a_companion_module_import_blocks_deleting_its_source_package()
     use galadril_registry::domain::Registry;
     use galadril_registry::gol_service::SaveGolOntology;
     let registry = Registry::new(memory::MemoryStore::default());
-    registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.bundle",display_name:"Bundle",files:vec![GolFile {path:"bundle.gol".into(),text:"ontology workspace.bundle version \"1.0.0\" {} ontology workspace.companion version \"1.0.0\" {}".into()}],author:"alice",expected_revision:None}).await?;
-    let consumer=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.consumer",display_name:"Consumer",files:vec![GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import workspace.companion version \"1.0.0\"; }".into()}],author:"alice",expected_revision:None}).await?;
+    registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.bundle",display_name:"Bundle",files:vec![GolFile {path:"bundle.gol".into(),text:"ontology workspace.bundle version \"1.0.0\" {} ontology workspace.companion version \"1.0.0\" {}".into()}],author:"alice",expected_revision:None,origin:None}).await?;
+    let consumer=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.consumer",display_name:"Consumer",files:vec![GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import workspace.companion version \"1.0.0\"; }".into()}],author:"alice",expected_revision:None,origin:None}).await?;
     let deleted = registry
         .delete_gol_ontology(
             "tenant_a",
@@ -312,6 +464,7 @@ async fn runtime_binding_resolves_compiled_step_from_deployed_root()
         }],
         author: "alice",
         expected_revision: None,
+        origin: None,
     }).await?;
     let child_definition = json!({
         "sources": [{"id": "input"}],

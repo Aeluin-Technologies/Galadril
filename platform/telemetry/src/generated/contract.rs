@@ -297,6 +297,8 @@ pub const ATTR_VISION_TIMING_PHASE: &str = "galadril.vision.timing_phase";
 pub const SPAN_AMARTH_EFFECT_ESTIMATE: &str = "galadril.amarth.effect.estimate";
 /// Evaluates structural and contextual authority for an operation.
 pub const SPAN_GATEWAY_AUTHORIZATION_EVALUATE: &str = "galadril.gateway.authorization.evaluate";
+/// Installs a versioned plugin source package in a tenant.
+pub const SPAN_GOL_PACKAGE_INSTALL: &str = "galadril.gol.package.install";
 /// Acquires the ontology binding for an admitted execution.
 pub const SPAN_GOL_RUNTIME_BIND: &str = "galadril.gol.runtime.bind";
 /// Evaluates a proposed information flow under the active policy.
@@ -317,6 +319,8 @@ pub const SPAN_VISION_STEP_DISPATCH: &str = "galadril.vision.step.dispatch";
 pub const SPAN_VISION_STEP_EXECUTE: &str = "galadril.vision.step.execute";
 /// Reports the decision of a Gateway authorization evaluation.
 pub const EVENT_GATEWAY_AUTHORIZATION_CHECK: &str = "galadril.gateway.authorization.check";
+/// Reports completion of a plugin ontology installation.
+pub const EVENT_GOL_PACKAGE_INSTALL_COMPLETED: &str = "galadril.gol.package.install_completed";
 /// Reports the safe failure returned at the private Gateway worker boundary.
 pub const EVENT_GOL_WORKER_FAILED: &str = "galadril.gol.worker.failed";
 /// Reports the safe failure identity at the phase observing it.
@@ -360,6 +364,19 @@ pub fn emit_gateway_authorization_check(
             "galadril.error.occurrence_id" = error_occurrence_id,
         },
         "Reports the decision of a Gateway authorization evaluation."
+    );
+}
+
+/// Reports completion of a plugin ontology installation.
+pub fn emit_gol_package_install_completed(
+    error_code: Option<ErrorCode>,
+) {
+    tracing::info!(
+        name: EVENT_GOL_PACKAGE_INSTALL_COMPLETED,
+        {
+            "galadril.error.code" = error_code.map(ErrorCode::as_str),
+        },
+        "Reports completion of a plugin ontology installation."
     );
 }
 

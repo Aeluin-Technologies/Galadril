@@ -60,6 +60,64 @@ pub struct Summary {
     pub active_generation: Option<String>,
     pub active_source_revision: Option<String>,
     pub status: String,
+    pub origin: Option<PackageOrigin>,
+}
+
+#[derive(GraphQLObject)]
+#[graphql(name = "GolPackageOrigin")]
+pub struct PackageOrigin {
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub package_version: String,
+}
+
+impl From<domain::GolPackageOrigin> for PackageOrigin {
+    fn from(value: domain::GolPackageOrigin) -> Self {
+        Self {
+            plugin_id: value.plugin_id,
+            plugin_version: value.plugin_version,
+            package_version: value.package_version,
+        }
+    }
+}
+
+/// Deployment availability is independent of every tenant publication.
+#[derive(GraphQLObject)]
+#[graphql(name = "GolOntologyPackage")]
+pub struct OntologyPackage {
+    pub ontology_id: String,
+    pub display_name: String,
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub package_version: String,
+    pub required_plugins: Vec<PluginRequirement>,
+}
+
+#[derive(GraphQLObject)]
+#[graphql(name = "GolPluginRequirement")]
+pub struct PluginRequirement {
+    pub plugin_id: String,
+    pub plugin_version: String,
+}
+
+impl From<domain::PluginGolPackage> for OntologyPackage {
+    fn from(value: domain::PluginGolPackage) -> Self {
+        Self {
+            ontology_id: value.id,
+            display_name: value.name,
+            plugin_id: value.plugin_id,
+            plugin_version: value.plugin_version,
+            package_version: value.version,
+            required_plugins: value
+                .requires_plugins
+                .into_iter()
+                .map(|(plugin_id, plugin_version)| PluginRequirement {
+                    plugin_id,
+                    plugin_version,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<domain::GolSummary> for Summary {
@@ -71,6 +129,7 @@ impl From<domain::GolSummary> for Summary {
             active_generation: value.active_generation,
             active_source_revision: value.active_source_revision,
             status: value.status,
+            origin: value.origin.map(Into::into),
         }
     }
 }

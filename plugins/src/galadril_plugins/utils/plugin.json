@@ -79,7 +79,14 @@
             "default": true
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "x-galadril-resource-binding": {
+          "version": 1,
+          "resource": "mailbox",
+          "operation": {
+            "kind": "decide"
+          }
+        }
       }
     },
     {
@@ -110,18 +117,30 @@
             "title": "Reply template",
             "description": "Variables: {{ sender }}, {{ recipient }}, {{ subject }}, {{ body }}, {{ date }}.",
             "default": "Hello {{ sender }},\n\nThank you for your message about {{ subject }}.",
-            "format": "multiline"
+            "format": "multiline",
+            "x-galadril-visible-when": {
+              "parameter": "generation",
+              "equals": "template"
+            }
           },
           "model_alias": {
             "type": "string",
             "title": "Scribe model alias",
-            "format": "model-alias"
+            "format": "model-alias",
+            "x-galadril-visible-when": {
+              "parameter": "generation",
+              "equals": "scribe"
+            }
           },
           "instructions": {
             "type": "string",
             "title": "Instructions for Scribe",
             "default": "Write a helpful, accurate reply. Do not invent facts or commitments.",
-            "format": "multiline"
+            "format": "multiline",
+            "x-galadril-visible-when": {
+              "parameter": "generation",
+              "equals": "scribe"
+            }
           },
           "include_attachments": {
             "type": "boolean",
@@ -167,7 +186,8 @@
             "title": "Send from",
             "format": "email-sender-account",
             "default": "source",
-            "description": "The receiving account or another connected SMTP account you can use."
+            "description": "The receiving account or another connected SMTP account you can use.",
+            "pattern": "^(source|[a-fA-F0-9]{32})$"
           },
           "delivery_mode": {
             "type": "string",
@@ -185,7 +205,16 @@
         "required": [
           "sender_account_id",
           "delivery_mode"
-        ]
+        ],
+        "x-galadril-resource-binding": {
+          "version": 1,
+          "resource": "mailbox",
+          "operation": {
+            "kind": "execute",
+            "parameter": "sender_account_id",
+            "mode": "delivery_mode"
+          }
+        }
       }
     },
     {
@@ -255,7 +284,8 @@
             "type": "string",
             "title": "Watch mailbox",
             "format": "email-source-account",
-            "description": "New mail from this IMAP account triggers the deployed pipeline. Document indexing is independent."
+            "description": "New mail from this IMAP account triggers the deployed pipeline. Document indexing is independent.",
+            "pattern": "^[a-fA-F0-9]{32}$"
           }
         },
         "required": [
@@ -263,7 +293,19 @@
           "source_kind",
           "schema_path",
           "account_id"
-        ]
+        ],
+        "x-galadril-resource-binding": {
+          "version": 1,
+          "resource": "mailbox",
+          "operation": {
+            "kind": "select",
+            "parameter": "account_id"
+          }
+        },
+        "x-galadril-match-pattern": {
+          "parameter": "account_id",
+          "template": "email-{value}-[a-f0-9]+[.]json$"
+        }
       }
     },
     {
@@ -341,9 +383,10 @@
     {
       "id": "communication.mail",
       "name": "Email and documents",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
-        "mail.gol"
+        "mail.gol",
+        "delivery.gol"
       ],
       "contracts": {
         "utils.input.email": {

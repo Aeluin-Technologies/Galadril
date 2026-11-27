@@ -1,0 +1,34 @@
+// Case evidence may point to a protected message without copying its contents.
+
+ontology law.correspondence version "1.0.0" {
+    import law.socle version "0.5.0" as Cases;
+    import law.preuves version "0.5.0" as Evidence;
+    import law.moyens version "0.5.0" as Arguments;
+    import communication.delivery version "1.0.0" as Mailbox;
+    import documents.attachments version "1.0.0" as Attachments;
+    import type gal.time::Instant version "1.0.0";
+
+    security label CaseCorrespondence {
+        classification: Restricted;
+        compartments: [Legal, Mailbox];
+    }
+
+    entity CommunicationEvidence {
+        field case_record: Ref<law.socle.Case> @label(CaseCorrespondence);
+        field occurrence: Ref<communication.delivery.MessageOccurrence> @label(CaseCorrespondence);
+        field attachment: Option<Ref<documents.attachments.Attachment>> @label(CaseCorrespondence);
+        field allegation: Option<Ref<law.preuves.Allegation>> @label(CaseCorrespondence);
+        field argument: Option<Ref<law.moyens.Argument>> @label(CaseCorrespondence);
+        field linked_at: gal.time.Instant @label(CaseCorrespondence);
+        field rationale: String @label(CaseCorrespondence);
+    }
+
+    access CommunicationEvidence {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+}

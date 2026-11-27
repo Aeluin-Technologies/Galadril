@@ -273,7 +273,7 @@ class EmailPipeline(unittest.TestCase):
             {
                 "subject": "Meeting",
                 "id": "<one@example.org>",
-                "date": "2026-10-26T09:30:00+00:00",
+                "date": "2026-10-26T09:30:00.000000000Z",
             },
         )
         other = asyncio.run(
@@ -329,6 +329,34 @@ class ReplyTemplates(unittest.TestCase):
 
 
 class AuthoredLayout(unittest.TestCase):
+    def test_external_resource_binding_requires_an_exact_capability_version(
+        self,
+    ) -> None:
+        registry = PluginRegistry.discover()
+        source = {
+            "id": "mail",
+            "account_id": "a" * 32,
+            "topic": "raw",
+            "match_pattern": ".*",
+            "schema_path": "schemas/avro/email.avsc",
+            "parser": "json",
+            "source_kind": "email",
+            "capability_id": "utils.input.email",
+        }
+        with self.assertRaisesRegex(ValueError, "version"):
+            registry.validate_pipeline(
+                {"name": "Mail", "sources": [source], "pipeline": []}
+            )
+        source["capability_version"] = "1.0.0"
+        registry.validate_pipeline(
+            {"name": "Mail", "sources": [source], "pipeline": []}
+        )
+        source["account_id"] = "bad-id"
+        with self.assertRaises(ValueError):
+            registry.validate_pipeline(
+                {"name": "Mail", "sources": [source], "pipeline": []}
+            )
+
     def test_mailbox_selection_survives_runtime_source_validation(self) -> None:
         source = Source.model_validate(
             {

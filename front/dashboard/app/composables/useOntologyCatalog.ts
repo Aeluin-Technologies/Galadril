@@ -1,7 +1,13 @@
 /** Requests only GOL DTOs and never logs source text or protected metadata. */
 import { trace, SpanStatusCode } from "@opentelemetry/api";
-import type { GolSchemaProfile, GolSourceFile } from "~/types/ontology";
+import type {
+  GolOntologyPackage,
+  GolSchemaProfile,
+  GolSourceFile,
+} from "~/types/ontology";
 import {
+  parseGolOntologyPackages,
+  parseGolSummary,
   parseGolSummaries,
   parseGolWorkspace,
   parseGolValidation,
@@ -9,8 +15,8 @@ import {
   parseGolSymbols,
 } from "~/utils/ontology";
 
-const summary =
-  "ontologyId displayName sourceRevision activeGeneration activeSourceRevision status";
+const origin = "pluginId pluginVersion packageVersion";
+const summary = `ontologyId displayName sourceRevision activeGeneration activeSourceRevision status origin{${origin}}`;
 const diagnostics = "code message path start end severity";
 const dependencies = "ontologyId generation sourceRevision";
 const workspace = `summary{${summary}} files{path text} diagnostics{${diagnostics}} dependencies{${dependencies}}`;
@@ -77,6 +83,32 @@ export function useOntologyCatalog() {
             `{golOntologies(limit:100){${summary}}}`,
           )
         ).golOntologies,
+      );
+    },
+    async packages() {
+      return parseGolOntologyPackages(
+        (
+          await query<{ golOntologyPackages: unknown }>(
+            `{golOntologyPackages{ontologyId displayName ${origin} requiredPlugins{pluginId pluginVersion}}}`,
+          )
+        ).golOntologyPackages,
+      );
+    },
+    async install(item: GolOntologyPackage, expectedRevision?: string) {
+      const { ontologyId, pluginId, pluginVersion, packageVersion } = item;
+      return parseGolSummary(
+        (
+          await query<{ installGolOntologyPackage: unknown }>(
+            `mutation($ontologyId:String!,$pluginId:String!,$pluginVersion:String!,$packageVersion:String!,$expectedRevision:String){installGolOntologyPackage(ontologyId:$ontologyId,pluginId:$pluginId,pluginVersion:$pluginVersion,packageVersion:$packageVersion,expectedRevision:$expectedRevision){${summary}}}`,
+            {
+              ontologyId,
+              pluginId,
+              pluginVersion,
+              packageVersion,
+              expectedRevision,
+            },
+          )
+        ).installGolOntologyPackage,
       );
     },
     async workspace(ontologyId: string) {

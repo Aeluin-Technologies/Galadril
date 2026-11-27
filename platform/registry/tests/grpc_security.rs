@@ -29,6 +29,7 @@ async fn a_loopback_workload_cannot_read_source_without_the_gateway_credential()
             }],
             author: "alice",
             expected_revision: None,
+            origin: None,
         })
         .await?;
     let request = || {
@@ -103,7 +104,7 @@ async fn a_loopback_workload_cannot_read_source_without_the_gateway_credential()
 async fn dependency_preview_does_not_open_an_unapproved_import() -> Result<()>
 {
     let registry = Registry::new(memory::MemoryStore::default());
-    let source=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.public",display_name:"Public",files:vec![GolFile {path:"public.gol".into(),text:"ontology workspace.public version \"1.0.0\" { import workspace.secret version \"1.0.0\"; entity Public { field value: workspace.secret.Hidden; } }".into()}],author:"alice",expected_revision:None}).await?;
+    let source=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.public",display_name:"Public",files:vec![GolFile {path:"public.gol".into(),text:"ontology workspace.public version \"1.0.0\" { import workspace.secret version \"1.0.0\"; entity Public { field value: workspace.secret.Hidden; } }".into()}],author:"alice",expected_revision:None,origin:None}).await?;
     let preview = registry
         .preview_gol_dependencies(
             "tenant_a",

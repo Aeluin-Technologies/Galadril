@@ -16,6 +16,43 @@ from galadril_plugins import registry as module
 from galadril_plugins.registry import Binding, PluginManifest, UnavailablePlugin
 
 
+@pytest.mark.parametrize(
+    ("selection", "expected"),
+    [("", set()), ("law", {"law"}), ("utils", {"utils"})],
+)
+def test_operator_can_deploy_one_plugin_or_none(
+    monkeypatch: pytest.MonkeyPatch,
+    selection: str,
+    expected: set[str],
+) -> None:
+    monkeypatch.setenv("GALADRIL_PLUGIN_ALLOWLIST", selection)
+    registry = PluginRegistry.discover()
+    assert {
+        package["plugin_id"] for package in registry.ontology_packages()
+    } == expected
+
+
+def test_a_misspelled_allowlist_fails_before_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GALADRIL_PLUGIN_ALLOWLIST", "missing_fixture")
+    with pytest.raises(ValueError, match="allowlist"):
+        PluginRegistry.discover()
+
+
+def test_correspondence_contract_requires_utils_without_disabling_law(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for selection, expected in (("law,utils", True), ("law", False)):
+        monkeypatch.setenv("GALADRIL_PLUGIN_ALLOWLIST", selection)
+        available = {
+            package["id"]
+            for package in PluginRegistry.discover().ontology_packages()
+        }
+        assert ("law.correspondence" in available) == expected
+        assert "law.socle" in available
+
+
 def manifest(identifier: str, *, model: bool = False) -> PluginManifest:
     kind = CapabilityKind.MODEL if model else CapabilityKind.ALGORITHM
     capability = Capability(

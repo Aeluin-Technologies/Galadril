@@ -4,7 +4,7 @@ pub mod chat_tools;
 pub mod document_compiler;
 pub mod gol;
 pub mod graphql;
-mod mail_policy;
+mod resource_policy;
 pub mod mcp_tools;
 pub mod pengolo;
 pub mod sso;

@@ -1,17 +1,18 @@
 //! Authenticated GOL lifecycle operations and separately authorized
 //! disclosures.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::application::ports::audit_store::{AuditEvent, AuditFilter};
 use crate::application::ports::control_plane_store::{
-    ControlPlaneStore, GolDisclosure, GolPublication, GolSummary,
-    GolValidation, GolWorkspace, GolWrite, PipelineExecution,
-    PipelineOntologyBinding,
+    ControlPlaneStore, GolDisclosure, GolPackageOrigin, GolPublication,
+    GolSummary, GolValidation, GolWorkspace, GolWrite, PipelineExecution,
+    PipelineOntologyBinding, PluginGolPackage,
 };
+use crate::application::ports::conversation_agent::ConversationAgent;
 use crate::application::usecases::audit::{
     AuditAction, AuditService, AuditTarget,
 };
@@ -29,6 +30,7 @@ pub struct ControlPlaneService {
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
     disclosure: Arc<dyn GolDisclosure>,
+    plugin_catalog: Option<Arc<dyn ConversationAgent>>,
 }
 
 impl ControlPlaneService {
@@ -83,6 +85,175 @@ impl ControlPlaneService {
             auth,
             audit,
             disclosure,
+            plugin_catalog: None,
+        }
+    }
+
+    /// Connects the deployment inventory independently of chat availability.
+    pub fn with_plugin_catalog(
+        mut self,
+        catalog: Arc<dyn ConversationAgent>,
+    ) -> Self {
+        self.plugin_catalog = Some(catalog);
+        self
+    }
+
+    async fn deployed_gol_packages(&self) -> Result<Vec<PluginGolPackage>> {
+        let Some(catalog) = &self.plugin_catalog else {
+            return Ok(Vec::new());
+        };
+        let packages = catalog.plugin_ontologies().await?;
+        let mut ids = HashSet::with_capacity(packages.len());
+        for package in &packages {
+            Self::validate_ontology_id(&package.id)?;
+            package.origin().validate()?;
+            ensure!(
+                ids.insert(package.id.as_str()),
+                "duplicate deployed GOL ontology identity"
+            );
+        }
+        Ok(packages)
+    }
+
+    /// Package discovery grants neither source access nor publication.
+    pub async fn gol_ontology_packages(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+    ) -> Result<Vec<PluginGolPackage>> {
+        if !self
+            .gol_can_manage(
+                tenant,
+                user,
+                context,
+                None,
+                Permission::CreateOntology,
+            )
+            .await?
+        {
+            return Ok(Vec::new());
+        }
+        self.deployed_gol_packages().await
+    }
+
+    /// Creates or upgrades a tenant draft from a deployed package.
+    #[tracing::instrument(name = "galadril.gol.package.install", skip_all, fields(galadril.error.code = tracing::field::Empty))]
+    pub async fn install_gol_ontology_package(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        ontology_id: &str,
+        origin: &GolPackageOrigin,
+        expected_revision: Option<&str>,
+    ) -> Result<GolSummary> {
+        Self::validate_ontology_id(ontology_id)?;
+        origin.validate()?;
+        ensure!(
+            self.ontology_permission(
+                tenant,
+                user,
+                context,
+                None,
+                Permission::CreateOntology
+            )
+            .await?,
+            "GOL operation denied"
+        );
+        self.disclosure
+            .admit_creation(tenant, user, context, ontology_id)
+            .await?;
+        if let Some(revision) = expected_revision {
+            Self::validate_revision(revision)?;
+            self.require_gol_permission(
+                tenant,
+                user,
+                context,
+                ontology_id,
+                Permission::Edit,
+            )
+            .await?;
+            self.disclosure
+                .admit_source(
+                    tenant,
+                    user,
+                    context,
+                    ontology_id,
+                    Some(revision),
+                )
+                .await?;
+        }
+        let package = self
+            .deployed_gol_packages()
+            .await?
+            .into_iter()
+            .find(|package| {
+                package.id == ontology_id && package.origin() == *origin
+            })
+            .context("GOL package version unavailable")?;
+        let operation = self
+            .audit
+            .begin(
+                tenant,
+                user,
+                AuditTarget::new(
+                    AuditAction::SaveOntologyDraft,
+                    "ontology",
+                    ontology_id,
+                ),
+                context,
+            )
+            .await?;
+        let result = async {
+            self.disclosure
+                .admit_creation(tenant, user, context, ontology_id)
+                .await?;
+            if expected_revision.is_none() {
+                // Register tenant ownership first so an interrupted install
+                // remains discoverable.
+                self.auth
+                    .upsert_relationship(
+                        "ontology",
+                        &format!("{tenant}/{ontology_id}"),
+                        "parent",
+                        "tenant",
+                        tenant,
+                    )
+                    .await?;
+            }
+            let workspace = self
+                .store
+                .save_gol_ontology(
+                    tenant,
+                    user,
+                    GolWrite {
+                        ontology_id,
+                        display_name: &package.name,
+                        files: &package.files,
+                        expected_revision,
+                        origin: Some(package.origin()),
+                    },
+                )
+                .await?;
+            Ok(workspace.summary)
+        }
+        .await;
+        match result {
+            Ok(summary) => {
+                operation.succeeded().await?;
+                galadril_telemetry::contract::emit_gol_package_install_completed(None);
+                Ok(summary)
+            },
+            Err(error) => {
+                operation.failed("gol_package_install_failed").await?;
+                let code =
+                    galadril_telemetry::contract::ErrorCode::Unavailable;
+                tracing::Span::current()
+                    .record("galadril.error.code", code.as_str());
+                galadril_telemetry::contract::emit_gol_package_install_completed(Some(code));
+                Err(error)
+            },
         }
     }
 
@@ -213,6 +384,7 @@ impl ControlPlaneService {
                     candidate.display_name.clone_from(&candidate.ontology_id);
                     candidate.source_revision.clone_from(active_source);
                     candidate.status = "published".into();
+                    candidate.origin = None;
                     tracing::debug!(event.name = "gol.catalog.draft_redacted");
                 }
                 result.push(candidate);

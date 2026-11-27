@@ -467,3 +467,13 @@ js_test(
 )
 
 exports_files(["server/auth/telemetry-contract.ts"], visibility = ["//platform/telemetry/contracts:__pkg__"])
+
+filegroup(
+    name = "plugin_boundary_sources",
+    srcs = [
+        "app/components/Pipeline/PluginParameters.vue",
+        "app/composables/useOntologyCatalog.ts",
+        "app/utils/plugin-blocks.ts",
+    ],
+    visibility = ["//tests/architecture:__pkg__"],
+)

@@ -1,20 +1,18 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.administratif version "0.4.0" {
-    import law.contentieux version "0.4.0" as LawContentieux;
-    import law.preuves version "0.4.0" as LawPreuves;
-    import law.socle version "0.4.0" as LawSocle;
+ontology law.administratif version "0.5.0" {
+    import law.contentieux version "0.5.0" as LawContentieux;
+    import law.preuves version "0.5.0" as LawPreuves;
+    import law.socle version "0.5.0" as LawSocle;
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
     }
-    enum ProceedingDegree { premier_degre, second_degre, hors_degre }
-    enum ProceedingStatus { a_introduire, en_cours, terminee }
     entity Proceeding {
         field number: Option<String> @label(LegalData);
         field procedure: Option<String> @label(LegalData);
-        field degree: Option<ProceedingDegree> @label(LegalData);
-        field status: Option<ProceedingStatus> @label(LegalData);
+        field degree: Option<law.socle.ProceedingDegree> @label(LegalData);
+        field status: Option<law.socle.ProceedingStatus> @label(LegalData);
     }
     enum CourtKind { tribunal_administratif, cour_administrative_appel, conseil_etat }
     entity Court {
@@ -44,52 +42,6 @@ ontology law.administratif version "0.4.0" {
         role target: law.preuves.Document [0..*];
     }
     access Proceeding {
-        resource: "gol_resource";
-        permission read_access {
-            relation: "read";
-            cedar: "Gol::Action::\"read\"";
-        }
-        permission write_access {
-            relation: "write";
-            cedar: "Gol::Action::\"write\"";
-        }
-        permission describe {
-            relation: "describe";
-            cedar: "Gol::Action::\"describe\"";
-        }
-        permission transfer {
-            relation: "transfer";
-            cedar: "Gol::Action::\"transfer\"";
-        }
-        permission execute {
-            relation: "execute";
-            cedar: "Gol::Action::\"execute\"";
-        }
-    }
-    access ProceedingDegree {
-        resource: "gol_resource";
-        permission read_access {
-            relation: "read";
-            cedar: "Gol::Action::\"read\"";
-        }
-        permission write_access {
-            relation: "write";
-            cedar: "Gol::Action::\"write\"";
-        }
-        permission describe {
-            relation: "describe";
-            cedar: "Gol::Action::\"describe\"";
-        }
-        permission transfer {
-            relation: "transfer";
-            cedar: "Gol::Action::\"transfer\"";
-        }
-        permission execute {
-            relation: "execute";
-            cedar: "Gol::Action::\"execute\"";
-        }
-    }
-    access ProceedingStatus {
         resource: "gol_resource";
         permission read_access {
             relation: "read";

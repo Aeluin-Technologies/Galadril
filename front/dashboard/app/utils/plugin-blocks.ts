@@ -77,6 +77,7 @@ export interface ParameterField {
   advanced?: boolean;
   minimum?: number;
   maximum?: number;
+  visibleWhen?: { parameter: string; equals: string };
 }
 export function parameterFields(capability: PluginBlock): ParameterField[] {
   const schema = parseParameters(capability.parametersSchemaJson);
@@ -89,6 +90,7 @@ export function parameterFields(capability: PluginBlock): ParameterField[] {
       !["string", "integer", "number", "boolean"].includes(property.type)
     )
       return [];
+    const condition = property["x-galadril-visible-when"];
     return [
       {
         key,
@@ -106,6 +108,12 @@ export function parameterFields(capability: PluginBlock): ParameterField[] {
           typeof property.minimum === "number" ? property.minimum : undefined,
         maximum:
           typeof property.maximum === "number" ? property.maximum : undefined,
+        visibleWhen:
+          object(condition) &&
+          typeof condition.parameter === "string" &&
+          typeof condition.equals === "string"
+            ? { parameter: condition.parameter, equals: condition.equals }
+            : undefined,
         required: required.includes(key),
         options:
           Array.isArray(property.enum) &&
@@ -137,7 +145,7 @@ export function pluginConfig(capability: PluginBlock): NodeConfig {
       : {}),
   };
   return capability.stepType === "source"
-    ? sourceConfig(config, defaults)
+    ? sourceConfig(config, defaults, schema)
     : { ...config, params: defaults };
 }
 export function sourceParameters(config: NodeConfig): Record<string, Json> {
@@ -153,19 +161,30 @@ export function sourceParameters(config: NodeConfig): Record<string, Json> {
 export function sourceConfig(
   config: NodeConfig,
   parameters: Record<string, Json>,
+  schema: Record<string, unknown>,
 ): NodeConfig {
   const read = (key: string): string | undefined =>
     typeof parameters[key] === "string" ? parameters[key] : undefined;
   const types = parameters.content_types;
+  const binding = schema["x-galadril-match-pattern"];
+  let matchPattern = read("match_pattern") ?? ".*";
+  if (
+    object(binding) &&
+    typeof binding.parameter === "string" &&
+    typeof binding.template === "string"
+  ) {
+    const selection = read(binding.parameter);
+    if (selection) {
+      const literal = selection.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      matchPattern = binding.template.replaceAll("{value}", () => literal);
+    }
+  }
   return {
     capability_id: config.capability_id,
     capability_version: config.capability_version,
     account_id: read("account_id"),
     topic: read("topic") ?? "raw",
-    match_pattern:
-      config.capability_id === "utils.input.email" && read("account_id")
-        ? `email-${read("account_id")}-[a-f0-9]+[.]json$`
-        : (read("match_pattern") ?? ".*"),
+    match_pattern: matchPattern,
     schema_path: read("schema_path") ?? "schemas/avro/text.avsc",
     parser: read("parser"),
     source_kind: read("source_kind"),

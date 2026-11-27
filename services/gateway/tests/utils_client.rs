@@ -15,27 +15,95 @@ mod application {
 #[path = "../src/adapters/outbound/utils.rs"]
 mod utils;
 
-#[path = "../src/adapters/inbound/mail_policy.rs"]
-mod mail_policy;
+#[path = "../src/adapters/inbound/resource_policy.rs"]
+mod resource_policy;
 
-#[test]
-fn analysis_only_mailbox_source_does_not_grant_a_reply_policy() {
-    let account = "a".repeat(32);
-    let definition = serde_json::json!({"sources":[{"capability_id":"utils.input.email","account_id":account}],"pipeline":[{"capability_id":"utils.algorithm.email_context"}]});
-    assert!(mail_policy::selects_account(&definition, &account));
-    assert!(!mail_policy::selects_account(&definition, &"b".repeat(32)));
-    assert!(mail_policy::policy(&definition, &account).is_none());
+fn resource_catalog() -> serde_json::Value {
+    serde_json::json!({
+        "fixture.input.watch": {"x-galadril-resource-binding": {
+            "version": 1, "resource": "fixture_resource",
+            "operation": {"kind": "select", "parameter": "selected"}
+        }},
+        "fixture.output.send": {"x-galadril-resource-binding": {
+            "version": 1, "resource": "fixture_resource",
+            "operation": {"kind": "execute", "parameter": "sender", "mode": "strategy"}
+        }},
+        "fixture.algorithm.review": {"x-galadril-resource-binding": {
+            "version": 1, "resource": "fixture_resource",
+            "operation": {"kind": "decide"}
+        }}
+    })
 }
 
 #[test]
-fn deployed_scribe_filter_requires_a_durable_decision_before_sending() {
-    let account = "a".repeat(32);
-    let definition = serde_json::json!({"sources":[{"capability_id":"utils.input.email","account_id":account}],"pipeline":[{"capability_id":"utils.algorithm.decide_reply"},{"capability_id":"utils.output.reply","params":{"sender_account_id":"source","delivery_mode":"automatic"}}]});
-    let policy = mail_policy::policy(&definition, &account);
-    assert_eq!(
-        policy.and_then(|value| value.get("decision_required").cloned()),
-        Some(serde_json::Value::Bool(true))
+fn an_arbitrary_registered_input_does_not_grant_an_external_action() {
+    let catalog = resource_catalog();
+    let lookup = |id: &str, version: Option<&str>| {
+        (version == Some("1.2.0"))
+            .then(|| catalog.get(id))
+            .flatten()
+    };
+    let definition = serde_json::json!({
+        "sources":[{"capability_id":"fixture.input.watch","capability_version":"1.2.0","selected":"resource-a"}],
+        "pipeline":[{"type":"forward"}]
+    });
+    let grant = resource_policy::authorize(
+        &definition,
+        "fixture_resource",
+        "resource-a",
+        lookup,
     );
+    assert!(matches!(grant, Some(grant) if grant.action.is_none()));
+    assert!(
+        resource_policy::authorize(
+            &definition,
+            "fixture_resource",
+            "resource-b",
+            lookup
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn an_unavailable_decision_cannot_silently_admit_an_external_action() {
+    let catalog = resource_catalog();
+    let lookup = |id: &str, version: Option<&str>| {
+        (version == Some("1.2.0"))
+            .then(|| catalog.get(id))
+            .flatten()
+    };
+    let mut definition = serde_json::json!({
+        "sources":[{"capability_id":"fixture.input.watch","capability_version":"1.2.0","selected":"resource-a"}],
+        "pipeline":[
+            {"capability_id":"fixture.algorithm.review","capability_version":"1.2.0"},
+            {"capability_id":"fixture.output.send","capability_version":"1.2.0","params":{"sender":"source","strategy":"approval"}}
+        ]
+    });
+    let action = resource_policy::authorize(
+        &definition,
+        "fixture_resource",
+        "resource-a",
+        lookup,
+    )
+    .and_then(|grant| grant.action);
+    assert!(
+        matches!(action, Some(action) if action.target == "resource-a"
+        && action.decision_required && action.mode == resource_policy::ActionMode::Approval)
+    );
+
+    if let Some(version) =
+        definition.pointer_mut("/pipeline/0/capability_version")
+    {
+        *version = serde_json::json!("2.0.0");
+    }
+    let grant = resource_policy::authorize(
+        &definition,
+        "fixture_resource",
+        "resource-a",
+        lookup,
+    );
+    assert!(matches!(grant, Some(grant) if grant.action.is_none()));
 }
 
 #[test]

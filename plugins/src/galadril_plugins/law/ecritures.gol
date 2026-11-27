@@ -1,7 +1,8 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.ecritures version "0.4.0" {
-    import law.socle version "0.4.0" as LawSocle;
+ontology law.ecritures version "0.5.0" {
+    import law.socle version "0.5.0" as LawSocle;
+    import type gal.time::Instant version "1.0.0";
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
@@ -31,6 +32,44 @@ ontology law.ecritures version "0.4.0" {
     relation FilingRespondsTo {
         role source: Filing [1..1];
         role target: Filing [0..*];
+    }
+    enum FilingStage { draft, filed, served, withdrawn }
+    entity FilingRevision {
+        field filing: Ref<Filing> @label(LegalData);
+        field revision_number: u32 @label(LegalData);
+        field stage: FilingStage @label(LegalData);
+        field source_object: String @label(LegalData);
+        field recorded_at: gal.time.Instant @label(LegalData);
+    }
+    invariant PositiveFilingRevision on FilingRevision { revision_number > 0 }
+    entity Claim {
+        field filing_revision: Ref<FilingRevision> @label(LegalData);
+        field requesting_party: Ref<law.socle.Party> @label(LegalData);
+        field requested_relief: String @label(LegalData);
+    }
+    access FilingStage {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access FilingRevision {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access Claim {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
     }
     access Filing {
         resource: "gol_resource";

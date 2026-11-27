@@ -10,6 +10,21 @@ groups:
       - ref: galadril.gol.revision_id
         requirement_level: {conditionally_required: Once the runtime resolves the ontology.}
       - {ref: galadril.golc.version, requirement_level: opt_in}
+  - id: span.galadril.gol.package.install
+    type: span
+    span_kind: internal
+    brief: Installs a versioned plugin source package in a tenant.
+    stability: development
+    attributes:
+      - {ref: galadril.error.code, requirement_level: opt_in}
+  - id: event.galadril.gol.package.install_completed
+    type: event
+    name: galadril.gol.package.install_completed
+    brief: Reports completion of a plugin ontology installation.
+    stability: development
+    attributes:
+      - ref: galadril.error.code
+        requirement_level: {conditionally_required: If the installation failed.}
   - id: span.galadril.ifc.flow.evaluate
     type: span
     span_kind: internal

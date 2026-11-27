@@ -2,6 +2,8 @@
 import type {
   GolDependency,
   GolDiagnostic,
+  GolOntologyPackage,
+  GolPackageOrigin,
   GolPublication,
   GolSourceFile,
   GolSummary,
@@ -76,6 +78,30 @@ function dependencies(value: unknown): GolDependency[] {
     };
   });
 }
+function packageOrigin(value: Record<string, unknown>): GolPackageOrigin {
+  return {
+    pluginId: text(value.pluginId, 64),
+    pluginVersion: text(value.pluginVersion, 64),
+    packageVersion: text(value.packageVersion, 64),
+  };
+}
+export function parseGolOntologyPackages(input: unknown): GolOntologyPackage[] {
+  return list(input).map((value) => {
+    const item = object(value);
+    return {
+      ...packageOrigin(item),
+      ontologyId: text(item.ontologyId, 128),
+      displayName: text(item.displayName, 256),
+      requiredPlugins: list(item.requiredPlugins).map((value) => {
+        const plugin = object(value);
+        return {
+          pluginId: text(plugin.pluginId, 64),
+          pluginVersion: text(plugin.pluginVersion, 64),
+        };
+      }),
+    };
+  });
+}
 export function parseGolSummary(input: unknown): GolSummary {
   const value = object(input),
     status = value.status;
@@ -88,6 +114,7 @@ export function parseGolSummary(input: unknown): GolSummary {
     activeGeneration: optionalText(value.activeGeneration),
     activeSourceRevision: optionalText(value.activeSourceRevision),
     status,
+    origin: value.origin == null ? null : packageOrigin(object(value.origin)),
   };
 }
 export function parseGolSummaries(input: unknown): GolSummary[] {

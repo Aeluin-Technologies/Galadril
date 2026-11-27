@@ -8,8 +8,37 @@ import {
   validateConnections,
 } from "../app/utils/pipeline.ts";
 import type { Definition, GraphNode } from "../app/utils/pipeline.ts";
-import { sourceConfig } from "../app/utils/plugin-blocks.ts";
+import { parameterFields, sourceConfig } from "../app/utils/plugin-blocks.ts";
 import { reviewChanges } from "../app/utils/pipeline-review.ts";
+
+test("registered parameter metadata can hide fields until a matching choice", () => {
+  const field = parameterFields({
+    id: "fixture.algorithm.compose",
+    pluginId: "fixture",
+    pluginVersion: "1.0.0",
+    name: "Compose",
+    description: "Test a conditional parameter.",
+    kind: "ALGORITHM",
+    origin: "PLUGIN",
+    execution: "REGISTERED",
+    targets: ["PIPELINE"],
+    stepType: "algorithm",
+    compatibility: { allowedModels: [], requires: [] },
+    parametersSchemaJson: JSON.stringify({
+      properties: {
+        template: {
+          type: "string",
+          "x-galadril-visible-when": { parameter: "mode", equals: "template" },
+        },
+      },
+    }),
+  }).find((item) => item.key === "template");
+
+  assert.deepEqual(field?.visibleWhen, {
+    parameter: "mode",
+    equals: "template",
+  });
+});
 
 test("review groups additions, removals and field changes by authored block", () => {
   const source = {
@@ -64,11 +93,17 @@ test("branch origins remain explicit across nested forks and legacy revisions", 
   assert.equal(result.branches.legacy?.parent_branch, undefined);
 });
 
-test("email mailbox choice survives persistence and scopes incoming events", () => {
+test("registered source metadata scopes incoming events independently of the capability ID", () => {
   const account = "a".repeat(32);
   const config = sourceConfig(
-    { capability_id: "utils.input.email" },
+    { capability_id: "fixture.input.watch" },
     { account_id: account },
+    {
+      "x-galadril-match-pattern": {
+        parameter: "account_id",
+        template: "email-{value}-[a-f0-9]+[.]json$",
+      },
+    },
   );
   assert.equal(config.account_id, account);
   assert.equal(

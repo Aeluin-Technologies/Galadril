@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
+from galadril_pipeline.capabilities import PluginId
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -12,6 +13,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+type PluginVersionPin = Annotated[str, Field(min_length=1, max_length=64)]
 
 
 class OntologyContract(BaseModel):
@@ -52,6 +55,9 @@ class GolPackageManifest(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     version: str = Field(min_length=1, max_length=64)
     files: tuple[str, ...] = Field(min_length=1, max_length=32)
+    requires_plugins: dict[PluginId, PluginVersionPin] = Field(
+        default_factory=dict, max_length=32
+    )
     contracts: dict[str, OntologyContract] = Field(
         default_factory=dict, max_length=128
     )
@@ -77,6 +83,9 @@ class OntologyPackage(BaseModel):
     name: str
     version: str
     files: tuple[GolSource, ...] = Field(min_length=1, max_length=32)
+    requires_plugins: dict[PluginId, PluginVersionPin] = Field(
+        default_factory=dict, max_length=32
+    )
     contracts: dict[str, OntologyContract] = Field(
         default_factory=dict, max_length=128
     )

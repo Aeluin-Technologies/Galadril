@@ -85,6 +85,12 @@ pub struct GolSourceRecord {
     pub updated_at_ms: i64,
     /// Optimistic source revision fencing a retryable cross-store deletion.
     pub deletion_base: Option<String>,
+    /// Package provenance is independent of later tenant edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::gol_service::GolPackageOrigin>,
+    /// Base digest for refusing to replace customized source on upgrade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_source_digest: Option<String>,
 }
 
 /// A pipeline-owned immutable source/generation selection, without raw IR.

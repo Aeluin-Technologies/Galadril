@@ -1,8 +1,8 @@
 # Plugin extensibility boundary
 
-Status: audit and required design constraints for the pending law plugin. The
-execution-profile mechanism described below is a target contract, not an API
-already implemented by the current manifests.
+The [plugin GOL source lifecycle](plugin-ontologies.md) documents how deployed
+packages enter the tenant catalog. The design constraints below also cover
+execution and private context isolation.
 
 A plugin using supported extension contracts must not require edits to Gateway,
 Scribe, Registry, Vision or the dashboard to execute. The host can acquire a new
@@ -14,14 +14,13 @@ third-party code is a separate trust boundary from deploying a reviewed bundle.
 
 | Path | Observed behavior | Assessment |
 | --- | --- | --- |
-| `front/dashboard/app/utils/ontology.ts`, `useOfficialOntologyLabels.ts` | Official ontology IDs select frontend translations; unknown packages use supplied labels. | Optional presentation integration, not an execution dependency. |
+| `front/dashboard/app/composables/useOntologyCatalog.ts` | The catalog renders authorized package names and origins from GraphQL. | Package and workspace rendering use the same path for all plugin IDs. |
 | `services/gateway/src/adapters/outbound/database/pengolo.rs`, `domain/pengolo.rs` | Tool checkpoints retain a text offset and a validated operation category. | Generic conversation protocol; do not require a new hardcoded operation for each plugin. |
-| `platform/registry/src/plugin_ontology.rs` | Production materialization validates resource closure, mappings, limits and provenance. Legal IDs occur in tests below `mod tests`. | Generic production boundary; legal fixtures are not runtime coupling. |
+| `platform/registry/src/gol_service.rs` | Registry stores bounded GOL source packages and resolves, compiles and publishes authorized imports. | Generic production boundary. Deployment authority files still name the official modules they approve. |
 | `plugins/src/galadril_plugins/registry.py` | Manifests bind namespaced capabilities to packaged handlers, tools, models, Skills and resources. | Existing generic execution path for trusted deployments. |
-| `plugins/src/galadril_plugins/ontologies.py` | The shared ontology class derives administrative, civil and criminal views specifically for `law.contentieux`. | Business projection in the shared SDK; move generation/data into the law package. |
-| `services/gateway/src/domain/pengolo.rs`, `application/usecases/pengolo.rs` | Legal branch enums, capability-name parsing, defense Skill identity and defense sharing influence admission. | Pending law-specific host coupling; replace with validated generic execution profiles. |
-| `machine-learning/scribe/python/galadril_scribe/teams.py`, `contracts.py`, `runtime.py`, `instructions.py` | Legal identity selects context restrictions, legal writing instructions and a separate defense agent. | Preserve the isolation guarantees through a generic mechanism; move legal meanings and prompts into the plugin. |
-| `services/gateway/src/adapters/inbound/mail_policy.rs`, `machine-learning/scribe/python/galadril_scribe/runtime.py` | Native email integration recognizes specific utils capability IDs and enables the email toolset. | Existing first-party adapter. Other connectors must have a generic path, rather than adding another ID exception. |
+| `plugins/src/galadril_plugins/ontologies.py` | The shared SDK validates the package envelope and transports GOL sources. | Source imports and semantic classification are Registry operations. |
+| `services/gateway/src/application/usecases/pengolo.rs`, `machine-learning/scribe/python/galadril_scribe/teams.py` | The execution catalog supplies plugin contexts, roles and isolation requirements. | Host admission retains responsibility for context privacy and tool delegation. |
+| `services/gateway/src/adapters/inbound/resource_policy.rs`, `platform/registry/src/authoring.rs`, `front/dashboard/app/utils/plugin-blocks.ts` | Mailbox selection and external action policies resolve versioned schema metadata. Source filename selection uses plugin-provided editor metadata. | Replaces the Utils ID branches in deployed policy, validation and source pattern generation. The private email bridge and its UI controls remain specialized. |
 
 The current loader scans packaged `galadril_plugins` resources and limits factory
 imports to the declared plugin namespace. It does not implement a third-party

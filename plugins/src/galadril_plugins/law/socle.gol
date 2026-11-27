@@ -1,6 +1,7 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.socle version "0.4.0" {
+ontology law.socle version "0.5.0" {
+    import type gal.time::Instant version "1.0.0";
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
@@ -84,6 +85,21 @@ ontology law.socle version "0.4.0" {
     relation ProceedingRelated {
         role source: Proceeding [1..1];
         role target: Proceeding [0..*];
+    }
+    entity NormativeVersion {
+        field provision: Ref<Provision> @label(LegalData);
+        field official_version_id: String @label(LegalData);
+        field published_reference: String @label(LegalData);
+        field effective_at: Option<gal.time.Instant> @label(LegalData);
+        field verified_at: gal.time.Instant @label(LegalData);
+    }
+    access NormativeVersion {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
     }
     access Case {
         resource: "gol_resource";

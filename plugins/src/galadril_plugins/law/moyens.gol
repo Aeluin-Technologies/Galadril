@@ -1,8 +1,8 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.moyens version "0.4.0" {
-    import law.ecritures version "0.4.0" as LawEcritures;
-    import law.socle version "0.4.0" as LawSocle;
+ontology law.moyens version "0.5.0" {
+    import law.ecritures version "0.5.0" as LawEcritures;
+    import law.socle version "0.5.0" as LawSocle;
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
@@ -22,6 +22,30 @@ ontology law.moyens version "0.4.0" {
     relation PleaJurisprudence {
         role source: Plea [1..1];
         role target: law.socle.JudicialDecision [0..*];
+    }
+    enum ArgumentRole { assertion, rebuttal, alternative }
+    entity Argument {
+        field plea: Ref<Plea> @label(LegalData);
+        field claim: Option<Ref<law.ecritures.Claim>> @label(LegalData);
+        field author: Ref<law.socle.Party> @label(LegalData);
+        field argument_role: ArgumentRole @label(LegalData);
+        field text: String @label(LegalData);
+    }
+    access ArgumentRole {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access Argument {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
     }
     access Plea {
         resource: "gol_resource";

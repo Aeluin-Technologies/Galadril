@@ -665,7 +665,7 @@
     {
       "id": "law.socle",
       "name": "Legal case foundations",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "socle.gol"
       ],
@@ -675,7 +675,7 @@
     {
       "id": "law.ecritures",
       "name": "Écrits and filings",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "ecritures.gol"
       ],
@@ -685,7 +685,7 @@
     {
       "id": "law.moyens",
       "name": "Moyens and legal citations",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "moyens.gol"
       ],
@@ -695,7 +695,7 @@
     {
       "id": "law.preuves",
       "name": "Pièces and source documents",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "preuves.gol"
       ],
@@ -705,7 +705,7 @@
     {
       "id": "law.contentieux",
       "name": "Shared litigation layers",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "contentieux.gol"
       ],
@@ -739,7 +739,7 @@
     {
       "id": "law.administratif",
       "name": "Administrative litigation",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "administratif.gol"
       ],
@@ -773,7 +773,7 @@
     {
       "id": "law.judiciaire",
       "name": "Civil litigation",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "judiciaire.gol"
       ],
@@ -783,12 +783,23 @@
     {
       "id": "law.penal",
       "name": "Criminal proceedings",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "files": [
         "penal.gol"
       ],
       "contracts": {},
       "bindings": {}
+    },
+    {
+      "id": "law.correspondence",
+      "name": "Case correspondence evidence",
+      "version": "1.0.0",
+      "files": [
+        "correspondence.gol"
+      ],
+      "requires_plugins": {
+        "utils": "1.0.0"
+      }
     }
   ]
 }

@@ -1,5 +1,6 @@
 //! Background mail work rechecks the live canonical identity before effects.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
@@ -9,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::adapters::inbound::graphql::server::GatewayServices;
+use crate::domain::capabilities::CapabilityExecution;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,6 +90,30 @@ pub async fn authorize(
                     "Mail pipelines unavailable",
                 )
             })?;
+        let catalog = services
+            .pipelines
+            .capabilities(&actor.tenant, &actor.user)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Pipeline capability inventory unavailable",
+                )
+            })?;
+        let registered: HashMap<_, _> = catalog
+            .capabilities
+            .iter()
+            .filter(|item| item.execution == CapabilityExecution::Registered)
+            .map(|item| (item.id.as_str(), item))
+            .collect();
+        let resolve = |id: &str, version: Option<&str>| {
+            let capability = registered.get(id).copied()?;
+            version
+                .is_none_or(|version| {
+                    capability.plugin_version.as_deref() == Some(version)
+                })
+                .then_some(&capability.parameters_schema)
+        };
         let mut policies = Vec::new();
         for candidate in candidates {
             if actor
@@ -145,13 +171,28 @@ pub async fn authorize(
                     )
                 })?;
             if let Some(pinned) = pinned &&
-                super::mail_policy::selects_account(
+                let Some(selection) = super::resource_policy::authorize(
                     &pinned.definition,
+                    "mailbox",
                     account,
+                    resolve,
                 )
             {
-                let policy =
-                    super::mail_policy::policy(&pinned.definition, account);
+                let policy = selection.action.and_then(|action| {
+                    if action.target.len() != 32 ||
+                        !action
+                            .target
+                            .bytes()
+                            .all(|byte| byte.is_ascii_hexdigit())
+                    {
+                        return None;
+                    }
+                    Some(json!({
+                        "sender_account_id": action.target,
+                        "mode": action.mode,
+                        "decision_required": action.decision_required,
+                    }))
+                });
                 policies.push(json!({"pipeline_id":candidate.pipeline_id,"revision_id":revision,"policy":policy}));
             }
         }

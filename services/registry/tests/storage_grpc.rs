@@ -120,6 +120,7 @@ async fn concurrent_source_replacements_are_isolated(
             }],
             author: "test",
             expected_revision: Some(revision),
+            origin: None,
         })
         .await
     };
@@ -136,6 +137,7 @@ async fn concurrent_source_replacements_are_isolated(
                 }],
                 author: "test",
                 expected_revision: Some(revision),
+                origin: None,
             })
             .await
     };
@@ -336,6 +338,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             }],
             author: "test".into(),
             expected_revision: None,
+            origin: None,
         })
         .await?
         .into_inner();
@@ -512,6 +515,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             }],
             author: "test".into(),
             expected_revision: Some(head.source_revision),
+            origin: None,
         })
         .await?
         .into_inner()
@@ -555,7 +559,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
         {"operation":"OPERATION_TOUCH","relationship":relationship("ontology","tenant_a/workspace=2Econsumer","parent","tenant","tenant_a")},
         {"operation":"OPERATION_TOUCH","relationship":relationship("ontology","tenant_a/workspace=2Econsumer","owner","user","test")}
     ]})).await?;
-    let consumer=client.save_gol_ontology(proto::SaveGolOntologyRequest {tenant_id:"tenant_a".into(),ontology_id:"workspace.consumer".into(),display_name:"Consumer".into(),files:vec![proto::GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import people version \"1.0.0\"; }".into()}],author:"test".into(),expected_revision:None}).await?.into_inner().summary.context("consumer summary")?;
+    let consumer=client.save_gol_ontology(proto::SaveGolOntologyRequest {tenant_id:"tenant_a".into(),ontology_id:"workspace.consumer".into(),display_name:"Consumer".into(),files:vec![proto::GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import people version \"1.0.0\"; }".into()}],author:"test".into(),expected_revision:None,origin:None}).await?.into_inner().summary.context("consumer summary")?;
     let consumer_plan = client
         .preview_gol_dependencies(proto::PreviewGolDependenciesRequest {
             tenant_id: "tenant_a".into(),
@@ -590,6 +594,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             }],
             author: "test".into(),
             expected_revision: Some(consumer.source_revision),
+            origin: None,
         })
         .await?
         .into_inner()
