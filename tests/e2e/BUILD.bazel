@@ -746,8 +746,12 @@ py_test(
     timeout = "eternal",
     srcs = ["test_dashboard.py"],
     data = glob(["dashboard/*"]) + [
+        "//front:testing/browser-profile.ts",
+        "//front:testing/browser-test.ts",
+        "//front/dashboard:shared/records.ts",
         "//front/dashboard:tests/email-profile.spec.ts",
         "//front/dashboard:tests/email-ui.spec.ts",
+        "//front/dashboard:tests/graphql-fixture.ts",
     ],
     exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
@@ -797,4 +801,10 @@ test_suite(
         ":pipeline_lifecycle_test",
         ":pipeline_publication_test",
     ],
+)
+
+filegroup(
+    name = "typescript_quality_sources",
+    srcs = glob(["dashboard/**/*.ts"]),
+    visibility = ["//front:__pkg__"],
 )

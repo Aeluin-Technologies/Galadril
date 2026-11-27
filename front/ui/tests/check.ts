@@ -1,9 +1,14 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 
-const require = createRequire(import.meta.url);
+import { stageFrontend } from "../../testing/stage.ts";
+
+const stage = stageFrontend(resolve(process.cwd(), ".."), "ui");
+process.on("exit", stage.cleanup);
+const require = createRequire(resolve(stage.path, "package.json"));
+process.chdir(stage.path);
 if (process.argv[2] === "format") {
   const prettier = await import("prettier");
   async function verify(path: string): Promise<void> {
@@ -33,6 +38,21 @@ if (process.argv[2] === "format") {
   ])
     await verify(resolve(path));
 } else {
+  const prepare = spawnSync(
+    process.execPath,
+    [
+      resolve(dirname(require.resolve("nuxt/package.json")), "bin/nuxt.mjs"),
+      "prepare",
+      "playground",
+    ],
+    {
+      stdio: "inherit",
+      env: { ...process.env, NUXT_TELEMETRY_DISABLED: "1" },
+    },
+  );
+  if (prepare.error) throw prepare.error;
+  if (prepare.status !== 0) process.exit(prepare.status ?? 1);
+
   const checks: Record<string, string[]> = {
     typecheck: [
       resolve(
@@ -45,8 +65,11 @@ if (process.argv[2] === "format") {
     ],
     lint: [
       resolve(dirname(require.resolve("eslint/package.json")), "bin/eslint.js"),
-      "src",
-      "tests",
+      "**/*.{ts,tsx,mts,cts,vue}",
+      "--ignore-pattern",
+      "**/.nuxt/**",
+      "--ignore-pattern",
+      "**/.output/**",
       "--max-warnings",
       "0",
     ],

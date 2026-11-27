@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
 import { parse, Kind } from "graphql";
 

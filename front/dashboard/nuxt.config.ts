@@ -114,7 +114,10 @@ export default defineNuxtConfig({
     },
   },
 
-  sourcemap: isDevelopment,
+  sourcemap: {
+    client: isDevelopment || Boolean(process.env.COVERAGE_DIR),
+    server: isDevelopment,
+  },
   devServer: {
     port: 3000,
   },
@@ -174,7 +177,6 @@ export default defineNuxtConfig({
   },
 
   echarts: {
-    ssr: false,
     renderer: ["canvas", "svg"],
     charts: [
       "BarChart",

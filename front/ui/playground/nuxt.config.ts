@@ -5,6 +5,7 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   telemetry: false,
+  sourcemap: { client: Boolean(process.env.COVERAGE_DIR), server: false },
   // Bazel dependency files are read-only; Nitro must normalize its traced copies.
   nitro: { externals: { chmod: true } },
   modules: [fileURLToPath(new URL("../src/nuxt.ts", import.meta.url))],

@@ -15,11 +15,14 @@
   },
   "include": [
     "testing/**/*.ts",
-    "ui/tests/**/*.ts",
+    "dashboard/*.ts",
+    "dashboard/apollo/**/*.ts",
+    "dashboard/server/**/*.ts",
+    "dashboard/i18n/**/*.ts",
+    "dashboard/shared/**/*.ts",
     "dashboard/tests/**/*.ts",
     "dashboard/.nuxt/**/*.d.ts",
-    "dashboard/app/types/**/*.d.ts",
-    "dashboard/server/auth/**/*.ts",
-    "dashboard/server/media/**/*.ts"
-  ]
+    "dashboard/app/types/**/*.d.ts"
+  ],
+  "exclude": ["**/node_modules", "**/.output"]
 }

@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
 import { record } from "../shared/records.ts";
 import { readFile } from "node:fs/promises";

@@ -22,3 +22,9 @@ filegroup(
     srcs = glob(["*.yaml"]) + ["error-page.lua"],
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "typescript_quality_sources",
+    srcs = glob(["**/*.ts"]),
+    visibility = ["//front:__pkg__"],
+)

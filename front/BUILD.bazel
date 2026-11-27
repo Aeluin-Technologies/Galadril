@@ -1,13 +1,38 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 
 js_library(
     name = "testing_support",
-    srcs = ["testing/stage.ts", "tsconfig.tools.json"],
+    srcs = [
+        "testing/browser-profile.ts",
+        "testing/browser-profile.test.ts",
+        "testing/browser-test.ts",
+        "testing/stage.ts",
+        "testing/type-policy.ts",
+        "tsconfig.tools.json",
+    ],
+    data = [":browser_coverage_dependencies"],
     visibility = ["//front:__subpackages__"],
 )
 
 npm_link_all_packages(name = "node_modules")
+
+exports_files([
+    "testing/browser-profile.ts",
+    "testing/browser-test.ts",
+], visibility = ["//tests/e2e:__pkg__"])
+
+filegroup(
+    name = "browser_coverage_dependencies",
+    srcs = [
+        ":node_modules/@jridgewell/trace-mapping",
+        ":node_modules/@vitest/istanbul-lib-coverage",
+        ":node_modules/@vitest/istanbul-lib-report",
+        ":node_modules/@vue/compiler-sfc",
+        ":node_modules/acorn",
+        ":node_modules/ast-v8-to-istanbul",
+    ],
+)
 
 exports_files([
     "pnpm-lock.yaml",
@@ -21,6 +46,7 @@ filegroup(
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
+        "testing/type-policy.ts",
     ] + glob(["patches/**"]),
     visibility = ["//front:__subpackages__"],
 )
@@ -59,4 +85,25 @@ alias(
     name = "dashboard_image_push",
     actual = "//front/dashboard:image_push",
     visibility = ["//visibility:public"],
+)
+
+js_test(
+    name = "typescript_tools_test",
+    patch_node_fs = False,
+    copy_data_to_bin = False,
+    data = [
+        "testing/external-eslint.config.ts",
+        ":testing_support",
+        "//front/ui:node_modules",
+        "//infrastructure/envoy:typescript_quality_sources",
+        "//tests/e2e:typescript_quality_sources",
+    ],
+    entry_point = "testing/external-quality.ts",
+    include_types = True,
+)
+
+js_test(
+    name = "browser_profile_test",
+    data = [":testing_support"],
+    entry_point = "testing/browser-profile.test.ts",
 )

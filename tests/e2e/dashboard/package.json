@@ -4,8 +4,14 @@
   "type": "module",
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
+    "@jridgewell/trace-mapping": "0.3.31",
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.5",
+    "@vitest/istanbul-lib-coverage": "2.1.1",
+    "@vitest/istanbul-lib-report": "2.1.1",
+    "@vue/compiler-sfc": "3.5.44",
+    "acorn": "8.19.0",
+    "ast-v8-to-istanbul": "1.0.8",
     "typescript": "6.0.3"
   }
 }
