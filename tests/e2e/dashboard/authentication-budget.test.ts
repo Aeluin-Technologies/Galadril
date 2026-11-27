@@ -14,7 +14,7 @@ function budgetTest(run: (path: string) => void) {
   }
 }
 
-test("a replacement worker retains the shared source IP budget", () =>
+await test("a replacement worker retains the shared source IP budget", () =>
   budgetTest((path) => {
     const budget = new AuthenticationBudget(path);
     assert.equal(budget.delay(1000), 0);
@@ -26,7 +26,7 @@ test("a replacement worker retains the shared source IP budget", () =>
     assert.equal(new AuthenticationBudget(path).delay(60101), 0);
   }));
 
-test("delayed and malformed headers cannot replenish a known window", () =>
+await test("delayed and malformed headers cannot replenish a known window", () =>
   budgetTest((path) => {
     const budget = new AuthenticationBudget(path);
     budget.observe({
@@ -49,7 +49,7 @@ test("delayed and malformed headers cannot replenish a known window", () =>
     assert.equal(new AuthenticationBudget(path).delay(60001), 0);
   }));
 
-test("an implausible reset deadline fails rather than hanging the suite", () =>
+await test("an implausible reset deadline fails rather than hanging the suite", () =>
   budgetTest((path) => {
     const budget = new AuthenticationBudget(path);
     budget.observe({

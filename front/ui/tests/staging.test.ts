@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
-test("OCI staging materializes workspace siblings and selects the dashboard build", () => {
+await test("OCI staging materializes workspace siblings and selects the dashboard build", () => {
   const source = readFileSync(
     new URL("../../../build/private/nuxt_pnpm_layer.bzl", import.meta.url),
     "utf8",

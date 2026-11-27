@@ -91,9 +91,8 @@ class DashboardBrowserTest(SsoIntegrationTest):
             "/tmp",
             archive(
                 {
-                    "gateway-fixture.ts": (
-                        SUITE / "gateway-fixture.ts"
-                    ).read_bytes()
+                    filename: (SUITE / filename).read_bytes()
+                    for filename in ("gateway-fixture.ts", "wire.ts")
                 }
             ),
         )

@@ -1,3 +1,4 @@
+import { frame, operation, record } from "./wire.ts";
 import { test, expect, finishLogin } from "./fixture.ts";
 
 test("Pengolo interactive planning accepts an answer and continues tools after text", async ({
@@ -129,28 +130,24 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   });
   await page.routeWebSocket("**/graphql", (socket) =>
     socket.onMessage((raw) => {
-      const frame = JSON.parse(String(raw)) as {
-        type: string;
-        id?: string;
-        payload?: { query?: string };
-      };
-      if (frame.type === "connection_init")
+      const message = frame(String(raw));
+      if (message.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
-      if (frame.type !== "subscribe" || !frame.id) return;
-      if (frame.payload?.query?.includes("pengoloIdentityChanges"))
+      if (message.type !== "subscribe" || !message.id) return;
+      if (message.payload?.query?.includes("pengoloIdentityChanges"))
         socket.send(
           JSON.stringify({
             type: "next",
-            id: frame.id,
+            id: message.id,
             payload: { data: { pengoloIdentityChanges: identity } },
           }),
         );
-      if (frame.payload?.query?.includes("pengoloStream")) {
+      if (message.payload?.query?.includes("pengoloStream")) {
         channel.push = () =>
           socket.send(
             JSON.stringify({
               type: "next",
-              id: frame.id,
+              id: message.id,
               payload: { data: { pengoloStream: replay() } },
             }),
           );
@@ -160,10 +157,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   );
   await page.route("**/graphql", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
-    const body = route.request().postDataJSON() as {
-      query: string;
-      variables?: { input?: Record<string, unknown> };
-    };
+    const body = operation(route.request().postDataJSON());
     if (body.query.includes("query Workspace"))
       return route.fulfill({
         json: {
@@ -186,7 +180,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
         },
       });
     if (body.query.includes("mutation sendPengolo")) {
-      expect(body.variables?.input?.executionMode).toBe("chat");
+      expect(record(body.variables.input).executionMode).toBe("chat");
       return route.fulfill({
         json: {
           data: {
@@ -208,7 +202,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
       });
     }
     if (body.query.includes("mutation answerPengoloQuestion")) {
-      expect(body.variables?.input).toEqual(
+      expect(body.variables.input).toEqual(
         expect.objectContaining({
           id: generationId,
           questionId: "q1",
@@ -218,7 +212,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
           cancelled: false,
         }),
       );
-      expect(body.variables?.input).not.toHaveProperty("capability");
+      expect(body.variables.input).not.toHaveProperty("capability");
       answered = true;
       return route.fulfill({ json: { data: { answerPengoloQuestion: true } } });
     }

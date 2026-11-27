@@ -1,3 +1,4 @@
+import { operation, record } from "./wire.ts";
 import { test, expect } from "@playwright/test";
 
 test("Pengolo file drops announce their destination and preserve upload scope", async ({
@@ -45,10 +46,7 @@ test("Pengolo file drops announce their destination and preserve upload scope", 
     route.fulfill({ status: 200, body: "" }),
   );
   await page.route("**/graphql", (route) => {
-    const { query, variables } = route.request().postDataJSON() as {
-      query: string;
-      variables: { input?: Record<string, unknown>; project?: string | null };
-    };
+    const { query, variables } = operation(route.request().postDataJSON());
     let data: Record<string, unknown> = {};
     if (query.includes("query Workspace"))
       data = {
@@ -100,20 +98,23 @@ test("Pengolo file drops announce their destination and preserve upload scope", 
             ],
           },
         });
-      const input = variables.input ?? {};
+      const input =
+        variables.input === undefined ? {} : record(variables.input);
       inputs.push(input);
       const id = inputs.length.toString(16).padStart(32, "0");
-      const record = file(id, input);
-      files.set(id, record);
+      const uploaded = file(id, input);
+      files.set(id, uploaded);
       data = {
         beginPengoloUpload: {
-          file: record,
+          file: uploaded,
           url: `/fixture-drop/${id}`,
           headers: [],
         },
       };
     } else if (query.includes("finishPengoloUpload"))
-      data = { finishPengoloUpload: files.get(String(variables.input?.id)) };
+      data = {
+        finishPengoloUpload: files.get(String(record(variables.input).id)),
+      };
     else if (query.includes("pengoloLibrary"))
       data = {
         pengoloLibrary: {

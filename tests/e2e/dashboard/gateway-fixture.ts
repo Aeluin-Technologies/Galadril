@@ -1,4 +1,9 @@
-import { createServer } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { operation, record, stringField } from "./wire.ts";
 
 interface FixtureState {
   settings: {
@@ -15,27 +20,9 @@ interface FixtureState {
   hierarchy: { source: string; target: string; relation: string }[];
 }
 
-interface FixtureVariables {
-  search?: string;
-  subject?: string;
-  domain?: string;
-  name?: string;
-  enabled?: boolean;
-  active?: boolean;
-  role?: string;
-  parent?: string;
-  id?: string;
-  user?: string;
-  configuration?: { domain: string; jitProvision: boolean } & Record<
-    string,
-    unknown
-  >;
-  manifest?: { operations: unknown[] };
-}
-
 /** This double verifies UI contracts; real-service tests own Gateway authorization proofs. */
 const states = new Map<string, FixtureState>();
-createServer(async (request, response) => {
+async function respond(request: IncomingMessage, response: ServerResponse) {
   response.setHeader("content-type", "application/json");
   const actor = request.headers["x-galadril-sub"];
   if (
@@ -69,12 +56,12 @@ createServer(async (request, response) => {
   const state = states.get(actor);
   if (!state) throw new Error("Missing fixture actor");
   try {
+    request.setEncoding("utf8");
     let text = "";
-    for await (const chunk of request) text += chunk;
-    const {
-      query,
-      variables = {},
-    }: { query: string; variables?: FixtureVariables } = JSON.parse(text);
+    for await (const chunk of request) text += stringField(chunk);
+    const { query, variables } = operation(JSON.parse(text));
+    const search =
+      variables.search === undefined ? "" : stringField(variables.search);
     let data: Record<string, unknown>;
     if (!query.includes("mutation")) {
       data = {};
@@ -100,18 +87,17 @@ createServer(async (request, response) => {
         data.users = {
           items: users.filter(
             (user) =>
-              !variables.search ||
+              !search ||
               `${user.displayName} ${user.email}`
                 .toLowerCase()
-                .includes(variables.search.toLowerCase()),
+                .includes(search.toLowerCase()),
           ),
           after: null,
         };
       }
       if (query.includes("roles(")) {
         const items = state.roles.filter(
-          (role) =>
-            !variables.search || role.roleName.includes(variables.search),
+          (role) => !search || role.roleName.includes(search),
         );
         data.roles = {
           items,
@@ -163,7 +149,7 @@ createServer(async (request, response) => {
     } else if (query.includes("requestSsoDomain"))
       data = {
         requestSsoDomain: {
-          record: `_galadril.${variables.domain}`,
+          record: `_galadril.${stringField(variables.domain)}`,
           value: "fixture-dns-challenge",
         },
       };
@@ -182,14 +168,13 @@ createServer(async (request, response) => {
         },
       };
     else if (query.includes("configureSsoConnection")) {
-      const configuration = variables.configuration;
-      if (!configuration) throw new Error("Missing configuration");
+      const configuration = record(variables.configuration);
       state.settings.connections.push({
-        domain: configuration.domain,
+        domain: stringField(configuration.domain),
         protocol: "oidc",
         enabled: true,
-        jit_provision: configuration.jitProvision,
-        connection_id: `connection-${configuration.domain}`,
+        jit_provision: configuration.jitProvision === true,
+        connection_id: `connection-${stringField(configuration.domain)}`,
       });
       data = { configureSsoConnection: true };
     } else if (query.includes("setPermissionImport")) {
@@ -199,33 +184,41 @@ createServer(async (request, response) => {
       state.settings.passkey_mfa = variables.enabled === true;
       data = { setPasskeyMfa: true };
     } else if (query.includes("configureRoleSync")) {
-      const configuration = variables.configuration;
-      if (!configuration) throw new Error("Missing configuration");
+      const configuration = record(variables.configuration);
       state.synchronization = [configuration];
       data = { configureRoleSync: true };
     } else if (query.includes("importPermissions")) {
       if (!state.settings.permission_import)
         throw new Error("Permission imports disabled");
+      const operations =
+        variables.manifest === undefined
+          ? []
+          : record(variables.manifest).operations;
+      if (!Array.isArray(operations))
+        throw new Error("Expected permission operations");
       data = {
         importPermissions: {
-          applied: variables.manifest?.operations.length ?? 0,
+          applied: operations.length,
           complete: true,
           failedAt: null,
         },
       };
     } else if (query.includes("createRole")) {
-      state.roles.push({ roleName: variables.name ?? "" });
+      state.roles.push({
+        roleName:
+          variables.name === undefined ? "" : stringField(variables.name),
+      });
       data = { createRole: true };
     } else if (query.includes("setRoleParent")) {
       state.hierarchy = state.hierarchy.filter(
         (edge) =>
-          edge.source !== `role:${variables.parent}` ||
-          edge.target !== `role:${variables.role}`,
+          edge.source !== `role:${stringField(variables.parent)}` ||
+          edge.target !== `role:${stringField(variables.role)}`,
       );
       if (variables.enabled)
         state.hierarchy.push({
-          source: `role:${variables.parent}`,
-          target: `role:${variables.role}`,
+          source: `role:${stringField(variables.parent)}`,
+          target: `role:${stringField(variables.role)}`,
           relation: "superior",
         });
       data = { setRoleParent: true };
@@ -234,7 +227,7 @@ createServer(async (request, response) => {
         (policy) => policy.id !== variables.id,
       );
       state.policies.push({
-        id: variables.id ?? "",
+        id: variables.id === undefined ? "" : stringField(variables.id),
         content:
           "forbid(principal, action, resource) when { context.hour_utc < 8 };",
         active: true,
@@ -250,7 +243,8 @@ createServer(async (request, response) => {
       state.aliceActive = variables.active === true;
       data = { updateUser: true };
     } else if (query.includes("updateOrganization")) {
-      state.settings.organization_name = variables.name ?? "";
+      state.settings.organization_name =
+        variables.name === undefined ? "" : stringField(variables.name);
       data = { updateOrganization: true };
     } else {
       // Unrelated dashboard reads intentionally return no fixture business data.
@@ -274,4 +268,10 @@ createServer(async (request, response) => {
       JSON.stringify({ errors: [{ message: "Invalid fixture request" }] }),
     );
   }
+}
+
+createServer((request, response) => {
+  respond(request, response).catch((error: unknown) => {
+    response.destroy(error instanceof Error ? error : undefined);
+  });
 }).listen(8081, "127.0.0.1");
