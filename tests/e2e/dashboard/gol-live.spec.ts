@@ -147,6 +147,148 @@ async function selectMessage(page: Page) {
   ).toBeVisible();
 }
 
+test("provisions deployed GOL packages as authorized, editable drafts", async ({
+  page,
+  context,
+  browser,
+}) => {
+  await context.addCookies(cookies(fixture.cookies));
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const packages =
+    "{golOntologyPackages{ontologyId displayName pluginId pluginVersion packageVersion requiredPlugins{pluginId pluginVersion}}}";
+  await expect
+    .poll(async () => {
+      const data = await graphql(context, packages);
+      return data.golOntologyPackages;
+    })
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ontologyId: "law.socle", pluginId: "law" }),
+        expect.objectContaining({
+          ontologyId: "communication.mail",
+          pluginId: "utils",
+        }),
+        expect.objectContaining({
+          ontologyId: "law.correspondence",
+          requiredPlugins: [{ pluginId: "utils", pluginVersion: "1.0.0" }],
+        }),
+      ]),
+    );
+
+  const memberContext = await browser.newContext();
+  try {
+    await memberContext.addCookies(cookies(fixture.memberCookies));
+    expect(
+      (await graphql(memberContext, packages)).golOntologyPackages,
+    ).toEqual([]);
+    const denied = await graphqlEnvelope(
+      memberContext,
+      'mutation{installGolOntologyPackage(ontologyId:"law.socle",pluginId:"law",pluginVersion:"0.3.0",packageVersion:"0.5.0"){ontologyId}}',
+    );
+    expect(denied.errors).toBeDefined();
+  } finally {
+    await memberContext.close();
+  }
+
+  await page.goto("/ontology");
+  let mailGeneration: string | undefined;
+  for (const [id, name, plugin] of [
+    ["law.socle", "Legal case foundations", "law"],
+    ["law.ecritures", "Écrits and filings", "law"],
+    ["communication.mail", "Email and documents", "utils"],
+  ]) {
+    const installed = await mutationResult(
+      page,
+      "installGolOntologyPackage",
+      () =>
+        page
+          .getByRole("button", { name: `Install ${name}`, exact: true })
+          .click(),
+    );
+    expect(installed).toMatchObject({
+      ontologyId: id,
+      status: "draft",
+      activeGeneration: null,
+      origin: { pluginId: plugin },
+    });
+    const retry = await graphql(
+      context,
+      "mutation($id:String!,$plugin:String!,$version:String!,$package:String!){installGolOntologyPackage(ontologyId:$id,pluginId:$plugin,pluginVersion:$version,packageVersion:$package){sourceRevision}}",
+      {
+        id,
+        plugin,
+        version: text(object(installed.origin).pluginVersion),
+        package: text(object(installed.origin).packageVersion),
+      },
+    );
+    expect(object(retry.installGolOntologyPackage).sourceRevision).toBe(
+      installed.sourceRevision,
+    );
+    const link = page.getByRole("link", { name, exact: true });
+    await expect(link).toBeVisible();
+
+    await link.click();
+    const edit = page.getByRole("button", { name: "Edit GOL", exact: true });
+    await expect(edit).toBeVisible({ timeout: 15000 });
+    await edit.click();
+    const receipt = await publish(page);
+    if (plugin === "utils") mailGeneration = text(receipt.generation);
+    const published = await graphql(
+      context,
+      "{golOntologies{ontologyId activeGeneration origin{pluginId}}}",
+    );
+    expect(published.golOntologies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ontologyId: id,
+          activeGeneration: receipt.generation,
+          origin: { pluginId: plugin },
+        }),
+      ]),
+    );
+    await page.goto("/ontology");
+  }
+  const pipelineId = "installed_gol_binding";
+  const authored = await graphql(
+    context,
+    'mutation($id:String!,$definition:JSON!,$command:JSON!){authorPipeline(pipelineId:$id,name:"Installed GOL binding",definition:$definition,command:$command,message:"Bind an installed package"){headRevisionId}}',
+    {
+      id: pipelineId,
+      definition: JSON.stringify({
+        name: "Installed GOL binding",
+        sources: [{ id: "input" }],
+        pipeline: [{ step: "sink", type: "sink", input_from: ["input"] }],
+      }),
+      command: JSON.stringify({ operation: "save_draft", branch: "main" }),
+    },
+  );
+  await graphql(
+    context,
+    'mutation($pipeline:String!,$head:String!){bindGolOntology(ontologyId:"communication.mail",pipelineId:$pipeline,blockId:"sink",expectedPipelineRevision:$head)}',
+    {
+      pipeline: pipelineId,
+      head: text(object(authored.authorPipeline).headRevisionId),
+    },
+  );
+  const bindings = await graphql(
+    context,
+    "query($pipeline:String!){ontologyBindings(pipelineId:$pipeline){blockId ontologyId generation}}",
+    { pipeline: pipelineId },
+  );
+  expect(bindings.ontologyBindings).toEqual([
+    {
+      blockId: "sink",
+      ontologyId: "communication.mail",
+      generation: mailGeneration,
+    },
+  ]);
+});
+
 test("GOL authoring, atomic generations, authorized schemas and warm-cache revocation", async ({
   page,
   context,

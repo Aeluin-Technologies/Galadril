@@ -90,8 +90,15 @@ class EmailParticipants:
         try:
             timestamp = parsedate_to_datetime(metadata.date)
             if timestamp.tzinfo is not None:
-                date = timestamp.astimezone(UTC).isoformat()
-                record["timestamp"] = date
+                utc_time = timestamp.astimezone(UTC)
+                record["timestamp"] = utc_time.isoformat()
+                # The registered GOL Instant requires nine fractional digits.
+                date = (
+                    utc_time.isoformat(timespec="microseconds").removesuffix(
+                        "+00:00"
+                    )
+                    + "000Z"
+                )
         except (ValueError, TypeError, OverflowError):
             # A malformed Date header must not erase Intake's authenticated timestamp.
             structlog.get_logger(__name__).warning(

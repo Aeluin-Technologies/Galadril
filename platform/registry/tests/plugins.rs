@@ -16,6 +16,18 @@ const SCHEMA: &str = include_str!("../../../schemas/spicedb/schema.zed");
 
 const SOURCES: &[(&str, &str)] = &[
     (
+        "law.correspondence.gol",
+        include_str!(
+            "../../../plugins/src/galadril_plugins/law/correspondence.gol"
+        ),
+    ),
+    (
+        "communication.delivery.gol",
+        include_str!(
+            "../../../plugins/src/galadril_plugins/utils/delivery.gol"
+        ),
+    ),
+    (
         "communication.mail.gol",
         include_str!("../../../plugins/src/galadril_plugins/utils/mail.gol"),
     ),
@@ -98,7 +110,7 @@ async fn a_package_cannot_shadow_another_modules_approved_owner() -> Result<()>
     )?;
     let registry =
         Registry::new(memory::MemoryStore::default()).with_gol(config);
-    let workspace=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.shadow",display_name:"Shadow",files:vec![GolFile {path:"shadow.gol".into(),text:"ontology workspace.shadow version \"1.0.0\" {} ontology law.socle version \"0.4.0\" {}".into()}],author:"alice",expected_revision:None}).await?;
+    let workspace=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.shadow",display_name:"Shadow",files:vec![GolFile {path:"shadow.gol".into(),text:"ontology workspace.shadow version \"1.0.0\" {} ontology law.socle version \"0.4.0\" {}".into()}],author:"alice",expected_revision:None,origin:None}).await?;
     let preview = registry
         .preview_gol_dependencies(
             "tenant_a",
@@ -126,7 +138,7 @@ async fn a_package_cannot_shadow_another_modules_approved_owner() -> Result<()>
             ),
         "companion module shadowing was admitted"
     );
-    let consumer=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.consumer",display_name:"Consumer",files:vec![GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import communication.people version \"1.0.0\"; }".into()}],author:"alice",expected_revision:None}).await?;
+    let consumer=registry.save_gol_ontology(SaveGolOntology {tenant_id:"tenant_a",ontology_id:"workspace.consumer",display_name:"Consumer",files:vec![GolFile {path:"consumer.gol".into(),text:"ontology workspace.consumer version \"1.0.0\" { import communication.people version \"1.0.0\"; }".into()}],author:"alice",expected_revision:None,origin:None}).await?;
     let preview = registry
         .preview_gol_dependencies(
             "tenant_a",
@@ -178,6 +190,54 @@ fn plugin_sources_are_semantically_and_security_valid_under_real_deployment_cont
         "approved SpiceDB snapshot fingerprint differs from deployed schema"
     );
     let environment = authority.environment(&project)?;
+    for (module, names) in [
+        (
+            "communication.delivery",
+            &[
+                "MailboxAccount",
+                "MessageOccurrence",
+                "SynchronizationCheckpoint",
+                "ReplyDraft",
+                "DeliveryReceipt",
+            ][..],
+        ),
+        ("law.ecritures", &["FilingRevision", "Claim"]),
+        ("law.moyens", &["Argument"]),
+        (
+            "law.preuves",
+            &["Allegation", "EvidenceAssessment", "JudicialFinding"],
+        ),
+        (
+            "law.contentieux",
+            &["ProceduralEvent", "Notification", "DeadlineAssessment"],
+        ),
+    ] {
+        let module = module.parse::<galadril_ontology::OntologyId>()?;
+        for name in names {
+            let name = name.parse::<galadril_ontology::Name>()?;
+            ensure!(
+                project
+                    .symbols()
+                    .keys()
+                    .any(|symbol| symbol.key().ontology() == &module &&
+                        symbol.key().name() == &name),
+                "missing declared business contract {module}::{name}"
+            );
+        }
+    }
+    for name in [
+        "communication.delivery.ValidMessageUid.condition",
+        "communication.delivery.ValidCheckpoint.condition",
+        "law.ecritures.PositiveFilingRevision.condition",
+    ] {
+        ensure!(
+            project
+                .expressions()
+                .keys()
+                .any(|key| key.to_string() == name),
+            "missing checked invariant {name}"
+        );
+    }
     let result = compile(&project, &environment);
     let contract = result
         .publishable()

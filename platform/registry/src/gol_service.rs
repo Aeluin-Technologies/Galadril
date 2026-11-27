@@ -112,6 +112,8 @@ pub struct SaveGolOntology<'a> {
     pub author: &'a str,
     /// Required immutable tenant head for replacement; absent creates only.
     pub expected_revision: Option<&'a str>,
+    /// Supplied only for installation from an operator-deployed plugin.
+    pub origin: Option<GolPackageOrigin>,
 }
 
 /// Catalog metadata without authored source or symbol names.
@@ -129,6 +131,49 @@ pub struct GolSummary {
     pub active_source_revision: Option<String>,
     /// `draft` or `published`; validation is reported independently.
     pub status: String,
+    /// Origin of the installed base source, retained through tenant edits.
+    #[serde(default)]
+    pub origin: Option<GolPackageOrigin>,
+}
+
+/// Identity of the deployed package from which a tenant source was installed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GolPackageOrigin {
+    /// Deployment manifest namespace.
+    pub plugin_id: String,
+    /// Version of the deployment manifest.
+    pub plugin_version: String,
+    /// Package release version; individual modules declare their own
+    /// versions.
+    pub package_version: String,
+}
+
+impl GolPackageOrigin {
+    /// Bounds metadata before persisting it in tenant-controlled state.
+    pub fn validate(&self) -> Result<()> {
+        let id = self.plugin_id.as_bytes();
+        ensure!(
+            id.len() <= 64 &&
+                id.first().is_some_and(u8::is_ascii_lowercase) &&
+                id.iter().all(|byte| byte.is_ascii_lowercase() ||
+                    byte.is_ascii_digit() ||
+                    matches!(byte, b'_' | b'-')),
+            "invalid GOL plugin identity"
+        );
+        for version in [&self.plugin_version, &self.package_version] {
+            ensure!(
+                !version.is_empty() &&
+                    version.len() <= 64 &&
+                    version
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() ||
+                            matches!(byte, b'.' | b'-' | b'+' | b'_')),
+                "invalid GOL package version"
+            );
+        }
+        Ok(())
+    }
 }
 
 /// A module dependency pinned through an active immutable generation.
@@ -243,7 +288,10 @@ impl<S: RevisionStore> Registry<S> {
             !input.author.is_empty() && input.author.len() <= 256,
             "invalid ontology author"
         );
-        validate_files(&input.files)?;
+        let source_digest = crate::gol::source_digest(&input.files)?;
+        if let Some(origin) = &input.origin {
+            origin.validate()?;
+        }
         self.store.ensure_tenant(input.tenant_id).await?;
         let snapshot = self.store.load(input.tenant_id, None).await?;
         let mut state = snapshot.state;
@@ -252,6 +300,19 @@ impl<S: RevisionStore> Registry<S> {
             existing.is_none_or(|record| record.deletion_base.is_none()),
             "ontology deletion is pending"
         );
+        if let (Some(origin), Some(record)) = (&input.origin, existing) &&
+            record.origin.as_ref() == Some(origin) &&
+            record.source_digest == source_digest
+        {
+            tracing::debug!(event.name = "registry.gol.install_reused");
+            return self
+                .gol_workspace(
+                    input.tenant_id,
+                    input.ontology_id,
+                    Some(&snapshot.revision_id),
+                )
+                .await;
+        }
         if let Some(expected) = input.expected_revision {
             ensure!(
                 valid_revision(expected) && expected == snapshot.revision_id,
@@ -264,6 +325,31 @@ impl<S: RevisionStore> Registry<S> {
                 "expected revision is required for existing ontology"
             );
         }
+        let package_source_digest = match (&input.origin, existing) {
+            (Some(origin), Some(record)) => {
+                ensure!(
+                    record
+                        .origin
+                        .as_ref()
+                        .is_some_and(|previous| previous.plugin_id ==
+                            origin.plugin_id &&
+                            previous != origin) &&
+                        record.package_source_digest.as_ref() ==
+                            Some(&record.source_digest),
+                    "installed GOL sources differ from the selected plugin package"
+                );
+                Some(source_digest.clone())
+            },
+            (Some(_), None) => Some(source_digest.clone()),
+            (None, record) => {
+                record.and_then(|record| record.package_source_digest.clone())
+            },
+        };
+        // A source upgrade leaves the tenant's catalog name intact.
+        let display_name = match (input.origin.as_ref(), existing) {
+            (Some(_), Some(record)) => record.display_name.clone(),
+            _ => input.display_name.into(),
+        };
         // A draft keeps the publication baseline the editor needs for its
         // next compare-and-swap. Read it before committing the draft.
         let (active_generation, active_source_revision) = match existing {
@@ -282,6 +368,9 @@ impl<S: RevisionStore> Registry<S> {
         let now = Utc::now().timestamp_millis();
         let created_at_ms =
             existing.map_or(now, |record| record.created_at_ms);
+        let origin = input
+            .origin
+            .or_else(|| existing.and_then(|record| record.origin.clone()));
         let mut files = input.files;
         files.sort_unstable_by(|left, right| left.path.cmp(&right.path));
         let (declared_modules, imports) = match source_imports(&files) {
@@ -294,9 +383,9 @@ impl<S: RevisionStore> Registry<S> {
             input.ontology_id.into(),
             GolSourceRecord {
                 ontology_id: input.ontology_id.into(),
-                display_name: input.display_name.into(),
+                display_name,
                 paths: files.iter().map(|file| file.path.clone()).collect(),
-                source_digest: crate::gol::source_digest(&files)?,
+                source_digest,
                 declared_modules,
                 imports,
                 files,
@@ -304,6 +393,8 @@ impl<S: RevisionStore> Registry<S> {
                 created_at_ms,
                 updated_at_ms: now,
                 deletion_base: None,
+                origin,
+                package_source_digest,
             },
         );
         let revision = self
@@ -329,6 +420,7 @@ impl<S: RevisionStore> Registry<S> {
                 active_generation,
                 active_source_revision,
                 status: "draft".into(),
+                origin: record.origin,
             },
             files: record.files,
             diagnostics: Vec::new(),
@@ -408,6 +500,7 @@ impl<S: RevisionStore> Registry<S> {
             active_generation: None,
             active_source_revision: None,
             status: "draft".into(),
+            origin: record.origin.clone(),
         };
         if let Some(config) = &self.gol {
             let store = config.store(tenant, &record.ontology_id).await?;

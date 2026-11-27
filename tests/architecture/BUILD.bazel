@@ -1,0 +1,16 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+sh_test(
+    name = "plugin_boundary_test",
+    srcs = ["plugin_boundary_test.sh"],
+    args = [
+        "$(rootpaths //platform/registry:plugin_boundary_sources)",
+        "$(rootpaths //services/gateway:plugin_boundary_sources)",
+        "$(rootpaths //front/dashboard:plugin_boundary_sources)",
+    ],
+    data = [
+        "//platform/registry:plugin_boundary_sources",
+        "//services/gateway:plugin_boundary_sources",
+        "//front/dashboard:plugin_boundary_sources",
+    ],
+)

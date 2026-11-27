@@ -6,6 +6,7 @@ import importlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.resources import files
+from os import environ
 from types import MappingProxyType
 from typing import Literal, Protocol, cast
 
@@ -353,7 +354,18 @@ class PluginRegistry:
         manifests: dict[str, PluginManifest] = {}
         unavailable: dict[str, UnavailablePlugin] = {}
         root = files("galadril_plugins")
+        selection = environ.get("GALADRIL_PLUGIN_ALLOWLIST", "*")
+        enabled: set[str] | None = None
+        if selection != "*":
+            if len(selection) > 32 * 65:
+                raise ValueError("Plugin deployment allowlist exceeds limit")
+            names = selection.split(",") if selection else []
+            enabled = set(names)
+            if len(enabled) != len(names) or len(enabled) > 32:
+                raise ValueError("Invalid plugin deployment allowlist")
         for directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if enabled is not None and directory.name not in enabled:
+                continue
             resource = directory.joinpath("plugin.json")
             if directory.is_dir() and resource.is_file():
                 try:
@@ -372,6 +384,10 @@ class PluginRegistry:
                     unavailable[directory.name] = UnavailablePlugin(
                         "manifest", type(error).__name__
                     )
+        if enabled is not None and enabled.difference(manifests, unavailable):
+            raise ValueError(
+                "Plugin deployment allowlist names unavailable packages"
+            )
         if len(manifests) + len(unavailable) > 32:
             raise ValueError("Plugin inventory exceeds limit")
         installed = dict(manifests)
@@ -668,6 +684,19 @@ class PluginRegistry:
             *pipeline.sources,
             *pipeline.pipeline,
         )
+        for item in items:
+            if item.capability_id is None:
+                continue
+            capability = self._capabilities.get(item.capability_id)
+            if (
+                capability is not None
+                and "x-galadril-resource-binding"
+                in capability.parameters_schema
+                and item.capability_version is None
+            ):
+                raise ValueError(
+                    "Resource binding requires a capability version"
+                )
         selected = frozenset(
             item.capability_id for item in items if item.capability_id
         )
@@ -718,6 +747,13 @@ class PluginRegistry:
         total = 0
         for manifest in self._manifests.values():
             for package in manifest.ontologies:
+                # Optional integrations have a separate package so their owning plugin can still load.
+                if any(
+                    (dependency := self._manifests.get(identifier)) is None
+                    or dependency.version != version
+                    for identifier, version in package.requires_plugins.items()
+                ):
+                    continue
                 if len(result) >= 32 or package.id in identifiers:
                     raise ValueError("Invalid ontology package identity")
                 if not set(package.contracts).issubset(
@@ -744,6 +780,7 @@ class PluginRegistry:
                     name=package.name,
                     version=package.version,
                     files=tuple(sources),
+                    requires_plugins=package.requires_plugins,
                     contracts=package.contracts,
                     bindings=package.bindings,
                 )

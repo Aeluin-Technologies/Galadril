@@ -80,3 +80,9 @@ rust_test(
         normal_dev = True,
     ),
 )
+
+filegroup(
+    name = "plugin_boundary_sources",
+    srcs = ["src/authoring.rs", "src/gol_service.rs"],
+    visibility = ["//tests/architecture:__pkg__"],
+)

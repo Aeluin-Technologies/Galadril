@@ -456,6 +456,13 @@ where
                     .collect(),
                 author: &request.author,
                 expected_revision: request.expected_revision.as_deref(),
+                origin: request.origin.map(|origin| {
+                    crate::gol_service::GolPackageOrigin {
+                        plugin_id: origin.plugin_id,
+                        plugin_version: origin.plugin_version,
+                        package_version: origin.package_version,
+                    }
+                }),
             })
             .await
             .map_err(domain_status)?;
@@ -698,6 +705,11 @@ fn summary_message(summary: GolSummary) -> proto::GolSummary {
         active_generation: summary.active_generation,
         active_source_revision: summary.active_source_revision,
         status: summary.status,
+        origin: summary.origin.map(|origin| proto::GolPackageOrigin {
+            plugin_id: origin.plugin_id,
+            plugin_version: origin.plugin_version,
+            package_version: origin.package_version,
+        }),
     }
 }
 

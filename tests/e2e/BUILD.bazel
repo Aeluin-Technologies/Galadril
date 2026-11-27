@@ -758,6 +758,7 @@ py_test(
 
 pipeline_e2e_test(
     name = "gol_lifecycle_test",
+    scribe = True,
     src = "test_gol_lifecycle.py",
     data = [
         "dashboard/gol-live.spec.ts",

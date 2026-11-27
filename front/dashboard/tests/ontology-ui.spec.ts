@@ -51,6 +51,8 @@ async function fixture(page: Page, author = true, listed = true) {
       return route.fulfill({
         json: { data: { golOntologies: listed ? [summary()] : [] } },
       });
+    if (query.includes("golOntologyPackages"))
+      return route.fulfill({ json: { data: { golOntologyPackages: [] } } });
     if (query.includes("golOntologyWorkspace")) {
       state.sourceReads++;
       expect(author).toBe(true);

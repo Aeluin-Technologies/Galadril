@@ -97,6 +97,7 @@ export const ATTR_VISION_TIMING_PHASE = "galadril.vision.timing_phase";
 export const SPAN_AMARTH_EFFECT_ESTIMATE = "galadril.amarth.effect.estimate";
 export const SPAN_GATEWAY_AUTHORIZATION_EVALUATE =
   "galadril.gateway.authorization.evaluate";
+export const SPAN_GOL_PACKAGE_INSTALL = "galadril.gol.package.install";
 export const SPAN_GOL_RUNTIME_BIND = "galadril.gol.runtime.bind";
 export const SPAN_IFC_FLOW_EVALUATE = "galadril.ifc.flow.evaluate";
 export const SPAN_INTAKE_OBSERVATION_INGEST =
@@ -113,6 +114,8 @@ export const SPAN_VISION_STEP_DISPATCH = "galadril.vision.step.dispatch";
 export const SPAN_VISION_STEP_EXECUTE = "galadril.vision.step.execute";
 export const EVENT_GATEWAY_AUTHORIZATION_CHECK =
   "galadril.gateway.authorization.check";
+export const EVENT_GOL_PACKAGE_INSTALL_COMPLETED =
+  "galadril.gol.package.install_completed";
 export const EVENT_GOL_WORKER_FAILED = "galadril.gol.worker.failed";
 export const EVENT_VISION_STEP_FAILED = "galadril.vision.step.failed";
 export const METRIC_AUTH_ATTEMPTS = "galadril.auth.attempts";
@@ -143,6 +146,12 @@ export type GatewayAuthorizationEvaluateAttributes = {
 export const gatewayAuthorizationEvaluateAttributeKeys = [
   "galadril.error.code",
 ] as const;
+
+export type GolPackageInstallAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const golPackageInstallAttributeKeys = ["galadril.error.code"] as const;
 
 export type GolRuntimeBindAttributes = {
   "galadril.gol.revision_id"?: string;
@@ -246,6 +255,14 @@ export const gatewayAuthorizationCheckAttributeKeys = [
   "galadril.authorization.decision",
   "galadril.error.code",
   "galadril.error.occurrence_id",
+] as const;
+
+export type GolPackageInstallCompletedAttributes = {
+  "galadril.error.code"?: ErrorCode;
+};
+
+export const golPackageInstallCompletedAttributeKeys = [
+  "galadril.error.code",
 ] as const;
 
 export type GolWorkerFailedAttributes = {

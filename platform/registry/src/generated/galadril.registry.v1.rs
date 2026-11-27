@@ -204,6 +204,15 @@ pub struct GolDependency {
     pub source_revision: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GolPackageOrigin {
+    #[prost(string, tag = "1")]
+    pub plugin_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub plugin_version: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub package_version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GolSummary {
     #[prost(string, tag = "1")]
     pub ontology_id: ::prost::alloc::string::String,
@@ -217,6 +226,8 @@ pub struct GolSummary {
     pub active_source_revision: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, tag = "6")]
     pub status: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "7")]
+    pub origin: ::core::option::Option<GolPackageOrigin>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GolWorkspace {
@@ -265,6 +276,9 @@ pub struct SaveGolOntologyRequest {
     pub author: ::prost::alloc::string::String,
     #[prost(string, optional, tag = "6")]
     pub expected_revision: ::core::option::Option<::prost::alloc::string::String>,
+    /// Populated only by Gateway from the deployed inventory.
+    #[prost(message, optional, tag = "7")]
+    pub origin: ::core::option::Option<GolPackageOrigin>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetGolWorkspaceRequest {
@@ -403,10 +417,12 @@ pub struct ListBindingsResponse {
 pub struct GetGolBindingRequest {
     #[prost(string, tag = "1")]
     pub tenant_id: ::prost::alloc::string::String,
+    /// The execution root and exact deployed revision select the composition.
     #[prost(string, tag = "2")]
     pub pipeline_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub pipeline_revision_id: ::prost::alloc::string::String,
+    /// A step ID from the compiled composition, including generated IDs.
     #[prost(string, tag = "4")]
     pub block_id: ::prost::alloc::string::String,
 }

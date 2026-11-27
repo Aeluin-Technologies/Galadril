@@ -1,10 +1,12 @@
 //! GOL source transport and immutable pipeline bindings owned by Registry.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 pub use galadril_registry::gol::{GolDiagnostic, GolFile};
 pub use galadril_registry::gol_service::{
-    GolCompileApproval, GolDependencyPreview, GolPublication, GolSummary,
-    GolValidation, GolWorkspace,
+    GolCompileApproval, GolDependencyPreview, GolPackageOrigin,
+    GolPublication, GolSummary, GolValidation, GolWorkspace,
 };
 use serde_json::Value;
 
@@ -20,6 +22,32 @@ pub struct GolWrite<'a> {
     pub files: &'a [GolFile],
     /// Required source snapshot for replacement; absence means creation.
     pub expected_revision: Option<&'a str>,
+    /// Origin comes from the deployment inventory during explicit
+    /// installation.
+    pub origin: Option<GolPackageOrigin>,
+}
+
+/// Private transport from the deployed plugin inventory.
+#[derive(serde::Deserialize)]
+pub struct PluginGolPackage {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub plugin_id: String,
+    pub plugin_version: String,
+    pub files: Vec<GolFile>,
+    #[serde(default)]
+    pub requires_plugins: BTreeMap<String, String>,
+}
+
+impl PluginGolPackage {
+    pub fn origin(&self) -> GolPackageOrigin {
+        GolPackageOrigin {
+            plugin_id: self.plugin_id.clone(),
+            plugin_version: self.plugin_version.clone(),
+            package_version: self.version.clone(),
+        }
+    }
 }
 
 /// The shared security adapter must admit metadata before it reaches clients.

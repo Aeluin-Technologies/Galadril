@@ -110,7 +110,7 @@ rust_test(
 rust_test(
     name = "utils_client_test",
     srcs = [
-        "src/adapters/inbound/mail_policy.rs",
+        "src/adapters/inbound/resource_policy.rs",
         "src/adapters/outbound/utils.rs",
         "src/application/ports/email.rs",
         "tests/utils_client.rs",
@@ -334,4 +334,13 @@ rust_test(
     srcs = ["src/domain/redaction.rs"],
     crate_root = "src/domain/redaction.rs",
     deps = crate_deps(["anyhow", "base64", "serde", "serde_json"]),
+)
+
+filegroup(
+    name = "plugin_boundary_sources",
+    srcs = [
+        "src/adapters/inbound/resource_policy.rs",
+        "src/application/usecases/control_plane.rs",
+    ],
+    visibility = ["//tests/architecture:__pkg__"],
 )

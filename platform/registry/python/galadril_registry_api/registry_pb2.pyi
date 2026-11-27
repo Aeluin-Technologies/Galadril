@@ -230,21 +230,33 @@ class GolDependency(_message.Message):
     source_revision: str
     def __init__(self, ontology_id: _Optional[str] = ..., generation: _Optional[str] = ..., source_revision: _Optional[str] = ...) -> None: ...
 
+class GolPackageOrigin(_message.Message):
+    __slots__ = ("plugin_id", "plugin_version", "package_version")
+    PLUGIN_ID_FIELD_NUMBER: _ClassVar[int]
+    PLUGIN_VERSION_FIELD_NUMBER: _ClassVar[int]
+    PACKAGE_VERSION_FIELD_NUMBER: _ClassVar[int]
+    plugin_id: str
+    plugin_version: str
+    package_version: str
+    def __init__(self, plugin_id: _Optional[str] = ..., plugin_version: _Optional[str] = ..., package_version: _Optional[str] = ...) -> None: ...
+
 class GolSummary(_message.Message):
-    __slots__ = ("ontology_id", "display_name", "source_revision", "active_generation", "active_source_revision", "status")
+    __slots__ = ("ontology_id", "display_name", "source_revision", "active_generation", "active_source_revision", "status", "origin")
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_GENERATION_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_SOURCE_REVISION_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
     ontology_id: str
     display_name: str
     source_revision: str
     active_generation: str
     active_source_revision: str
     status: str
-    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., source_revision: _Optional[str] = ..., active_generation: _Optional[str] = ..., active_source_revision: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    origin: GolPackageOrigin
+    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., source_revision: _Optional[str] = ..., active_generation: _Optional[str] = ..., active_source_revision: _Optional[str] = ..., status: _Optional[str] = ..., origin: _Optional[_Union[GolPackageOrigin, _Mapping]] = ...) -> None: ...
 
 class GolWorkspace(_message.Message):
     __slots__ = ("summary", "files", "diagnostics", "dependencies")
@@ -283,20 +295,22 @@ class GolPublication(_message.Message):
     def __init__(self, ontology_id: _Optional[str] = ..., source_revision: _Optional[str] = ..., generation: _Optional[str] = ...) -> None: ...
 
 class SaveGolOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "display_name", "files", "author", "expected_revision")
+    __slots__ = ("tenant_id", "ontology_id", "display_name", "files", "author", "expected_revision", "origin")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     AUTHOR_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     ontology_id: str
     display_name: str
     files: _containers.RepeatedCompositeFieldContainer[GolFile]
     author: str
     expected_revision: str
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., files: _Optional[_Iterable[_Union[GolFile, _Mapping]]] = ..., author: _Optional[str] = ..., expected_revision: _Optional[str] = ...) -> None: ...
+    origin: GolPackageOrigin
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., files: _Optional[_Iterable[_Union[GolFile, _Mapping]]] = ..., author: _Optional[str] = ..., expected_revision: _Optional[str] = ..., origin: _Optional[_Union[GolPackageOrigin, _Mapping]] = ...) -> None: ...
 
 class GetGolWorkspaceRequest(_message.Message):
     __slots__ = ("tenant_id", "ontology_id", "source_revision")

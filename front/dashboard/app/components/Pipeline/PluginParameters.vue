@@ -12,6 +12,9 @@ const props = defineProps<{ capability: PluginBlock }>();
 const config = defineModel<NodeConfig>({ required: true });
 const emit = defineEmits<{ valid: [value: boolean] }>();
 const fields = computed(() => parameterFields(props.capability));
+const schema = computed(() =>
+  parseParameters(props.capability.parametersSchemaJson),
+);
 const values = computed(() =>
   props.capability.stepType === "source"
     ? sourceParameters(config.value)
@@ -100,16 +103,14 @@ const visibleFields = computed(() =>
         (!field.advanced &&
           !(props.capability.kind === "MODEL" && field.key === "action"))) &&
       (field.key !== "cron" || values.value.trigger === "cron") &&
-      (props.capability.id !== "utils.algorithm.compose_reply" ||
-        ((field.key !== "template" || values.value.generation === "template") &&
-          (!["model_alias", "instructions"].includes(field.key) ||
-            values.value.generation === "scribe"))),
+      (!field.visibleWhen ||
+        values.value[field.visibleWhen.parameter] === field.visibleWhen.equals),
   ),
 );
 function publish(value: Record<string, Json>) {
   config.value =
     props.capability.stepType === "source"
-      ? sourceConfig(config.value, value)
+      ? sourceConfig(config.value, value, schema.value)
       : { ...config.value, params: value };
   const complete = fields.value.every(
     (field) =>

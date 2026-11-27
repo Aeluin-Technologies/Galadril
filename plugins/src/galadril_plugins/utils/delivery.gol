@@ -1,0 +1,110 @@
+// Mailbox-local provenance carries no credential or inferred identity authority.
+
+ontology communication.delivery version "1.0.0" {
+    import communication.mail version "1.0.0" as Mail;
+    import communication.people version "1.0.0" as People;
+    import type gal.time::Instant version "1.0.0";
+    security label MailboxData {
+        classification: Confidential;
+        compartments: [Mailbox];
+    }
+    entity MailboxAccount {
+        field address: Ref<communication.people.Address> @label(MailboxData);
+        field connector_account: String @label(MailboxData);
+    }
+    entity MessageOccurrence {
+        field message: Ref<communication.mail.Message> @label(MailboxData);
+        field account: Ref<MailboxAccount> @label(MailboxData);
+        field mailbox: String @label(MailboxData);
+        field uid_validity: u32 @label(MailboxData);
+        field uid: u32 @label(MailboxData);
+        field original_object: String @label(MailboxData);
+        field received_at: Option<gal.time.Instant> @label(MailboxData);
+        field collected_at: gal.time.Instant @label(MailboxData);
+        field processed_at: Option<gal.time.Instant> @label(MailboxData);
+    }
+    invariant ValidMessageUid on MessageOccurrence { uid_validity > 0 && uid > 0 }
+    entity SynchronizationCheckpoint {
+        field account: Ref<MailboxAccount> @label(MailboxData);
+        field mailbox: String @label(MailboxData);
+        field uid_validity: u32 @label(MailboxData);
+        field highest_seen_uid: u32 @label(MailboxData);
+        field persisted_at: gal.time.Instant @label(MailboxData);
+    }
+    invariant ValidCheckpoint on SynchronizationCheckpoint { uid_validity > 0 }
+    entity ObservedCorrespondent {
+        field occurrence: Ref<MessageOccurrence> @label(MailboxData);
+        field observed_address: Ref<communication.people.Address> @label(MailboxData);
+        field observed_name: Option<String> @label(MailboxData);
+        field resolved_person: Option<Ref<communication.people.Person>> @label(MailboxData);
+    }
+    enum ReplyStage { prepared, validated, approved, rejected }
+    entity ReplyDraft {
+        field in_reply_to: Ref<MessageOccurrence> @label(MailboxData);
+        field sending_account: Ref<MailboxAccount> @label(MailboxData);
+        field draft_object: String @label(MailboxData);
+        field stage: ReplyStage @label(MailboxData);
+        field prepared_at: gal.time.Instant @label(MailboxData);
+    }
+    entity DeliveryReceipt {
+        field draft: Ref<ReplyDraft> @label(MailboxData);
+        field delivery_id: String @label(MailboxData);
+        field accepted_at: gal.time.Instant @label(MailboxData);
+    }
+    access MailboxAccount {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access MessageOccurrence {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access SynchronizationCheckpoint {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access ObservedCorrespondent {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access ReplyDraft {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access ReplyStage {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access DeliveryReceipt {
+        resource: "gol_resource";
+        permission read_access { relation: "mailbox_owner"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "mailbox_owner_transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+}

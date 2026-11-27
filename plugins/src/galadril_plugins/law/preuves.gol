@@ -1,9 +1,10 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.preuves version "0.4.0" {
-    import law.ecritures version "0.4.0" as LawEcritures;
-    import law.moyens version "0.4.0" as LawMoyens;
-    import law.socle version "0.4.0" as LawSocle;
+ontology law.preuves version "0.5.0" {
+    import law.ecritures version "0.5.0" as LawEcritures;
+    import law.moyens version "0.5.0" as LawMoyens;
+    import law.socle version "0.5.0" as LawSocle;
+    import type gal.time::Instant version "1.0.0";
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
@@ -35,6 +36,60 @@ ontology law.preuves version "0.4.0" {
     relation JudicialDecisionDocument {
         role source: law.socle.JudicialDecision [1..1];
         role target: Document [0..*];
+    }
+    entity Allegation {
+        field statement: String @label(LegalData);
+        field made_by: Ref<law.socle.Party> @label(LegalData);
+        field filing_revision: Ref<law.ecritures.FilingRevision> @label(LegalData);
+        field source_locator: Option<String> @label(LegalData);
+        field alleged_occurrence_at: Option<gal.time.Instant> @label(LegalData);
+    }
+    enum EvidentiaryPosition { supports, contradicts, inconclusive }
+    entity EvidenceAssessment {
+        field allegation: Ref<Allegation> @label(LegalData);
+        field exhibit: Ref<Exhibit> @label(LegalData);
+        field argument: Option<Ref<law.moyens.Argument>> @label(LegalData);
+        field assessor: Ref<law.socle.Party> @label(LegalData);
+        field position: EvidentiaryPosition @label(LegalData);
+        field explanation: String @label(LegalData);
+    }
+    entity JudicialFinding {
+        field decision: Ref<law.socle.JudicialDecision> @label(LegalData);
+        field finding: String @label(LegalData);
+        field allegation: Option<Ref<Allegation>> @label(LegalData);
+        field decision_locator: Option<String> @label(LegalData);
+    }
+    access Allegation {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access EvidentiaryPosition {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access EvidenceAssessment {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access JudicialFinding {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
     }
     access Document {
         resource: "gol_resource";

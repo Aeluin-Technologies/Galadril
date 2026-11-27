@@ -161,6 +161,11 @@ message GolDependency {
   string generation = 2;
   string source_revision = 3;
 }
+message GolPackageOrigin {
+  string plugin_id = 1;
+  string plugin_version = 2;
+  string package_version = 3;
+}
 message GolSummary {
   string ontology_id = 1;
   string display_name = 2;
@@ -168,6 +173,7 @@ message GolSummary {
   optional string active_generation = 4;
   optional string active_source_revision = 5;
   string status = 6;
+  GolPackageOrigin origin = 7;
 }
 message GolWorkspace {
   GolSummary summary = 1;
@@ -194,6 +200,8 @@ message SaveGolOntologyRequest {
   repeated GolFile files = 4;
   string author = 5;
   optional string expected_revision = 6;
+  // Populated only by Gateway from the deployed inventory.
+  GolPackageOrigin origin = 7;
 }
 message GetGolWorkspaceRequest {
   string tenant_id = 1;

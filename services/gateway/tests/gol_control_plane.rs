@@ -28,6 +28,7 @@ fn summary() -> GolSummary {
         active_generation: None,
         active_source_revision: None,
         status: "draft".into(),
+        origin: None,
     }
 }
 
@@ -313,6 +314,7 @@ async fn creation_right_never_discloses_existing_source_or_draft_metadata()
                 display_name: "Mail",
                 files: &files,
                 expected_revision: None,
+                origin: None,
             },
         )
         .await?;
@@ -442,7 +444,8 @@ async fn source_saves_require_the_specific_permission_and_do_not_parse_drafts()
                         ontology_id: "communication.mail",
                         display_name: "Mail",
                         files: &files,
-                        expected_revision: expected
+                        expected_revision: expected,
+                        origin: None,
                     }
                 )
                 .await
@@ -473,6 +476,7 @@ async fn source_saves_require_the_specific_permission_and_do_not_parse_drafts()
                 display_name: "Mail",
                 files: &files,
                 expected_revision: None,
+                origin: None,
             },
         )
         .await?;

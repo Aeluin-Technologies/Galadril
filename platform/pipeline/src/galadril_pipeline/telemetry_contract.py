@@ -98,6 +98,7 @@ SPAN_AMARTH_EFFECT_ESTIMATE: Final = "galadril.amarth.effect.estimate"
 SPAN_GATEWAY_AUTHORIZATION_EVALUATE: Final = (
     "galadril.gateway.authorization.evaluate"
 )
+SPAN_GOL_PACKAGE_INSTALL: Final = "galadril.gol.package.install"
 SPAN_GOL_RUNTIME_BIND: Final = "galadril.gol.runtime.bind"
 SPAN_IFC_FLOW_EVALUATE: Final = "galadril.ifc.flow.evaluate"
 SPAN_INTAKE_OBSERVATION_INGEST: Final = "galadril.intake.observation.ingest"
@@ -109,6 +110,9 @@ SPAN_VISION_STEP_DISPATCH: Final = "galadril.vision.step.dispatch"
 SPAN_VISION_STEP_EXECUTE: Final = "galadril.vision.step.execute"
 EVENT_GATEWAY_AUTHORIZATION_CHECK: Final = (
     "galadril.gateway.authorization.check"
+)
+EVENT_GOL_PACKAGE_INSTALL_COMPLETED: Final = (
+    "galadril.gol.package.install_completed"
 )
 EVENT_GOL_WORKER_FAILED: Final = "galadril.gol.worker.failed"
 EVENT_VISION_STEP_FAILED: Final = "galadril.vision.step.failed"
@@ -137,6 +141,16 @@ def amarth_effect_estimate_attributes(
 
 
 def gateway_authorization_evaluate_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
+    return attributes
+
+
+def gol_package_install_attributes(
     *,
     error_code: ErrorCode | None = None,
 ) -> dict[str, Attribute]:
@@ -274,6 +288,16 @@ def gateway_authorization_check_attributes(
         attributes["galadril.error.code"] = error_code
     if error_occurrence_id is not None:
         attributes["galadril.error.occurrence_id"] = error_occurrence_id
+    return attributes
+
+
+def gol_package_install_completed_attributes(
+    *,
+    error_code: ErrorCode | None = None,
+) -> dict[str, Attribute]:
+    attributes: dict[str, Attribute] = {}
+    if error_code is not None:
+        attributes["galadril.error.code"] = error_code
     return attributes
 
 

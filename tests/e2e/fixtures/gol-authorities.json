@@ -154,6 +154,23 @@
       "compartments": [],
       "destinations": null,
       "purposes": null
+    },
+    "law.correspondence": {
+      "classification": "Restricted",
+      "compartments": [
+        "Legal",
+        "Mailbox"
+      ],
+      "destinations": null,
+      "purposes": null
+    },
+    "communication.delivery": {
+      "classification": "Confidential",
+      "compartments": [
+        "Mailbox"
+      ],
+      "destinations": null,
+      "purposes": null
     }
   },
   "target_floors": [
@@ -449,6 +466,7 @@
     "communication.content": "communication.mail",
     "communication.threads": "communication.mail",
     "communication.mail": "communication.mail",
+    "communication.delivery": "communication.mail",
     "documents.attachments": "communication.mail"
   }
 }

@@ -1,12 +1,89 @@
 // Authored GOL contract; security identities remain external.
 
-ontology law.contentieux version "0.4.0" {
-    import law.ecritures version "0.4.0" as LawEcritures;
-    import law.moyens version "0.4.0" as LawMoyens;
-    import law.preuves version "0.4.0" as LawPreuves;
-    import law.socle version "0.4.0" as LawSocle;
+ontology law.contentieux version "0.5.0" {
+    import law.ecritures version "0.5.0" as LawEcritures;
+    import law.moyens version "0.5.0" as LawMoyens;
+    import law.preuves version "0.5.0" as LawPreuves;
+    import law.socle version "0.5.0" as LawSocle;
+    import type gal.time::Instant version "1.0.0";
     security label LegalData {
         classification: Restricted;
         compartments: [Legal];
+    }
+    enum ProceduralEventKind { filing, hearing, decision, notification, appeal, other }
+    entity ProceduralEvent {
+        field proceeding: Ref<law.socle.Proceeding> @label(LegalData);
+        field kind: ProceduralEventKind @label(LegalData);
+        field source_document: Ref<law.preuves.Document> @label(LegalData);
+        field filing_revision: Option<Ref<law.ecritures.FilingRevision>> @label(LegalData);
+        field occurred_at: Option<gal.time.Instant> @label(LegalData);
+        field recorded_at: gal.time.Instant @label(LegalData);
+    }
+    enum NotificationChannel { postal, electronic, personal_service, other, unknown }
+    entity Notification {
+        field event: Ref<ProceduralEvent> @label(LegalData);
+        field recipient: Ref<law.socle.Party> @label(LegalData);
+        field channel: NotificationChannel @label(LegalData);
+        field dispatch_at: Option<gal.time.Instant> @label(LegalData);
+        field receipt_at: Option<gal.time.Instant> @label(LegalData);
+        field receipt_evidence: Option<Ref<law.preuves.Document>> @label(LegalData);
+    }
+    enum DeadlineReview { tentative, confirmed, superseded }
+    entity DeadlineAssessment {
+        field proceeding: Ref<law.socle.Proceeding> @label(LegalData);
+        field triggering_event: Option<Ref<ProceduralEvent>> @label(LegalData);
+        field basis: List<Ref<law.socle.NormativeVersion>> @label(LegalData);
+        field status: DeadlineReview @label(LegalData);
+        field candidate_due_at: Option<gal.time.Instant> @label(LegalData);
+        field assumptions: String @label(LegalData);
+        field assessed_at: gal.time.Instant @label(LegalData);
+    }
+    access ProceduralEventKind {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access ProceduralEvent {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access NotificationChannel {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access Notification {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access DeadlineReview {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
+    }
+    access DeadlineAssessment {
+        resource: "gol_resource";
+        permission read_access { relation: "read"; cedar: "Gol::Action::\"read\""; }
+        permission write_access { relation: "write"; cedar: "Gol::Action::\"write\""; }
+        permission describe { relation: "describe"; cedar: "Gol::Action::\"describe\""; }
+        permission transfer { relation: "transfer"; cedar: "Gol::Action::\"transfer\""; }
+        permission execute { relation: "execute"; cedar: "Gol::Action::\"execute\""; }
     }
 }

@@ -18,6 +18,7 @@ const summary: GolSummary = {
   activeGeneration: "generation-1",
   activeSourceRevision: "revision-1",
   status: "published",
+  origin: null,
 };
 const text =
   'ontology communication.mail version "1.0.0" {\n  entity Message { field title: String; }\n}';

@@ -9,6 +9,7 @@ use futures::StreamExt as _;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::application::ports::control_plane_store::PluginGolPackage;
 use crate::application::ports::conversation_agent::{
     AgentChunk, AgentModelCatalog, AgentRequest, AgentStream,
     ConversationAgent,
@@ -271,24 +272,28 @@ impl ConversationAgent for ScribeAgent {
         Ok(catalog)
     }
 
-    #[tracing::instrument(skip_all, name = "scribe.pipeline.validate")]
-    async fn plugin_ontologies(&self) -> Result<serde_json::Value> {
+    #[tracing::instrument(skip_all, name = "scribe.gol.catalog")]
+    async fn plugin_ontologies(&self) -> Result<Vec<PluginGolPackage>> {
+        #[derive(Deserialize)]
+        struct Inventory {
+            packages: Vec<PluginGolPackage>,
+        }
         let base = self
             .models_endpoint
             .strip_suffix("/models")
             .context("Invalid Scribe catalog route")?;
-        let response = self
-            .client
-            .get(format!("{base}/plugin-ontologies"))
-            .timeout(Duration::from_secs(15))
-            .send()
-            .await?;
+        let data = fetch_catalog_body(
+            &self.client,
+            &format!("{base}/plugin-ontologies"),
+            8 * 1024 * 1024,
+        )
+        .await?;
+        let inventory: Inventory = serde_json::from_slice(&data)?;
         anyhow::ensure!(
-            response.status().is_success(),
-            "Plugin ontologies unavailable"
+            inventory.packages.len() <= 32,
+            "Plugin ontology inventory exceeds limit"
         );
-        let data = bounded_body(response, 2 * 1024 * 1024).await?;
-        Ok(serde_json::from_slice(&data)?)
+        Ok(inventory.packages)
     }
 
     async fn validate_pipeline_capabilities(

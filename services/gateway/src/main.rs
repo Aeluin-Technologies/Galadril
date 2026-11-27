@@ -294,13 +294,13 @@ async fn main() -> Result<()> {
         let registry_store =
             Arc::new(RegistryStore::new(registry_client, database.clone()));
         let control_plane_store = registry_store.clone();
-        let control_plane = Arc::new(ControlPlaneService::new(
+        let control_plane = ControlPlaneService::new(
             control_plane_store,
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
             Arc::clone(&gol) as Arc<dyn crate::application::ports::control_plane_store::GolDisclosure>,
-        ));
+        );
 
         let search_store = Arc::new(PgSearchStore::new(database.clone()));
         let embedder = Arc::new(FakeEmbeddingGenerator::new());
@@ -362,6 +362,7 @@ async fn main() -> Result<()> {
         if let Some(service) = &utils { chat_tools.set_email(Arc::clone(service))?; }
         let pipeline_runtime: Arc<dyn ConversationAgent> = ScribeAgent::new(&config.scribe, Arc::clone(&chat_tools))
             .context("Failed to initialize pipeline capability runtime")?;
+        let control_plane = Arc::new(control_plane.with_plugin_catalog(Arc::clone(&pipeline_runtime)));
         let scribe = crate::adapters::outbound::scribe::chat_agent(config.scribe.enabled, Arc::clone(&pipeline_runtime));
         search.set_evidence_runtime(Arc::downgrade(&scribe))?;
         let pipelines = Arc::new(PipelineService::new(

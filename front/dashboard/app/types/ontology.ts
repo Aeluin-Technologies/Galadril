@@ -3,6 +3,16 @@ export interface GolSourceFile {
   path: string;
   text: string;
 }
+export interface GolPackageOrigin {
+  pluginId: string;
+  pluginVersion: string;
+  packageVersion: string;
+}
+export interface GolOntologyPackage extends GolPackageOrigin {
+  ontologyId: string;
+  displayName: string;
+  requiredPlugins: Pick<GolPackageOrigin, "pluginId" | "pluginVersion">[];
+}
 export interface GolSummary {
   ontologyId: string;
   displayName: string;
@@ -10,6 +20,7 @@ export interface GolSummary {
   activeGeneration: string | null;
   activeSourceRevision: string | null;
   status: "draft" | "published";
+  origin: GolPackageOrigin | null;
 }
 export interface GolDiagnostic {
   code: string;

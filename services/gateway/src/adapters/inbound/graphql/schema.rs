@@ -2140,6 +2140,22 @@ impl Query {
             .map_err(|_| gol::unavailable())
     }
 
+    /// Lists deployment packages available to authorized ontology installers.
+    async fn gol_ontology_packages(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<Vec<gol::OntologyPackage>> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .gol_ontology_packages(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+            )
+            .await
+            .map(|values| values.into_iter().map(Into::into).collect())
+            .map_err(|_| gol::unavailable())
+    }
+
     /// Source text and diagnostic metadata require source-authoring authority.
     async fn gol_ontology_workspace(
         #[graphql(context)] ctx: &AppContext,
@@ -3348,6 +3364,34 @@ impl Mutation {
             .map_err(pipeline_error)
     }
 
+    /// Installs a version-pinned deployment package as a tenant source draft.
+    async fn install_gol_ontology_package(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        plugin_id: String,
+        plugin_version: String,
+        package_version: String,
+        expected_revision: Option<String>,
+    ) -> FieldResult<gol::Summary> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .install_gol_ontology_package(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                &crate::application::ports::control_plane_store::GolPackageOrigin {
+                    plugin_id,
+                    plugin_version,
+                    package_version,
+                },
+                expected_revision.as_deref(),
+            )
+            .await
+            .map(Into::into)
+            .map_err(|_| gol::unavailable())
+    }
+
     /// Invalid drafts remain saveable; Registry owns all compilation and CAS.
     async fn save_gol_ontology(
         #[graphql(context)] ctx: &AppContext,
@@ -3368,6 +3412,7 @@ impl Mutation {
                     display_name: &display_name,
                     files: &files,
                     expected_revision: expected_revision.as_deref(),
+                    origin: None,
                 },
             )
             .await

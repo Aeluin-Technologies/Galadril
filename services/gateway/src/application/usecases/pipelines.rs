@@ -51,24 +51,6 @@ pub struct PipelineService {
 }
 
 impl PipelineService {
-    /// Uses the executable inventory only after authenticating tenant
-    /// membership.
-    pub async fn plugin_ontologies(
-        &self,
-        tenant: &str,
-        user: &str,
-    ) -> Result<Value> {
-        self.identity
-            .verify_user(tenant, user)
-            .await
-            .map_err(|_| PipelineAccessDenied)?;
-        self.runtime_catalog
-            .as_ref()
-            .context("Plugin ontology inventory unavailable")?
-            .plugin_ontologies()
-            .await
-    }
-
     /// Returns stable block diagnostics while keeping dependency details
     /// private.
     pub async fn diagnose(

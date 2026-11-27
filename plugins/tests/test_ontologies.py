@@ -16,7 +16,7 @@ class Packages(unittest.TestCase):
         self,
     ) -> None:
         packages = PluginRegistry.discover().ontology_packages()
-        self.assertEqual(len(packages), 9)
+        self.assertEqual(len(packages), 10)
         for package in packages:
             with self.subTest(package=package["id"]):
                 self.assertNotIn("ontologies", package)
@@ -62,7 +62,7 @@ class Packages(unittest.TestCase):
         )
         self.assertIn("@label(LegalData)", admin["files"][0]["text"])
         self.assertIn(
-            'import law.contentieux version "0.4.0" as LawContentieux;',
+            'import law.contentieux version "0.5.0" as LawContentieux;',
             admin["files"][0]["text"],
         )
         self.assertNotIn("extends", admin["files"][0]["text"])
