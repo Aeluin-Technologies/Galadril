@@ -109,8 +109,8 @@ const {
           ><UiInput
             id="new-role"
             ref="newRoleInput"
-            autofocus
             v-model.trim="newRole"
+            autofocus
             pattern="[A-Za-z0-9_-]{1,64}"
             maxlength="64"
             required
@@ -161,17 +161,17 @@ const {
         <div class="mt-4 flex flex-wrap gap-3">
           <UiButton
             type="button"
-            @click="assignRole()"
             variant="primary"
             :loading="busy"
             :disabled="!selectedRole"
+            @click="assignRole()"
             >{{ $t("administration.copy.assign_role") }}</UiButton
           ><UiButton
             type="button"
             variant="secondary"
-            @click="assignRole(false)"
             :loading="busy"
             :disabled="!selectedRole"
+            @click="assignRole(false)"
             >{{ $t("administration.copy.remove_role") }}</UiButton
           >
         </div></template
@@ -212,23 +212,23 @@ const {
         <div class="mt-4 flex gap-3">
           <UiButton
             type="button"
+            variant="primary"
+            :loading="busy"
+            :disabled="!parentRole"
             @click="
               selectedRole = subject.slice(5);
               includeRole();
             "
-            variant="primary"
-            :loading="busy"
-            :disabled="!parentRole"
             >{{ $t("administration.copy.include_role") }}</UiButton
           ><UiButton
             type="button"
             variant="secondary"
+            :loading="busy"
+            :disabled="!parentRole"
             @click="
               selectedRole = subject.slice(5);
               includeRole(false);
             "
-            :loading="busy"
-            :disabled="!parentRole"
             >{{ $t("administration.copy.remove_inclusion") }}</UiButton
           >
         </div></template
@@ -294,17 +294,17 @@ const {
         <div class="mt-4 flex flex-wrap gap-3">
           <UiButton
             type="button"
-            @click="saveResourceAccess()"
             variant="primary"
             :loading="busy"
             :disabled="!resourceAccessReady"
+            @click="saveResourceAccess()"
             >{{ $t("administration.copy.grant_data_access") }}</UiButton
           ><UiButton
             type="button"
             variant="secondary"
-            @click="saveResourceAccess(false)"
             :loading="busy"
             :disabled="!resourceAccessReady"
+            @click="saveResourceAccess(false)"
             >{{ $t("administration.copy.remove_data_access") }}</UiButton
           >
         </div>

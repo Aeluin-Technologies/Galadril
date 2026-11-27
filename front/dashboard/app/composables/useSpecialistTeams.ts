@@ -23,8 +23,16 @@ export function useSpecialistTeams(
     const groups = new Map<string, SpecialistTeam>();
     for (const agent of agents.items) {
       const plugin = agent.data.pluginId || null;
-      const context = agent.data.skillIds.map(id => agents.catalog.find(item => item.id === id)?.executionProfile?.requiresContext).find(Boolean);
-      const id = plugin ? `plugin:${plugin}:${context ?? "default"}` : `personal:${agent.id}`;
+      const context = agent.data.skillIds
+        .map(
+          (id) =>
+            agents.catalog.find((item) => item.id === id)?.executionProfile
+              ?.requiresContext,
+        )
+        .find(Boolean);
+      const id = plugin
+        ? `plugin:${plugin}:${context ?? "default"}`
+        : `personal:${agent.id}`;
       let team = groups.get(id);
       if (!team) {
         team = {
@@ -56,7 +64,9 @@ export function useSpecialistTeams(
   function usesPrivateProcessing(team: SpecialistTeam) {
     return team.members.some((member) =>
       member.data.skillIds.some((id) => {
-        const profile = agents.catalog.find((item) => item.id === id)?.executionProfile;
+        const profile = agents.catalog.find(
+          (item) => item.id === id,
+        )?.executionProfile;
         return profile?.contexts.some(
           (context) =>
             context.id === profile.requiresContext &&
@@ -88,5 +98,12 @@ export function useSpecialistTeams(
       agents.selected = [...new Set([...agents.selected, ...ids])];
     }
   }
-  return { teams, activeTeams, selected, available, toggle, usesPrivateProcessing };
+  return {
+    teams,
+    activeTeams,
+    selected,
+    available,
+    toggle,
+    usesPrivateProcessing,
+  };
 }

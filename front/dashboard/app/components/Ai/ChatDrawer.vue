@@ -32,15 +32,15 @@ async function expand() {
           <UiIconButton
             variant="ghost"
             type="button"
-            @click="expand"
             :icon="ArrowTopRightOnSquareIcon"
             label="Open Pengolo workspace"
+            @click="expand"
           /><UiIconButton
             variant="ghost"
             type="button"
-            @click="close"
             :icon="XMarkIcon"
             label="Close Pengolo assistant"
+            @click="close"
           />
         </div>
       </header>

@@ -4,15 +4,14 @@ import {
   parseDiagnostics,
 } from "~/utils/pipeline-review";
 import { parseAuthoring } from "~/utils/pipeline-authoring";
-import type { AuthoringCommand } from "~/utils/pipeline";
+import type {
+  AuthoringCommand,
+  Definition,
+  PipelineSummary,
+} from "~/utils/pipeline";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { parseDefinition } from "~/utils/pipeline";
-import type {
-  Definition,
-  PipelineArtifact,
-  PipelineSummary,
-} from "~/utils/pipeline";
 
 /** Requests remain on the authenticated Gateway; no artifact URL is client-owned. */
 export function usePipelineCatalog() {

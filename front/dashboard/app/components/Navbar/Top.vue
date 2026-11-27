@@ -79,19 +79,19 @@ const breadcrumbs = computed<Breadcrumb[]>(() => {
     <div class="flex items-center gap-1.5 sm:gap-3">
       <UiSearchTrigger
         data-tour="search"
-        @click="emit('open-command')"
         :label="$t('navbar.search.placeholder')"
         :shortcut="$t('navbar.search.shortcut')"
         aria-keyshortcuts="Control+K Meta+K"
         class="w-9 sm:w-64 lg:w-72"
+        @click="emit('open-command')"
       />
 
       <UiButton
         data-tour="copilot"
-        @click="chatStore.toggleChat"
         variant="ghost"
         :aria-pressed="chatStore.isChatOpen"
         aria-label="Pengolo"
+        @click="chatStore.toggleChat"
       >
         <SparklesIcon class="w-4 h-4 text-primary-foreground" />
         <span class="hidden sm:inline">Pengolo</span>

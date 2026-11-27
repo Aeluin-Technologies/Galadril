@@ -8,6 +8,7 @@ import {
   required,
 } from "./fixture.ts";
 import type { Page, Request as BrowserRequest } from "@playwright/test";
+import { operation, record, stringField } from "./wire.ts";
 
 async function administration(page: Page, actor: string) {
   await finishLogin(page, actor);
@@ -52,7 +53,7 @@ function observeMutations(page: Page) {
       request.method() !== "POST"
     )
       return;
-    const body = request.postDataJSON();
+    const body = operation(request.postDataJSON());
     if (body.query?.startsWith("mutation")) operations.push(body);
   });
   return operations;
@@ -139,11 +140,13 @@ test("password and passkey transitions keep the document, session survives reloa
   expect(
     await page.evaluate(() => document.cookie.includes("galadril-token")),
   ).toBe(false);
-  const claims = JSON.parse(
-    Buffer.from(
-      required(cookie).value.split(".")[1] ?? "",
-      "base64url",
-    ).toString(),
+  const claims = record(
+    JSON.parse(
+      Buffer.from(
+        required(cookie).value.split(".")[1] ?? "",
+        "base64url",
+      ).toString(),
+    ),
   );
   expect(claims).toMatchObject({
     sub: "browser-auth",
@@ -154,8 +157,10 @@ test("password and passkey transitions keep the document, session survives reloa
   expect(claims.amr).toEqual(expect.arrayContaining(["pwd", "mfa", "pop"]));
   expect(
     await page.evaluate(() =>
-      [...Object.values(localStorage), ...Object.values(sessionStorage)].some(
-        (value) => value.includes("eyJ"),
+      [localStorage, sessionStorage].some((storage) =>
+        Object.keys(storage).some(
+          (key) => storage.getItem(key)?.includes("eyJ") === true,
+        ),
       ),
     ),
   ).toBe(false);
@@ -199,11 +204,13 @@ test("enterprise email follows real Polis OIDC and requires passkey enrollment",
   const cookie = (await context.cookies()).find(
     (value) => value.name === tokenCookie,
   );
-  const claims = JSON.parse(
-    Buffer.from(
-      required(cookie).value.split(".")[1] ?? "",
-      "base64url",
-    ).toString(),
+  const claims = record(
+    JSON.parse(
+      Buffer.from(
+        required(cookie).value.split(".")[1] ?? "",
+        "base64url",
+      ).toString(),
+    ),
   );
   expect(claims.tenant_id).toBe("acme");
   expect(claims.amr).toEqual(
@@ -357,7 +364,7 @@ test("people reload uses an animated icon and announces completion without repla
     release = resolve;
   });
   await page.route("**/graphql", async (route) => {
-    if (route.request().postDataJSON().query.includes("users("))
+    if (operation(route.request().postDataJSON()).query.includes("users("))
       await responseGate;
     await route.continue();
   });
@@ -408,7 +415,7 @@ test("permission blocks round-trip through code and require opt-in and review", 
   const source = await page
     .getByLabel("Permission manifest", { exact: true })
     .inputValue();
-  expect(JSON.parse(source).operations).toHaveLength(1);
+  expect(record(JSON.parse(source)).operations).toHaveLength(1);
   await page
     .getByRole("button", { name: "Visual blocks", exact: true })
     .click();
@@ -433,13 +440,15 @@ test("permission blocks round-trip through code and require opt-in and review", 
   const applied = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === "/graphql" &&
-      response.request().postDataJSON()?.query.includes("importPermissions"),
+      operation(response.request().postDataJSON()).query.includes(
+        "importPermissions",
+      ),
   );
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
   const imported = await applied;
   expect(imported.status()).toBe(200);
-  const result = await imported.json();
-  expect(result.data.administration.importPermissions).toEqual({
+  const result = record(await imported.json());
+  expect(record(record(result.data).administration).importPermissions).toEqual({
     applied: 1,
     complete: true,
     failedAt: null,
@@ -487,7 +496,9 @@ test("permissions guide administrators through choices, filtered access maps and
   await page.route("**/graphql", async (route) => {
     if (
       route.request().method() !== "POST" ||
-      !route.request().postDataJSON().query?.includes("globalSearchPage")
+      !operation(route.request().postDataJSON()).query?.includes(
+        "globalSearchPage",
+      )
     )
       return route.continue();
     await searchGate;
@@ -628,7 +639,11 @@ test("administration errors explain recovery and never display backend details",
 }) => {
   await administration(page, "browser-admin-errors");
   await page.route("**/graphql", async (route) => {
-    if (!route.request().postDataJSON().query.includes("updateOrganization"))
+    if (
+      !operation(route.request().postDataJSON()).query.includes(
+        "updateOrganization",
+      )
+    )
       return route.continue();
     await route.fulfill({
       json: {
@@ -727,10 +742,14 @@ test("an active visible dashboard periodically renews its session using protecte
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const checkpoint = JSON.parse(
+        const checkpoint: unknown = JSON.parse(
           localStorage.getItem("galadril-session-check") ?? "null",
         );
-        return checkpoint?.subject;
+        return checkpoint &&
+          typeof checkpoint === "object" &&
+          "subject" in checkpoint
+          ? checkpoint.subject
+          : undefined;
       }),
     )
     .toBe("browser-session-renewal");
@@ -863,9 +882,9 @@ test("directory pagination appends server pages and accepts fuzzy matches withou
   }));
   const cursors: (string | null)[] = [];
   await page.route("**/graphql", async (route) => {
-    const { query, variables = {} } = route.request().postDataJSON();
+    const { query, variables } = operation(route.request().postDataJSON());
     if (!query.includes("users(")) return route.continue();
-    const after = variables.after ?? null;
+    const after = variables.after == null ? null : stringField(variables.after);
     cursors.push(after);
     const start = after
       ? people.findIndex((person) => person.userId === after) + 1
@@ -936,10 +955,10 @@ test("directory pagination appends server pages and accepts fuzzy matches withou
   });
   const terms: string[] = [];
   await page.route("**/graphql", async (route) => {
-    const { query, variables = {} } = route.request().postDataJSON();
+    const { query, variables } = operation(route.request().postDataJSON());
     if (!query.includes("accessGraph") || !variables.search)
       return route.continue();
-    const term = variables.search;
+    const term = stringField(variables.search);
     terms.push(term);
     if (term === "oldrole") {
       required(startedOld)();

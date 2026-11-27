@@ -85,9 +85,9 @@ async function attach(event: Event) {
 <template>
   <div class="grid gap-2">
     <UiField
+      v-slot="field"
       :label="$t('email.attachments')"
       :help="$t('email.attachmentHelp')"
-      v-slot="field"
     >
       <input
         :id="field.id"

@@ -1,3 +1,4 @@
+import { parseGenerationReplay } from "../app/utils/pengolo-replay.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -133,7 +134,7 @@ test("specialists remain opt-in and cannot escape project or Skill model restric
     ...skill,
     compatibility: { ...skill.compatibility },
   }));
-  nested[1]!.compatibility.requires = ["law.algorithm.verify"];
+  required(nested[1]).compatibility.requires = ["law.algorithm.verify"];
   assert.equal(compatibleAgent(agent, "legal", "local", nested), false);
   assert.equal(
     compatibleAgent(agent, "legal", "local", skills.slice(0, 1)),
@@ -655,5 +656,30 @@ test("execution compatibility follows registered metadata for arbitrary plugin I
       catalog,
     ),
     false,
+  );
+});
+
+test("replay validates the pushed event and message before updating a run", () => {
+  const page = {
+    generationId: "generation",
+    status: "running",
+    events: [{ sequence: 1, kind: "content", content: "Bonjour" }],
+    message: null,
+    chatRevision: null,
+    chatUpdatedAt: null,
+  };
+  assert.deepEqual(parseGenerationReplay(page), page);
+  assert.throws(() =>
+    parseGenerationReplay({ ...page, events: [{ sequence: "1" }] }),
+  );
+  assert.throws(() =>
+    parseGenerationReplay({ ...page, message: { role: "other" } }),
+  );
+  assert.throws(() => parseGenerationReplay({ ...page, message: undefined }));
+  assert.throws(() =>
+    parseGenerationReplay({ ...page, chatRevision: undefined }),
+  );
+  assert.throws(() =>
+    parseGenerationReplay({ ...page, chatUpdatedAt: undefined }),
   );
 });

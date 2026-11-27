@@ -139,7 +139,7 @@ export function reviewChanges(
             },
           ] as const,
       ),
-      ...Object.entries(definition)
+      ...Object.entries<unknown>({ ...definition })
         .filter(([key]) => key !== "sources" && key !== "pipeline")
         .map(
           ([key, value]) => [`setting:${key}`, { label: key, value }] as const,

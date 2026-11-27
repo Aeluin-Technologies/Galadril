@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasAsciiControl } from "../../../shared/text.ts";
 import {
   PaperAirplaneIcon,
   EnvelopeIcon,
@@ -135,7 +136,8 @@ const valid = computed(() => {
       (address) =>
         address.includes("@") &&
         address.length <= 320 &&
-        !/[\x00-\x20\x7f]/.test(address),
+        !address.includes(" ") &&
+        !hasAsciiControl(address),
     ) &&
     content.value.subject.trim().length > 0 &&
     content.value.subject.length <= 998 &&

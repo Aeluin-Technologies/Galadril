@@ -169,11 +169,11 @@ test("select remains usable inside modal top layers with disabled options and ty
   await expect(trigger).toHaveText("Object storage");
   await expect
     .poll(() =>
-      dialog
-        .locator("form")
-        .evaluate((form) =>
-          new FormData(form as HTMLFormElement).get("connection"),
-        ),
+      dialog.locator("form").evaluate((form) => {
+        if (!(form instanceof HTMLFormElement))
+          throw new Error("Expected a form");
+        return new FormData(form).get("connection");
+      }),
     )
     .toBe("storage");
   await trigger.press("ArrowDown");
@@ -195,11 +195,11 @@ test("select reflects a renamed option without changing its submitted identifier
   await page.getByRole("button", { name: "Rename connection" }).click();
   await expect(trigger).toHaveText("Analytics database");
   expect(
-    await page
-      .locator("dialog form")
-      .evaluate((form) =>
-        new FormData(form as HTMLFormElement).get("connection"),
-      ),
+    await page.locator("dialog form").evaluate((form) => {
+      if (!(form instanceof HTMLFormElement))
+        throw new Error("Expected a form");
+      return new FormData(form).get("connection");
+    }),
   ).toBe("database");
 });
 
@@ -222,11 +222,11 @@ test("shared form controls preserve external labels, numeric and boolean models,
   await page.getByRole("checkbox", { name: "Analyst" }).uncheck();
   await expect(page.getByLabel("Selected roles")).toHaveText("operator");
   expect(
-    await page
-      .locator("form")
-      .evaluate((form) =>
-        Object.fromEntries(new FormData(form as HTMLFormElement)),
-      ),
+    await page.locator("form").evaluate((form) => {
+      if (!(form instanceof HTMLFormElement))
+        throw new Error("Expected a form");
+      return Object.fromEntries(new FormData(form));
+    }),
   ).toMatchObject({ quantity: "7", access: "true", notes: "Keep the context" });
   expect(
     (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())

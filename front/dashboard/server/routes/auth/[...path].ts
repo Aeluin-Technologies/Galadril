@@ -104,7 +104,7 @@ export default defineEventHandler(async (event) => {
         if (!(error instanceof SecondFactorRequiredError)) throw error;
         requiresPasskey = true;
       }
-      const profile = await useSession(event, {
+      const profile = await useSession<Record<string, unknown>>(event, {
         name: "__Host-galadril-profile",
         password: config.sessionSecret,
         cookie,
@@ -116,7 +116,8 @@ export default defineEventHandler(async (event) => {
         requiresPasskey,
         displayName:
           profile.data.subject === claims.sub &&
-          profile.data.tenant === claims.tenant_id
+          profile.data.tenant === claims.tenant_id &&
+          typeof profile.data.displayName === "string"
             ? profile.data.displayName
             : undefined,
       };
@@ -139,8 +140,7 @@ export default defineEventHandler(async (event) => {
             config.keys,
           );
         } catch (error) {
-          if ((error as { code?: string }).code !== "ERR_JWT_EXPIRED")
-            throw error;
+          if (record(error).code !== "ERR_JWT_EXPIRED") throw error;
         }
         if (current) {
           if (
@@ -212,7 +212,7 @@ export default defineEventHandler(async (event) => {
         303,
       );
     }
-    const session = await useSession(event, {
+    const session = await useSession<Record<string, unknown>>(event, {
       name: "__Host-galadril-flow",
       password: config.sessionSecret,
       maxAge: 600,
@@ -232,10 +232,11 @@ export default defineEventHandler(async (event) => {
         throw new Error("Primary authentication expired");
     }
     function secondFactorClaims() {
-      return Number.isSafeInteger(session.data.mfaGeneration)
+      const generation = session.data.mfaGeneration;
+      return typeof generation === "number" && Number.isSafeInteger(generation)
         ? {
             acr: passkeyAssurance,
-            mfa_generation: session.data.mfaGeneration,
+            mfa_generation: generation,
             amr: [session.data.primaryMethod, "mfa", "pop"],
           }
         : {};
@@ -244,20 +245,20 @@ export default defineEventHandler(async (event) => {
       primaryFresh();
       const assurance = secondFactorClaims();
       await config.passkeys.check({
-        tenant_id: session.data.tenant,
-        sub: session.data.subject,
+        tenant_id: text(session.data.tenant),
+        sub: text(session.data.subject),
         ...assurance,
       });
       const accepted = await adminRequest(
         config,
         "login",
-        session.data.loginChallenge,
+        text(session.data.loginChallenge),
         {
-          subject: session.data.subject,
+          subject: text(session.data.subject),
           remember: false,
           ...(assurance.acr ? { acr: assurance.acr, amr: assurance.amr } : {}),
           context: {
-            tenant_id: session.data.tenant,
+            tenant_id: text(session.data.tenant),
             ...secondFactorClaims(),
           },
         },
@@ -286,20 +287,20 @@ export default defineEventHandler(async (event) => {
     if (path === "mfa/options" && event.method === "GET") {
       primaryFresh();
       const step = await config.passkeys.begin(
-        session.data.tenant,
-        session.data.subject,
-        session.data.state,
+        text(session.data.tenant),
+        text(session.data.subject),
+        text(session.data.state),
       );
       if (!step) throw new Error("Second factor policy changed");
       return step;
     }
     if (path === "mfa/verify" && event.method === "POST") {
       primaryFresh();
-      const proof = await readBody(event);
+      const proof: unknown = await readBody(event);
       const generation = await config.passkeys.verify(
-        session.data.tenant,
-        session.data.subject,
-        session.data.state,
+        text(session.data.tenant),
+        text(session.data.subject),
+        text(session.data.state),
         proof,
       );
       await session.update({ mfaGeneration: generation });
@@ -377,12 +378,12 @@ export default defineEventHandler(async (event) => {
           primary,
           await config.passkeys.store.context(primary.tenant_id, primary.sub),
         );
-        const profile = await useSession(event, {
+        const profile = await useSession<Record<string, unknown>>(event, {
           name: "__Host-galadril-profile",
           password: config.sessionSecret,
           cookie,
         });
-        email = profile.data.displayName;
+        email = text(profile.data.displayName);
         if (
           profile.data.subject !== primary.sub ||
           profile.data.tenant !== primary.tenant_id
@@ -501,7 +502,7 @@ export default defineEventHandler(async (event) => {
       }
       const provider = await findLoginProvider(
         config.directory,
-        session.data.email,
+        text(session.data.email),
         Boolean(config.kratos),
       );
       if (provider.kind === "local") {
@@ -567,7 +568,7 @@ export default defineEventHandler(async (event) => {
                 ...node,
                 attributes: {
                   ...record(node.attributes),
-                  value: session.data.email,
+                  value: text(session.data.email),
                 },
               }
             : node,
@@ -608,7 +609,7 @@ export default defineEventHandler(async (event) => {
             client_id: connection.connection_id,
             client_secret: await connectionCredential(config, connection),
             redirect_uri: `${config.origin}/auth/polis/callback`,
-            code_verifier: session.data.polisVerifier,
+            code_verifier: text(session.data.polisVerifier),
           }).toString(),
         },
       );
@@ -644,11 +645,11 @@ export default defineEventHandler(async (event) => {
         throw new Error("Invalid consent identity");
       await activeUser(
         config.directory,
-        session.data.tenant,
+        text(session.data.tenant),
         text(consent.subject),
       );
       await config.passkeys.check({
-        tenant_id: session.data.tenant,
+        tenant_id: text(session.data.tenant),
         sub: consent.subject,
         ...secondFactorClaims(),
       });
@@ -658,7 +659,7 @@ export default defineEventHandler(async (event) => {
         remember: false,
         session: {
           access_token: {
-            tenant_id: session.data.tenant,
+            tenant_id: text(session.data.tenant),
             token_use: "access",
             ...secondFactorClaims(),
           },
@@ -685,7 +686,7 @@ export default defineEventHandler(async (event) => {
           grant_type: "authorization_code",
           code: param("code"),
           redirect_uri: `${config.origin}/auth/callback`,
-          code_verifier: session.data.verifier,
+          code_verifier: text(session.data.verifier),
         }).toString(),
       });
       const identity = await jwtVerify(text(result.id_token), config.keys, {
@@ -714,7 +715,7 @@ export default defineEventHandler(async (event) => {
         ...cookie,
         maxAge: Math.max(0, claims.exp - Math.floor(Date.now() / 1000)),
       });
-      const profile = await useSession(event, {
+      const profile = await useSession<Record<string, unknown>>(event, {
         name: "__Host-galadril-profile",
         password: config.sessionSecret,
         maxAge: sessionLifetime,
@@ -723,7 +724,7 @@ export default defineEventHandler(async (event) => {
       await profile.update({
         subject: claims.sub,
         tenant: claims.tenant_id,
-        displayName: session.data.email,
+        displayName: text(session.data.email),
       });
       const renewal = await useSession(event, {
         name: "__Host-galadril-renewal",

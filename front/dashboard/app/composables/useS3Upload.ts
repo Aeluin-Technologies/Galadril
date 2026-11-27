@@ -65,8 +65,10 @@ export function useS3Upload() {
         return response.data.requestStagingUpload;
       }
       throw new Error(t("storage.upload.default_error"));
-    } catch (e: any) {
-      error.value = e.message || t("storage.upload.default_error");
+    } catch (cause: unknown) {
+      error.value =
+        (cause instanceof Error && cause.message) ||
+        t("storage.upload.default_error");
       return null;
     }
   }
@@ -90,7 +92,7 @@ export function useS3Upload() {
         },
       });
       return response.ok;
-    } catch (e) {
+    } catch {
       error.value = t("storage.upload.s3_error");
       return false;
     }
@@ -122,8 +124,10 @@ export function useS3Upload() {
         return response.data.completeUpload;
       }
       throw new Error(t("storage.upload.complete_error"));
-    } catch (e: any) {
-      error.value = e.message || t("storage.upload.complete_error");
+    } catch (cause: unknown) {
+      error.value =
+        (cause instanceof Error && cause.message) ||
+        t("storage.upload.complete_error");
       return null;
     }
   }

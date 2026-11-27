@@ -75,7 +75,7 @@ test("MCP OAuth binds client, callback, PKCE, resource and scopes", () => {
     ["code_challenge_method", "plain"],
   ]) {
     const changed = new URLSearchParams(query);
-    changed.set(key!, value!);
+    changed.set(required(key), required(value));
     assert.throws(() => mcpAuthorization(changed, clients));
   }
   const consent = {
@@ -93,7 +93,7 @@ test("MCP OAuth binds client, callback, PKCE, resource and scopes", () => {
       clients,
     ),
   );
-  const definition = mcpClientDefinition(clients[0]!);
+  const definition = mcpClientDefinition(required(clients[0]));
   assert.equal(definition.token_endpoint_auth_method, "none");
   assert.deepEqual(definition.audience, ["https://mcp.example/law/mcp"]);
   assert.throws(() =>

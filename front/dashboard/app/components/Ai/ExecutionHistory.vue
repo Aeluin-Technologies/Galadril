@@ -16,7 +16,7 @@ const props = withDefaults(
     hasWebResearch?: boolean;
     operations?: string[];
   }>(),
-  { hasOtherActivity: true },
+  { hasOtherActivity: true, operations: () => [] },
 );
 const { t } = useI18n();
 const events = ref<PengoloEvent[]>([]);

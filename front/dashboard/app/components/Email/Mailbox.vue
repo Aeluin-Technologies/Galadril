@@ -447,11 +447,11 @@ function download(value: EmailAttachment) {
     </div>
     <UiDialog
       v-model:open="reader"
-      @close="selected = undefined"
       :title="selected?.message.subject ?? ''"
       :description="selected?.message.sender"
       size="wide"
       :close-label="$t('actions.close')"
+      @close="selected = undefined"
     >
       <template v-if="selected">
         <p class="text-xs text-muted">{{ selected.message.date }}</p>

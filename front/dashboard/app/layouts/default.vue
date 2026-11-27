@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 const isCommandOpen = useState("global-command-bar", () => false);
 
-const handleGlobalKeys = (e) => {
+const handleGlobalKeys = (e: KeyboardEvent) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "k") {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -22,7 +22,7 @@ onUnmounted(() => {
   <div
     class="h-dvh w-full bg-canvas overflow-hidden flex flex-col font-sans antialiased text-foreground"
   >
-    <NavbarTop @open-command="isCommandOpen = true" class="flex-shrink-0" />
+    <NavbarTop class="flex-shrink-0" @open-command="isCommandOpen = true" />
 
     <div class="flex min-h-0 flex-1 overflow-hidden relative">
       <main
@@ -30,10 +30,6 @@ onUnmounted(() => {
       >
         <slot />
       </main>
-      <NavbarAction
-        v-if="hasSelection"
-        class="flex-shrink-0 border-l border-border"
-      />
       <LazyAiChatDrawer />
     </div>
 

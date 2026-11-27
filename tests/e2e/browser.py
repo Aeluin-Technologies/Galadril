@@ -22,9 +22,10 @@ async def run_browser_suite(spec: str, fixture: Mapping[str, object]) -> None:
         raise ValueError("Unknown browser scenario")
     name = "galadril-browser-" + uuid.uuid4().hex
     bundle = io.BytesIO()
+    helpers = ("wire.ts",) if spec == "live.spec.ts" else ()
     files = {
         filename: runfile("tests/e2e/dashboard/" + filename).read_bytes()
-        for filename in ("package.json", "package-lock.json", spec)
+        for filename in ("package.json", "package-lock.json", spec, *helpers)
     }
     files["live-fixture.json"] = json.dumps(fixture).encode()
     files["ca.pem"] = identity_files()["identity/gateway/ca.pem"]

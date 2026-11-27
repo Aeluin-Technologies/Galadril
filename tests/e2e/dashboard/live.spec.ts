@@ -1,25 +1,32 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { record as object, stringField } from "./wire.ts";
 
 test.use({ actionTimeout: 15_000, navigationTimeout: 30_000 });
 
-interface Fixture {
-  cookies: Parameters<BrowserContext["addCookies"]>[0];
-  memberCookies: Parameters<BrowserContext["addCookies"]>[0];
-  administratorCookies: Parameters<BrowserContext["addCookies"]>[0];
-  memberId: string;
-  prompt: string;
+function cookies(input: unknown): Parameters<BrowserContext["addCookies"]>[0] {
+  if (!Array.isArray(input)) throw new Error("Expected fixture cookies");
+  return input.map((item: unknown) => {
+    const cookie = object(item);
+    const { secure, httpOnly, sameSite } = cookie;
+    if (
+      typeof secure !== "boolean" ||
+      typeof httpOnly !== "boolean" ||
+      sameSite !== "Lax"
+    )
+      throw new Error("Invalid browser fixture cookie");
+    return {
+      name: stringField(cookie.name),
+      value: stringField(cookie.value),
+      url: stringField(cookie.url),
+      secure,
+      httpOnly,
+      sameSite,
+    };
+  });
 }
-const fixture = JSON.parse(
-  readFileSync("live-fixture.json", "utf8"),
-) as Fixture;
 
-function object(value: unknown): Record<string, unknown> {
-  const decoded: unknown = value;
-  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded))
-    throw new Error("Invalid Gateway object");
-  return decoded as Record<string, unknown>;
-}
+const fixture = object(JSON.parse(readFileSync("live-fixture.json", "utf8")));
 
 async function expectCompletedGeneration(
   page: Page,
@@ -89,7 +96,7 @@ test("real Pengolo generation survives browser reload", async ({
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await context.addCookies(fixture.cookies);
+  await context.addCookies(cookies(fixture.cookies));
   const workspaceResponse = page.waitForResponse(
     (response) => {
       const request = response.request();
@@ -142,7 +149,7 @@ test("real Pengolo generation survives browser reload", async ({
     .click();
   await page
     .getByLabel("Message Pengolo", { exact: true })
-    .fill(fixture.prompt);
+    .fill(stringField(fixture.prompt));
   const deadline = Date.now() + 90_000;
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
@@ -256,7 +263,7 @@ test("real Pengolo generation survives browser reload", async ({
   );
   await page
     .getByLabel("Message Pengolo", { exact: true })
-    .fill(fixture.prompt);
+    .fill(stringField(fixture.prompt));
   const sharedDeadline = Date.now() + 90_000;
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
@@ -275,10 +282,10 @@ test("real Pengolo generation survives browser reload", async ({
   ).not.toBeVisible();
   const sharedUrl = page.url();
   const administratorContext = await browser.newContext();
-  await administratorContext.addCookies(fixture.administratorCookies);
+  await administratorContext.addCookies(cookies(fixture.administratorCookies));
   const memberContext = await browser.newContext();
   try {
-    await memberContext.addCookies(fixture.memberCookies);
+    await memberContext.addCookies(cookies(fixture.memberCookies));
     const member = await memberContext.newPage();
     await member.goto("/pengolo");
     await expect(
@@ -302,7 +309,7 @@ test("real Pengolo generation survives browser reload", async ({
         {
           headers: { origin: new URL(page.url()).origin },
           data: {
-            query: `mutation { administration { ${operation}(userId:"${fixture.memberId}",roleName:"pengolo_reader") } }`,
+            query: `mutation { administration { ${operation}(userId:"${stringField(fixture.memberId)}",roleName:"pengolo_reader") } }`,
           },
         },
       );

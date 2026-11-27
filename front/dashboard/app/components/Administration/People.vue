@@ -66,6 +66,10 @@ const {
           type="button"
           variant="secondary"
           :aria-busy="peopleRefreshing"
+          :icon="ArrowPathIcon"
+          :label="$t('administration.copy.reload_people')"
+          :loading="busy"
+          :disabled="peopleRefreshing"
           @click="
             run(
               refreshPeople,
@@ -75,10 +79,6 @@ const {
               ),
             )
           "
-          :icon="ArrowPathIcon"
-          :label="$t('administration.copy.reload_people')"
-          :loading="busy"
-          :disabled="peopleRefreshing"
         />
       </div>
       <label for="member-search" class="sr-only">{{

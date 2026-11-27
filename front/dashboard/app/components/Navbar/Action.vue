@@ -19,27 +19,27 @@ const emit = defineEmits(["close"]);
     <div class="p-5 border-b border-border bg-surface">
       <div class="flex items-center justify-between mb-3">
         <div>
-          <slot name="header-badge"></slot>
+          <slot name="header-badge" />
         </div>
         <UiIconButton
-          @click="emit('close')"
           variant="ghost"
           :icon="XMarkIcon"
           :label="$t('ui.actions.close')"
+          @click="emit('close')"
         />
       </div>
-      <slot name="header-content"></slot>
+      <slot name="header-content" />
     </div>
 
     <div class="p-5 space-y-4 flex-1 overflow-y-auto text-xs text-foreground">
-      <slot></slot>
+      <slot />
     </div>
 
     <div
       v-if="$slots.footer"
       class="mt-auto p-5 border-t border-border bg-surface"
     >
-      <slot name="footer"></slot>
+      <slot name="footer" />
     </div>
   </aside>
 

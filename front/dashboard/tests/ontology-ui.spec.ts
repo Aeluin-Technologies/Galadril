@@ -1,3 +1,5 @@
+import { record } from "../shared/records.ts";
+import { graphQL } from "./graphql-fixture.ts";
 import { expect } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 import type { Page } from "@playwright/test";
@@ -39,7 +41,7 @@ async function fixture(page: Page, author = true, listed = true) {
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
+    const body = graphQL(route.request().postDataJSON());
     const query: string = body.query;
     const variables: Record<string, unknown> = body.variables ?? {};
     if (query.includes("golOntologyCanManage"))
@@ -84,9 +86,9 @@ async function fixture(page: Page, author = true, listed = true) {
         { path: "mail.gol", text: expect.any(String) },
       ]);
       const files = variables.files;
-      if (!Array.isArray(files) || typeof files[0]?.text !== "string")
-        throw new Error("Expected GOL files");
-      state.source = files[0].text;
+      const file = record(Array.isArray(files) ? files[0] : undefined);
+      if (typeof file.text !== "string") throw new Error("Expected GOL files");
+      state.source = file.text;
       state.revision = `source-${++state.saves + 1}`;
       return route.fulfill({
         json: {

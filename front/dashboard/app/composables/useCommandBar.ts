@@ -1,5 +1,8 @@
 import { useCommandPaletteHistory } from "~/composables/useCommandPaletteHistory";
-import { useCommandPaletteSearch } from "~/composables/useCommandPaletteSearch";
+import {
+  useCommandPaletteSearch,
+  type SearchHit,
+} from "~/composables/useCommandPaletteSearch";
 import { useS3Upload } from "~/composables/useS3Upload";
 import { useOnboardingStore } from "~/stores/useOnboarding";
 import { usePengoloSearch } from "~/stores/usePengoloSearch";
@@ -20,7 +23,7 @@ import {
 } from "@heroicons/vue/24/outline";
 
 export const useCommandBarLogic = (
-  emit: (event: "select", ...args: any[]) => void,
+  emit: (event: "select", item: SearchHit) => void,
 ) => {
   const { t, locale } = useI18n();
 
@@ -69,18 +72,18 @@ export const useCommandBarLogic = (
         : entry.id === "documents" || entry.id === "library"
           ? DocumentTextIcon
           : BoltIcon,
-    isStaticAction: true,
-    isUploadAction: false,
-    isHistoryItem: false,
+    isStaticAction: true as const,
+    isUploadAction: false as const,
+    isHistoryItem: false as const,
   });
   const uploadAction = computed(() => ({
     label: t("command_palette.commands.upload.label"),
     description: t("command_palette.commands.upload.description"),
     type: t("command_palette.commands.upload.type"),
     icon: CloudArrowUpIcon,
-    isStaticAction: true,
-    isUploadAction: true,
-    isHistoryItem: false,
+    isStaticAction: true as const,
+    isUploadAction: true as const,
+    isHistoryItem: false as const,
   }));
   const defaultQuickActions = computed(() => [
     ...navigationEntries(navigationContext.value).map(command),
@@ -127,21 +130,11 @@ export const useCommandBarLogic = (
     ];
   });
 
-  const getHitIcon = (item: any) => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      "isStaticAction" in item &&
-      item.isStaticAction
-    )
-      return item.icon;
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      "isHistoryItem" in item &&
-      item.isHistoryItem
-    )
-      return ClockIcon;
+  type CommandItem = (typeof visibleItems.value)[number];
+
+  const getHitIcon = (item: CommandItem) => {
+    if ("isStaticAction" in item) return item.icon;
+    if ("isHistoryItem" in item) return ClockIcon;
 
     switch (item.kind) {
       case "chat":
@@ -158,25 +151,15 @@ export const useCommandBarLogic = (
     }
   };
 
-  const formatHitPayload = (item: any) => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      "isStaticAction" in item &&
-      item.isStaticAction
-    ) {
+  const formatHitPayload = (item: CommandItem) => {
+    if ("isStaticAction" in item) {
       return {
         label: item.label,
         description: item.description,
         type: item.type,
       };
     }
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      "isHistoryItem" in item &&
-      item.isHistoryItem
-    ) {
+    if ("isHistoryItem" in item) {
       return {
         label: item.label,
         description: t(item.description),
@@ -184,7 +167,7 @@ export const useCommandBarLogic = (
       };
     }
 
-    if (item.kind === "chat" || item.kind === "message") {
+    if ("label" in item) {
       return {
         label: item.label,
         description:
@@ -208,13 +191,13 @@ export const useCommandBarLogic = (
     } else if (item.kind === "event") {
       return {
         label: `${t("command_palette.item_types.event")}: ${item.eventType}`,
-        description: `ID: ${item.eventId} • ${t("command_palette.item_types.time")}: ${new Date(item.eventTimeMs).toLocaleTimeString()}`,
+        description: `ID: ${item.eventId} • ${t("command_palette.item_types.time")}: ${new Date(item.eventTimeMs === undefined ? NaN : (item.eventTimeMs ?? 0)).toLocaleTimeString()}`,
         type: t("command_palette.item_types.event"),
       };
     } else {
       return {
         label: `${t("command_palette.item_types.vector_match")} [${item.modality}]`,
-        description: `${t("command_palette.item_types.distance")}: ${(item.score * 100).toFixed(1)}% • ${t("command_palette.item_types.entity")}: ${item.entityId}`,
+        description: `${t("command_palette.item_types.distance")}: ${((item.score === undefined ? NaN : (item.score ?? 0)) * 100).toFixed(1)}% • ${t("command_palette.item_types.entity")}: ${item.entityId}`,
         type: t("command_palette.item_types.embedding"),
       };
     }
@@ -233,7 +216,7 @@ export const useCommandBarLogic = (
     }
   };
 
-  const selectItem = async (item: any) => {
+  const selectItem = async (item: CommandItem | undefined) => {
     if (!item) return;
 
     if (
@@ -278,7 +261,11 @@ export const useCommandBarLogic = (
       if (item.kind === "chat" || item.kind === "message")
         await pengoloUi.prepareStoredChat();
       await navigateTo(item.href);
-      if (item.kind === "message" && typeof item.messageId === "string") {
+      if (
+        item.kind === "message" &&
+        "messageId" in item &&
+        typeof item.messageId === "string"
+      ) {
         await nextTick();
         const target = document.getElementById(`p-message-${item.messageId}`);
         target?.scrollIntoView({ block: "center" });
@@ -286,7 +273,7 @@ export const useCommandBarLogic = (
       }
     } else if ("entityId" in item && item.entityId) {
       await navigateTo(`/explorer/entity/${item.entityId}`);
-    } else {
+    } else if (!("label" in item)) {
       emit("select", item);
     }
     closeCommand();
@@ -317,9 +304,7 @@ export const useCommandBarLogic = (
         Math.max(1, visibleItems.value.length);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (visibleItems.value[activeIndex.value]) {
-        selectItem(visibleItems.value[activeIndex.value]);
-      }
+      void selectItem(visibleItems.value[activeIndex.value]);
     }
   };
 

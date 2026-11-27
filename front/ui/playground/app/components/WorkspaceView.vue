@@ -66,9 +66,9 @@ async function synchronize() {
   syncCount.value++;
   feedback.value = { title: "Sources synchronized", tone: "success" };
 }
-async function fail() {
+function fail(): Promise<never> {
   failureCount.value++;
-  throw new Error("Demonstration failure");
+  return Promise.reject(new Error("Demonstration failure"));
 }
 function failed() {
   feedback.value = {

@@ -143,9 +143,9 @@ const {
         <UiButton
           type="button"
           variant="secondary"
-          @click="resetKey(selectedUser)"
           :loading="busy"
           :disabled="!selectedUser.isActive"
+          @click="resetKey(selectedUser)"
           >{{ $t("administration.copy.reset_passkey") }}</UiButton
         >
       </div></template
@@ -160,9 +160,9 @@ const {
         v-if="selectedUser"
         type="button"
         :variant="selectedUser.isActive ? 'danger' : 'primary'"
-        @click="changeStatus(selectedUser)"
         :loading="busy"
         :disabled="selectedUser.userId === account?.subject"
+        @click="changeStatus(selectedUser)"
         >{{
           selectedUser.isActive
             ? $t("administration.copy.suspend_access")

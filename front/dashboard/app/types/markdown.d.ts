@@ -1,11 +1,11 @@
 declare module "@traptitech/markdown-it-katex" {
-  import type { PluginSimple } from "markdown-it";
-  const plugin: PluginSimple;
+  import type MarkdownIt from "markdown-it";
+  const plugin: (markdown: MarkdownIt) => void;
   export default plugin;
 }
 
 declare module "markdown-it-footnote" {
-  import type { PluginSimple } from "markdown-it";
-  const plugin: PluginSimple;
+  import type MarkdownIt from "markdown-it";
+  const plugin: (markdown: MarkdownIt) => void;
   export default plugin;
 }

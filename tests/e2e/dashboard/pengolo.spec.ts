@@ -1,3 +1,4 @@
+import { frame, operation, record, stringField, stringList } from "./wire.ts";
 import { test, expect, finishLogin } from "./fixture.ts";
 
 function previewPdf(): Buffer {
@@ -30,14 +31,14 @@ test("Pengolo selects its default model when the catalogue precedes the composer
   let workspaces = 0;
   await page.routeWebSocket("**/graphql", (socket) =>
     socket.onMessage((raw) => {
-      const frame = JSON.parse(String(raw)) as { type: string };
-      if (frame.type === "connection_init")
+      const message = frame(String(raw));
+      if (message.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
     }),
   );
   await page.route("**/graphql", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
-    const body = route.request().postDataJSON() as { query: string };
+    const body = operation(route.request().postDataJSON());
     if (!body.query.includes("query Workspace")) return route.continue();
     workspaces++;
     await route.fulfill({
@@ -232,43 +233,39 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   };
   await page.routeWebSocket("**/graphql", (socket) => {
     socket.onMessage((raw) => {
-      const frame = JSON.parse(String(raw)) as {
-        type: string;
-        id: string;
-        payload?: { query: string };
-      };
-      if (frame.type === "connection_init")
+      const message = frame(String(raw));
+      if (message.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
-      if (frame.type !== "subscribe") return;
-      if (frame.payload?.query.includes("pengoloIdentityChanges")) {
+      if (message.type !== "subscribe") return;
+      if (message.payload?.query?.includes("pengoloIdentityChanges")) {
         identityChannel.push = () =>
           socket.send(
             JSON.stringify({
               type: "next",
-              id: frame.id,
+              id: message.id,
               payload: { data: { pengoloIdentityChanges: identity() } },
             }),
           );
         identityChannel.push();
-      } else if (frame.payload?.query.includes("pengoloLibraryChanges")) {
+      } else if (message.payload?.query?.includes("pengoloLibraryChanges")) {
         libraryChannel.push = () =>
           socket.send(
             JSON.stringify({
               type: "next",
-              id: frame.id,
+              id: message.id,
               payload: { data: { pengoloLibraryChanges: true } },
             }),
           );
         libraryChannel.push();
-      } else if (frame.payload?.query.includes("pengoloStream")) {
+      } else if (message.payload?.query?.includes("pengoloStream")) {
         socket.send(
           JSON.stringify({
             type: "next",
-            id: frame.id,
+            id: message.id,
             payload: {
               data: {
                 pengoloStream: {
-                  generationId: frame.id,
+                  generationId: message.id,
                   status: "running",
                   events: [
                     {
@@ -288,11 +285,11 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
         socket.send(
           JSON.stringify({
             type: "next",
-            id: frame.id,
+            id: message.id,
             payload: {
               data: {
                 pengoloStream: {
-                  generationId: frame.id,
+                  generationId: message.id,
                   status: "completed",
                   events: [{ sequence: 2, kind: "completed", content: "" }],
                   message: chat.data.messages[1],
@@ -317,7 +314,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
       typeof body.query !== "string"
     )
       return route.continue();
-    const query = body.query;
+    const { query, variables } = operation(body);
     if (/pengolo(?:Models|Chats|Projects)/.test(query))
       workspaceRequests.push(query);
     if (query.includes("pengoloChat(") && !query.includes("query Workspace"))
@@ -325,20 +322,16 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     let data: Record<string, unknown>;
     if (query.includes("query Workspace")) {
       await initialIdentity;
-      const variables = (body as { variables?: { withChat?: boolean } })
-        .variables;
       data = {
         pengoloIdentity: identity(),
         pengoloModels: models,
         pengoloProjects: projects,
         pengoloChats: { items: sends ? [header] : [], after: null },
-        ...(variables?.withChat ? { activeChat: chatPage } : {}),
+        ...(variables.withChat === true ? { activeChat: chatPage } : {}),
       };
     } else if (query.includes("updatePengoloOpenai")) {
-      const operation = (
-        body as { variables?: { input: { operation: string } } }
-      ).variables?.input.operation;
-      if (operation === "CONNECT") {
+      const action = record(variables.input).operation;
+      if (action === "CONNECT") {
         oauthStarted = true;
         data = {
           updatePengoloOpenai: {
@@ -428,32 +421,21 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
         },
       };
     } else if (query.includes("savePengoloProject")) {
-      const input = (
-        body as {
-          variables?: {
-            input: {
-              id: string;
-              revision: number;
-              name: string;
-              roles: string[];
-              instructions: string;
-            };
-          };
-        }
-      ).variables?.input;
-      if (!input) throw new Error("Project input missing");
+      const input = record(variables.input);
       expect(input.id).toBe("e".repeat(32));
       expect(input.revision).toBe(1);
       expect(input.roles).toEqual(["staff", "lead", "operations"]);
       expect(input.instructions).toBe("Use formal French and cite evidence.");
+      const previous = projects[1];
+      if (!previous) throw new Error("Missing seeded project");
       const saved = {
-        ...projects[1]!,
+        ...previous,
         revision: 2,
         data: {
-          ...projects[1]!.data,
-          name: input.name,
-          roles: input.roles,
-          instructions: input.instructions,
+          ...previous.data,
+          name: stringField(input.name),
+          roles: stringList(input.roles),
+          instructions: stringField(input.instructions),
         },
       };
       projects[1] = saved;
@@ -885,8 +867,8 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   });
   await page.routeWebSocket("**/graphql", (socket) =>
     socket.onMessage((raw) => {
-      const frame = JSON.parse(String(raw)) as { type: string; id: string };
-      if (frame.type === "connection_init")
+      const message = frame(String(raw));
+      if (message.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
     }),
   );
@@ -901,10 +883,7 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   );
   await page.route("**/graphql", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
-    const body = route.request().postDataJSON() as {
-      query: string;
-      variables: Record<string, unknown>;
-    };
+    const body = operation(route.request().postDataJSON());
     const query = body.query;
     let data: Record<string, unknown>;
     if (query.includes("query Workspace")) {
@@ -955,14 +934,16 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
         },
       };
     } else if (query.includes("updatePengoloChat")) {
-      const input = body.variables.input as {
-        taskChecks: Array<{ index: number; checked: boolean }>;
-      };
-      checked = input.taskChecks[0]?.checked === true;
+      const input = record(body.variables.input);
+      const checks = input.taskChecks;
+      checked =
+        Array.isArray(checks) &&
+        checks.length !== 0 &&
+        record(checks[0]).checked === true;
       revision++;
       data = { updatePengoloChat: header() };
     } else if (query.includes("pengoloDownload")) {
-      const input = body.variables.input as { id: string };
+      const input = record(body.variables.input);
       data = {
         pengoloDownload: {
           url: "/fixture-preview.pdf",

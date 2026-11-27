@@ -1,6 +1,4 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import {
   EllipsisHorizontalIcon,
   TrashIcon,
@@ -11,6 +9,8 @@ import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import type { ChatRecord } from "~/utils/pengolo-api";
+
+const { t } = useI18n();
 const props = defineProps<{ chat: ChatRecord }>();
 const emit = defineEmits<{ select: [id: string] }>();
 const chats = usePengoloChats();
@@ -68,9 +68,9 @@ function move(project: string | undefined) {
       type="button"
       selection-tone="neutral"
       :aria-current="chats.active?.id === chat.id ? 'page' : undefined"
-      @click="emit('select', chat.id)"
       align="start"
       class="min-w-0 flex-1"
+      @click="emit('select', chat.id)"
     >
       <MapPinIcon
         v-if="chat.data.pinned"
@@ -88,19 +88,19 @@ function move(project: string | undefined) {
       variant="ghost"
       type="button"
       :aria-expanded="menu"
-      @click="menu = !menu"
       :icon="EllipsisHorizontalIcon"
       :label="
         $t('pengolo.copy.options_for_value0', { value0: chat.data.title })
       "
+      @click="menu = !menu"
     />
     <UiIconButton
       class="p-row-action"
       variant="ghost"
       type="button"
-      @click="deleting = true"
       :icon="TrashIcon"
       :label="$t('pengolo.copy.delete_value0', { value0: chat.data.title })"
+      @click="deleting = true"
     />
     <Transition name="p-pop"
       ><div
@@ -128,8 +128,8 @@ function move(project: string | undefined) {
           role="menuitem"
           align="start"
           class="w-full"
-          @click="update({ pinned: !chat.data.pinned })"
           :loading="busy"
+          @click="update({ pinned: !chat.data.pinned })"
         >
           {{
             chat.data.pinned ? $t("pengolo.copy.unpin") : $t("pengolo.copy.pin")
@@ -148,11 +148,11 @@ function move(project: string | undefined) {
                 },
               ]),
             ]"
-            @update:model-value="move"
-            :model-value="chat.projectId ?? ''" /></label
+            :model-value="chat.projectId ?? ''"
+            @update:model-value="move" /></label
         ><UiButton
-          variant="ghost"
           v-if="chat.projectId"
+          variant="ghost"
           type="button"
           role="menuitem"
           align="start"
@@ -204,8 +204,8 @@ function move(project: string | undefined) {
         ><UiButton
           variant="danger"
           type="button"
-          @click="remove"
           :loading="busy"
+          @click="remove"
         >
           {{ $t("pengolo.copy.delete_conversation") }}
         </UiButton></template

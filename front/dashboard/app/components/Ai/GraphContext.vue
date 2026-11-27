@@ -87,8 +87,8 @@ function select(context: GraphContext) {
         v-if="after"
         variant="secondary"
         type="button"
-        @click="pager.more()"
         :loading="loading"
+        @click="pager.more()"
         >Load more objects</UiButton
       >
       <p

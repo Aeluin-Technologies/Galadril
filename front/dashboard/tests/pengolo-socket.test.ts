@@ -1,3 +1,5 @@
+import { parseObject, record } from "../shared/records.ts";
+import { required } from "./support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPengoloSocket } from "../app/utils/pengolo-socket.ts";
@@ -14,7 +16,7 @@ class FakeSocket {
     FakeSocket.instances.push(this);
   }
   send(value: string) {
-    this.sent.push(JSON.parse(value));
+    this.sent.push(parseObject(value));
   }
   close() {
     this.onclose?.();
@@ -50,7 +52,7 @@ test("one socket multiplexes identity and generation, then reconnects with the l
     () => {},
   );
   assert.equal(FakeSocket.instances.length, 1);
-  const socket = FakeSocket.instances.at(-1)!;
+  const socket = required(FakeSocket.instances.at(-1));
   socket.onopen?.();
   socket.receive({ type: "connection_ack" });
   assert.deepEqual(
@@ -66,14 +68,11 @@ test("one socket multiplexes identity and generation, then reconnects with the l
   });
   assert.equal(received.length, 1);
   transport.reconnect();
-  const reconnected = FakeSocket.instances.at(-1)!;
+  const reconnected = required(FakeSocket.instances.at(-1));
   reconnected.onopen?.();
   reconnected.receive({ type: "connection_ack" });
   const run = reconnected.sent.find((frame) => frame.id === "run");
-  assert.equal(
-    (run?.payload as { variables: { after: number } }).variables.after,
-    2,
-  );
+  assert.equal(record(record(run?.payload).variables).after, 2);
   stopRun();
   stopIdentity();
   transport.clear();

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { record } from "./wire.ts";
 
 /** Persists the source IP budget because Playwright replaces workers after failure. */
 export class AuthenticationBudget {
@@ -9,7 +10,17 @@ export class AuthenticationBudget {
 
   constructor(path: string) {
     this.path = path;
-    if (existsSync(path)) this.observe(JSON.parse(readFileSync(path, "utf8")));
+    if (existsSync(path)) {
+      const previous = record(JSON.parse(readFileSync(path, "utf8")));
+      const reset = previous["x-ratelimit-reset"];
+      const remaining = previous["x-ratelimit-remaining"];
+      if (typeof reset === "string" && typeof remaining === "string") {
+        this.observe({
+          "x-ratelimit-reset": reset,
+          "x-ratelimit-remaining": remaining,
+        });
+      }
+    }
   }
 
   observe(headers: Readonly<Record<string, string>>): void {

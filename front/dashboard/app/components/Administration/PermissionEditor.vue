@@ -1,10 +1,10 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import {
   permissionBlocks,
   permissionManifest,
 } from "~/utils/administration.ts";
+
+const { t } = useI18n();
 
 const model = defineModel<string>({ default: "" });
 defineProps<{

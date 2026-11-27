@@ -22,7 +22,8 @@ export default defineNuxtModule({
     compatibility: { nuxt: "^4.0.0" },
   },
   async setup(_options: Record<string, never>, nuxt: Nuxt) {
-    const { resolve } = createResolver(import.meta.url);
+    const resolver = createResolver(import.meta.url);
+    const resolve = (path: string) => resolver.resolve(path);
     const tokens = resolve("./tokens.css");
     if (!nuxt.options.css.includes(tokens)) nuxt.options.css.unshift(tokens);
     nuxt.options.build.transpile.push("@galadril/ui");

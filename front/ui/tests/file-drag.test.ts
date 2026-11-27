@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { FileDragSession } from "../src/file-drag.ts";
 
-test("shared UI type checking accepts the explicit TypeScript imports used by Node tests", () => {
+await test("shared UI type checking accepts the explicit TypeScript imports used by Node tests", () => {
   const configuration: unknown = JSON.parse(
     readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"),
   );
@@ -15,7 +15,7 @@ test("shared UI type checking accepts the explicit TypeScript imports used by No
   assert.equal(options.allowImportingTsExtensions, true);
 });
 
-test("file-drop feedback survives child transitions and ignores dragged text or links", () => {
+await test("file-drop feedback survives child transitions and ignores dragged text or links", () => {
   const session = new FileDragSession();
   assert.equal(session.enter(["text/plain", "text/uri-list"]), false);
   assert.equal(session.enter(["Files"]), true);

@@ -7,7 +7,6 @@ import {
   normalizeDiscoveryAddress,
   providerFormValues,
 } from "~/utils/administration.ts";
-import { accountInitials } from "~/utils/account.ts";
 
 export function useAdministration() {
   const { t } = useI18n();
@@ -439,7 +438,7 @@ export function useAdministration() {
       t("administration.copy.sign_in_security_updated"),
     );
   }
-  async function graphql<T>(
+  async function graphql<T extends object>(
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<T> {
@@ -451,7 +450,10 @@ export function useAdministration() {
       credentials: "same-origin",
       body: { query, variables },
     });
-    return administrationResult(response) as T;
+    administrationResult(response);
+    const result = response.data?.administration;
+    if (!result) throw new Error("Missing administration response");
+    return result;
   }
   async function refresh() {
     const data = await graphql<{ ssoSettings: Settings }>(

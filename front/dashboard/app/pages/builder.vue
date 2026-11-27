@@ -1,6 +1,4 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import { GridLayout, GridItem } from "grid-layout-plus";
 import {
   PlusIcon,
@@ -9,23 +7,16 @@ import {
   ChartBarIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/vue/24/outline";
-import { type IamPermission } from "~/composables/useIamPermissions";
+import type { WidgetConfig, WidgetLayout } from "~/types/widget-layout";
+import type { IamPermission } from "~/composables/useIamPermissions";
 
-interface LayoutItem {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  i: string;
-  type: string;
-  config: Record<string, any>;
-}
+const { t } = useI18n();
 
 const dashboardName = ref("");
 const permissions = ref<IamPermission[]>([]);
 const widgetIdCounter = ref(2);
 
-const layout = ref<LayoutItem[]>([
+const layout = ref<WidgetLayout[]>([
   {
     x: 0,
     y: 0,
@@ -44,12 +35,12 @@ const layout = ref<LayoutItem[]>([
 
 const isConfigModalOpen = ref(false);
 
-const activeWidget = ref<LayoutItem | undefined>(undefined);
+const activeWidget = ref<WidgetLayout | undefined>(undefined);
 
 const addWidget = (type: string) => {
   let w = 4;
   let h = 4;
-  let config: Record<string, any> = {};
+  let config: WidgetConfig = {};
 
   if (type === "Map") {
     w = 8;
@@ -100,12 +91,12 @@ const removeWidget = (id: string) => {
   layout.value = layout.value.filter((item) => item.i !== id);
 };
 
-const openConfig = (widget: LayoutItem) => {
+const openConfig = (widget: WidgetLayout) => {
   activeWidget.value = widget;
   isConfigModalOpen.value = true;
 };
 
-const saveConfig = (updatedWidget: LayoutItem) => {
+const saveConfig = (updatedWidget: WidgetLayout) => {
   const index = layout.value.findIndex((item) => item.i === updatedWidget.i);
   if (index !== -1) layout.value[index] = updatedWidget;
 };
@@ -115,12 +106,11 @@ const saveDashboard = () => {
     name: dashboardName.value || "Untitled Dashboard",
     permissions: permissions.value,
     layout: layout.value.map((item) => {
-      const itemCopy = JSON.parse(JSON.stringify(item));
-
-      if (item.config && "icon" in item.config && item.config.icon) {
-        itemCopy.config.iconRef = "ChartBarIcon";
-      }
-      return itemCopy;
+      const { icon, ...config } = item.config;
+      return {
+        ...item,
+        config: icon ? { ...config, iconRef: "ChartBarIcon" } : config,
+      };
     }),
   };
 
@@ -163,37 +153,37 @@ const saveDashboard = () => {
               </UiButton>
             </template>
             <UiButton
-              @click="addWidget('Card')"
               variant="secondary"
               class="block w-full"
+              @click="addWidget('Card')"
             >
               {{ $t("builder.widgets.card") }}
             </UiButton>
             <UiButton
-              @click="addWidget('LineChart')"
               variant="secondary"
               class="block w-full"
+              @click="addWidget('LineChart')"
             >
               {{ $t("builder.widgets.line_chart") }}
             </UiButton>
             <UiButton
-              @click="addWidget('Alerts')"
               variant="secondary"
               class="block w-full"
+              @click="addWidget('Alerts')"
             >
               {{ $t("builder.widgets.alerts") }}
             </UiButton>
             <UiButton
-              @click="addWidget('Objects')"
               variant="secondary"
               class="block w-full"
+              @click="addWidget('Objects')"
             >
               {{ $t("builder.widgets.objects") }}
             </UiButton>
             <UiButton
-              @click="addWidget('Map')"
               variant="ghost"
               class="block w-full"
+              @click="addWidget('Map')"
             >
               {{ $t("builder.widgets.map") }}
             </UiButton>
@@ -231,16 +221,16 @@ const saveDashboard = () => {
             class="absolute top-2 right-2 z-[60] flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
           >
             <UiIconButton
-              @click="openConfig(item)"
               variant="secondary"
               :icon="PencilSquareIcon"
               :label="$t('ui.actions.edit')"
+              @click="openConfig(item)"
             />
             <UiIconButton
-              @click="removeWidget(item.i)"
               variant="danger"
               :icon="TrashIcon"
               :label="$t('ui.actions.delete')"
+              @click="removeWidget(item.i)"
             />
           </div>
 

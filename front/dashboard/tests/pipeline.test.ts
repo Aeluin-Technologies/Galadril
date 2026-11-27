@@ -1,3 +1,4 @@
+import { required } from "./support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -226,7 +227,7 @@ test("stored pipelines round-trip both parallel sinks and route outcomes", () =>
   assert.throws(() =>
     graphFromDefinition({
       ...definition,
-      pipeline: [...definition.pipeline, definition.pipeline[0]!],
+      pipeline: [...definition.pipeline, required(definition.pipeline[0])],
     }),
   );
 });

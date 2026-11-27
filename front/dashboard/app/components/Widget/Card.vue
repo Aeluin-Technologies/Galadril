@@ -1,9 +1,9 @@
 <script setup>
 defineProps({
-  title: String,
-  value: String,
-  icon: [Object, Function],
-  trend: String,
+  title: { type: String, default: undefined },
+  value: { type: String, default: undefined },
+  icon: { type: [Object, Function], default: undefined },
+  trend: { type: String, default: undefined },
   size: {
     type: String,
     default: "md",

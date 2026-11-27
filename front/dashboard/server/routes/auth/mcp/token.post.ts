@@ -37,8 +37,10 @@ export default defineEventHandler(async (event) => {
     "redirect_uri",
     "code_verifier",
     "refresh_token",
-  ])
-    if (parameters.has(field)) forwarded.set(field, parameters.get(field)!);
+  ]) {
+    const value = parameters.get(field);
+    if (value !== null) forwarded.set(field, value);
+  }
   const result = await requestObject(new URL("/oauth2/token", config.hydra), {
     method: "POST",
     headers: {

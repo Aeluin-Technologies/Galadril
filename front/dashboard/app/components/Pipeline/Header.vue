@@ -28,11 +28,11 @@ const emit = defineEmits<{
     <div class="flex items-center justify-between">
       <UiInput
         :value="props.modelValue"
+        :placeholder="$t('pipeline.header.pipeline_name')"
+        class="w-1/2"
         @input="
           emit('update:modelValue', ($event.target as HTMLInputElement).value)
         "
-        :placeholder="$t('pipeline.header.pipeline_name')"
-        class="w-1/2"
       />
 
       <div class="flex items-center gap-3">
@@ -49,41 +49,41 @@ const emit = defineEmits<{
             </UiButton>
           </template>
           <UiButton
-            @click="emit('add-step', 'source')"
             variant="secondary"
             class="flex items-center w-full"
+            @click="emit('add-step', 'source')"
           >
             <CircleStackIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.source") }}
           </UiButton>
           <UiButton
-            @click="emit('add-step', 'inference')"
             variant="secondary"
             class="flex items-center w-full"
+            @click="emit('add-step', 'inference')"
           >
             <CpuChipIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.inference") }}
           </UiButton>
           <UiButton
-            @click="emit('add-step', 'resolve')"
             variant="secondary"
             class="flex items-center w-full"
+            @click="emit('add-step', 'resolve')"
           >
             <AdjustmentsHorizontalIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.resolve") }}
           </UiButton>
           <UiButton
-            @click="emit('add-step', 'sink')"
             variant="secondary"
             class="flex items-center w-full"
+            @click="emit('add-step', 'sink')"
           >
             <ArrowDownOnSquareIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.sink") }}
           </UiButton>
           <UiButton
-            @click="emit('add-step', 'causal')"
             variant="ghost"
             class="flex items-center w-full"
+            @click="emit('add-step', 'causal')"
           >
             <BoltIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.causal") }}

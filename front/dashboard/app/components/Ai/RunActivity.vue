@@ -403,9 +403,9 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             <UiButton
               type="button"
               :disabled="closed(question)"
-              @click="respond(question, true)"
               variant="ghost"
               size="sm"
+              @click="respond(question, true)"
             >
               {{ $t("pengolo.questions.skip") }}
             </UiButton>

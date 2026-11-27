@@ -4,7 +4,7 @@ export interface IamPermission {
   scope: {
     principal?: string;
     role?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -48,7 +48,7 @@ export function useIamPermissions() {
    * @returns {boolean} True if syntax complies with standard object/relation semantics.
    */
   const validateSpiceDbSyntax = (permission: IamPermission): boolean => {
-    const spiceDbIdRegex = /^[a-zA-Z0-9_|\-]+$/;
+    const spiceDbIdRegex = /^[a-zA-Z0-9_|-]+$/;
     const targetId = permission.scope.principal || permission.scope.role;
 
     if (!targetId || !spiceDbIdRegex.test(targetId)) return false;
@@ -120,9 +120,10 @@ export function useIamPermissions() {
         permissions: permissionsList.value,
       });
       return !!response?.data?.setUserPermissions;
-    } catch (e: any) {
+    } catch (error: unknown) {
       permissionError.value =
-        e.message || t("storage.permissions.update_error");
+        (error instanceof Error && error.message) ||
+        t("storage.permissions.update_error");
       return false;
     } finally {
       isProcessing.value = false;
@@ -143,9 +144,10 @@ export function useIamPermissions() {
         permissions: permissionsList.value,
       });
       return !!response?.data?.setRolePermissions;
-    } catch (e: any) {
+    } catch (error: unknown) {
       permissionError.value =
-        e.message || t("storage.permissions.update_error");
+        (error instanceof Error && error.message) ||
+        t("storage.permissions.update_error");
       return false;
     } finally {
       isProcessing.value = false;

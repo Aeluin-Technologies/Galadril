@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { reactive, toRefs } from "vue";
-import {
-  ArrowLeftIcon,
-  ArrowPathIcon,
-  ArrowRightIcon,
-} from "@heroicons/vue/24/outline";
+import { ArrowLeftIcon, ArrowRightIcon } from "@heroicons/vue/24/outline";
 import type { PermissionProps, Person } from "~/composables/usePermissions";
 const props = defineProps<PermissionProps>();
 const emit = defineEmits<{
@@ -35,7 +31,7 @@ const {
   choices,
   choose,
   confirmImportSettings,
-  settings,
+  settings: permissionSettings,
   toggleImports,
   reviewImport,
   applyPermissions,
@@ -56,6 +52,7 @@ const {
       <UiButton
         v-if="mode === 'sync' && peopleAfter"
         variant="secondary"
+        :loading="busy"
         @click="
           perform(
             () => moreDirectory('users'),
@@ -63,12 +60,12 @@ const {
             $t('administration.copy.more_people_could_not_be_loaded'),
           )
         "
-        :loading="busy"
         >{{ $t("administration.copy.load_more_people") }}</UiButton
       >
       <UiButton
         v-if="ruleRolesAfter"
         variant="secondary"
+        :loading="busy"
         @click="
           perform(
             () => loadRuleRoles(true),
@@ -76,7 +73,6 @@ const {
             $t('administration.copy.more_roles_could_not_be_loaded'),
           )
         "
-        :loading="busy"
         >{{ $t("administration.copy.load_more_roles") }}</UiButton
       >
     </div>
@@ -102,10 +98,10 @@ const {
           <div v-for="choice in choices" :key="choice.id" class="py-2">
             <UiButton
               type="button"
-              @click="choose(choice.id)"
               variant="ghost"
               align="start"
               class="w-full"
+              @click="choose(choice.id)"
             >
               <span class="flex w-full items-center gap-4 py-3"
                 ><span class="choice-icon"
@@ -132,7 +128,7 @@ const {
       ></UiCard>
     </section>
     <template v-else>
-      <UiButton type="button" variant="ghost" @click="mode = ''" :loading="busy"
+      <UiButton type="button" variant="ghost" :loading="busy" @click="mode = ''"
         ><ArrowLeftIcon class="mr-2 h-4 w-4" aria-hidden="true" />{{
           $t("administration.copy.all_permission_options")
         }}</UiButton
@@ -150,7 +146,7 @@ const {
     <UiDialog
       :open="confirmImportSettings"
       :title="
-        settings.permission_import
+        permissionSettings.permission_import
           ? $t('administration.copy.turn_off_permission_imports')
           : $t('administration.copy.allow_permission_imports_2')
       "
@@ -158,7 +154,7 @@ const {
     >
       <p class="text-sm text-muted">
         {{
-          settings.permission_import
+          permissionSettings.permission_import
             ? $t(
                 "administration.copy.existing_access_stays_in_place_new_imports_and",
               )
@@ -171,14 +167,14 @@ const {
         ><UiButton
           type="button"
           variant="secondary"
-          @click="confirmImportSettings = false"
           :loading="busy"
+          @click="confirmImportSettings = false"
           >{{ $t("builder.config_modal.buttons.cancel") }}</UiButton
         ><UiButton
           type="button"
-          @click="toggleImports().then(() => (confirmImportSettings = false))"
           variant="primary"
           :loading="busy"
+          @click="toggleImports().then(() => (confirmImportSettings = false))"
           >{{
             busy
               ? $t("administration.copy.applying")
@@ -200,14 +196,14 @@ const {
         ><UiButton
           type="button"
           variant="secondary"
-          @click="reviewImport = false"
           :loading="busy"
+          @click="reviewImport = false"
           >{{ $t("builder.config_modal.buttons.cancel") }}</UiButton
         ><UiButton
           type="button"
-          @click="applyPermissions"
           variant="primary"
           :loading="busy"
+          @click="applyPermissions"
           >{{
             busy
               ? $t("administration.copy.applying")

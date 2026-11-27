@@ -630,18 +630,15 @@ export function diagnoseGraph(
     validateConnections(nodes, edges);
   } catch (error) {
     const code = error instanceof Error ? error.message : "connection";
-    if (
-      [
-        "cycle",
-        "connection",
-        "duplicate",
-        "join",
-        "blocks",
-        "transfers",
-        "branch",
-      ].includes(code)
-    ) {
-      issues.push({ code: code as PipelineDiagnostic["code"] });
+    switch (code) {
+      case "cycle":
+      case "connection":
+      case "duplicate":
+      case "join":
+      case "blocks":
+      case "transfers":
+      case "branch":
+        issues.push({ code });
     }
   }
   return issues;

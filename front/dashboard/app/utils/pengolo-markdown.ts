@@ -1,4 +1,4 @@
-import MarkdownIt, { type Token, type Env } from "markdown-it";
+import MarkdownIt, { type Token } from "markdown-it";
 import markdownItKatex from "@traptitech/markdown-it-katex";
 import footnote from "markdown-it-footnote";
 import hljs from "highlight.js/lib/core";
@@ -72,8 +72,8 @@ function evidenceItems(
     return null;
   const items: EvidenceItem[] = [];
   for (const raw of value as unknown[]) {
-    if (typeof raw !== "object" || raw === null) return null;
-    const item = raw as Record<string, unknown>;
+    if (!object(raw)) return null;
+    const item = raw;
     if (
       Object.keys(item).some(
         (key) => !["label", "detail", "source", "level"].includes(key),
@@ -101,8 +101,8 @@ function parseEvidence(
   if (content.length > 16_384) return null;
   try {
     const payload: unknown = JSON.parse(content);
-    if (typeof payload !== "object" || payload === null) return null;
-    const value = payload as Record<string, unknown>;
+    if (!object(payload)) return null;
+    const value = payload;
     if (
       Object.keys(value).some(
         (key) => !["title", "items", "outcomes"].includes(key),
@@ -122,7 +122,7 @@ function parseEvidence(
   }
 }
 
-interface RenderContext extends Env {
+interface RenderContext {
   tableLabel: string;
   scope: string;
   docId: string;
@@ -130,6 +130,17 @@ interface RenderContext extends Env {
   anchors: Map<string, string>;
   tables: string[][][];
   codes: string[];
+}
+
+const rendering = new WeakMap<object, RenderContext>();
+
+function renderContext(value: unknown): RenderContext {
+  const context =
+    value !== null && typeof value === "object"
+      ? rendering.get(value)
+      : undefined;
+  if (!context) throw new Error("Missing Markdown render context");
+  return context;
 }
 
 for (const [name, language] of Object.entries({
@@ -244,7 +255,7 @@ function task(tokens: readonly Token[], index: number): boolean {
 }
 
 markdown.core.ruler.push("pengolo_identifiers", (state) => {
-  const env = state.env as unknown as RenderContext;
+  const env = renderContext(state.env);
   const used = new Set<string>();
   let taskIndex = 0;
   let table: string[][] | null = null;
@@ -302,7 +313,7 @@ markdown.renderer.rules.pengolo_checkbox = (
   _options,
   context,
 ) => {
-  const env = context as unknown as RenderContext;
+  const env = renderContext(context);
   const token = tokens[index];
   const id = token?.attrGet("data-task-index") ?? "0";
   return `<input type="checkbox" data-task-index="${id}"${token?.attrGet("checked") ? " checked" : ""}${env.editable ? "" : " disabled"}> `;
@@ -317,7 +328,7 @@ markdown.renderer.rules.link_open = (
   renderer,
 ) => {
   const token = tokens[index];
-  const env = context as unknown as RenderContext;
+  const env = renderContext(context);
   const href = String(token?.attrGet("href") ?? "");
   if (/^https?:\/\//i.test(href)) {
     token?.attrSet("target", "_blank");
@@ -365,7 +376,7 @@ markdown.renderer.rules.image = (
 markdown.renderer.rules.fence = (tokens, index, _options, context) => {
   const token = tokens[index];
   if (!token) return "";
-  const env = context as unknown as RenderContext;
+  const env = renderContext(context);
   const language = token.info.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
   const code =
     language && hljs.getLanguage(language)
@@ -377,9 +388,7 @@ markdown.renderer.rules.fence = (tokens, index, _options, context) => {
 
 markdown.renderer.rules.table_open = (tokens, index, _options, context) => {
   const id = tokens[index]?.attrGet("data-table-index") ?? "0";
-  const label = markdown.utils.escapeHtml(
-    (context as RenderContext).tableLabel,
-  );
+  const label = markdown.utils.escapeHtml(renderContext(context).tableLabel);
   return `<div class="p-table"><div class="p-table-actions"><button type="button" data-table-copy="${id}">Copy table</button><button type="button" data-table-download="${id}">Download Excel</button></div><div class="p-table-scroll" tabindex="0" role="region" aria-label="${label}"><table>`;
 };
 markdown.renderer.rules.table_close = () => "</table></div></div>";
@@ -402,7 +411,9 @@ export function renderPengoloMarkdown(
     tables: [],
     codes: [],
   };
-  const tokens = markdown.parse(text, env);
+  const markdownEnv = { ...env };
+  rendering.set(markdownEnv, env);
+  const tokens = markdown.parse(text, markdownEnv);
   const blocks: MessageBlock[] = [];
   const lines = text.split("\n");
   const starts = [0];
@@ -419,7 +430,7 @@ export function renderPengoloMarkdown(
       html: markdown.renderer.render(
         tokens.slice(from, index),
         markdown.options,
-        env,
+        markdownEnv,
       ),
     });
     from = index;
@@ -508,7 +519,8 @@ export function parseChart(text: string): ChartSpec | null {
     )
   )
     return null;
-  if (!["bar", "line", "pie", "donut"].includes(String(value.type)))
+  const type = value.type;
+  if (type !== "bar" && type !== "line" && type !== "pie" && type !== "donut")
     return null;
   if (
     value.title !== undefined &&
@@ -520,7 +532,8 @@ export function parseChart(text: string): ChartSpec | null {
     !value.labels.length ||
     value.labels.length > 100 ||
     !value.labels.every(
-      (label) => typeof label === "string" && label.length <= 128,
+      (label: unknown): label is string =>
+        typeof label === "string" && label.length <= 128,
     )
   )
     return null;
@@ -530,6 +543,7 @@ export function parseChart(text: string): ChartSpec | null {
     value.series.length > 8
   )
     return null;
+  const specifications: ChartSpec["series"] = [];
   for (const series of value.series) {
     if (
       !object(series) ||
@@ -547,7 +561,7 @@ export function parseChart(text: string): ChartSpec | null {
       return null;
     if (
       !series.values.every(
-        (number) =>
+        (number: unknown): number is number =>
           typeof number === "number" &&
           Number.isFinite(number) &&
           Math.abs(number) <= 1e15,
@@ -560,11 +574,16 @@ export function parseChart(text: string): ChartSpec | null {
         !/^#[a-f0-9]{6}$/i.test(series.color))
     )
       return null;
+    specifications.push({
+      name: series.name,
+      values: series.values,
+      ...(series.color === undefined ? {} : { color: series.color }),
+    });
   }
   return {
-    type: value.type as ChartSpec["type"],
-    title: (value.title as string | undefined) ?? "",
-    labels: value.labels as string[],
-    series: value.series as ChartSpec["series"],
+    type,
+    title: value.title ?? "",
+    labels: value.labels,
+    series: specifications,
   };
 }

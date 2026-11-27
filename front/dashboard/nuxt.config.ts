@@ -70,6 +70,14 @@ export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   builder: "vite",
   vite: {
+    environments: {
+      ssr: {
+        build: {
+          // Nitro resolves shared sources from Vite's intermediate server bundle.
+          rolldownOptions: { makeAbsoluteExternalsRelative: false },
+        },
+      },
+    },
     optimizeDeps: {
       include: [
         ...pdfSigningDependencies,
@@ -232,8 +240,8 @@ export default defineNuxtConfig({
     },
   },
 
-  sri: true,
   security: {
+    sri: true,
     strict: true,
     hidePoweredBy: true,
     removeLoggers: true,

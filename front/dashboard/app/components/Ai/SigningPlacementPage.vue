@@ -72,10 +72,16 @@ onBeforeUnmount(() => {
 const box = computed<Box | undefined>(() => {
   const view = viewport.value;
   if (!view || placement.value?.page !== props.page) return;
-  const [a, b, c, d] = view.convertToViewportRectangle([
+  const coordinates: readonly unknown[] = view.convertToViewportRectangle([
     ...placement.value.rect,
   ]);
-  if (a === undefined || b === undefined || c === undefined || d === undefined)
+  const [a, b, c, d] = coordinates;
+  if (
+    typeof a !== "number" ||
+    typeof b !== "number" ||
+    typeof c !== "number" ||
+    typeof d !== "number"
+  )
     return;
   return {
     x: Math.min(a, c) / view.width,
@@ -105,19 +111,21 @@ function place(area: Box) {
     (area.height * view.height) / view.scale < 8
   )
     return;
-  const [ax, ay] = view.convertToPdfPoint(
+  const start: readonly unknown[] = view.convertToPdfPoint(
     area.x * view.width,
     area.y * view.height,
   );
-  const [bx, by] = view.convertToPdfPoint(
+  const end: readonly unknown[] = view.convertToPdfPoint(
     (area.x + area.width) * view.width,
     (area.y + area.height) * view.height,
   );
+  const [ax, ay] = start;
+  const [bx, by] = end;
   if (
-    ax === undefined ||
-    ay === undefined ||
-    bx === undefined ||
-    by === undefined
+    typeof ax !== "number" ||
+    typeof ay !== "number" ||
+    typeof bx !== "number" ||
+    typeof by !== "number"
   )
     return;
   placement.value = {

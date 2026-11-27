@@ -1,6 +1,4 @@
 <script setup lang="ts">
-const { t } = useI18n();
-
 import { onClickOutside } from "@vueuse/core";
 import { ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
@@ -8,6 +6,8 @@ import { projectIcon, projectIcons } from "~/utils/project-icons";
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { executionContexts } from "~/utils/pengolo";
 import type { ProjectRecord } from "~/utils/pengolo-api";
+
+const { t } = useI18n();
 const props = defineProps<{ open: boolean; project?: ProjectRecord | null }>();
 const emit = defineEmits<{ close: [] }>();
 const projects = usePengoloProjects();
@@ -23,9 +23,15 @@ const executionContext = ref<string>("");
 const instructions = ref("");
 const appearance = ref(false);
 const appearancePanel = ref<HTMLElement | null>(null);
-onClickOutside(appearancePanel, () => { appearance.value = false; }, {
-  ignore: ["[data-project-appearance-trigger]"],
-});
+onClickOutside(
+  appearancePanel,
+  () => {
+    appearance.value = false;
+  },
+  {
+    ignore: ["[data-project-appearance-trigger]"],
+  },
+);
 const colors = [
   "#d97706",
   "#ef4444",
@@ -42,7 +48,9 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return;
-    agents.load().catch(() => { error.value = t("pengolo.copy.agents_and_skills_could_not_be_loaded_you"); });
+    agents.load().catch(() => {
+      error.value = t("pengolo.copy.agents_and_skills_could_not_be_loaded_you");
+    });
     const project = props.project;
     name.value = project?.data.name ?? "";
     icon.value = projectIcon(project?.data.icon ?? "folder").id;
@@ -131,12 +139,17 @@ async function save() {
             :placeholder="$t('pengolo.copy.project_name')"
           />
         </div>
-        <div v-if="appearance" ref="appearancePanel" class="p-appearance-picker" @keydown.esc.stop="appearance = false">
+        <div
+          v-if="appearance"
+          ref="appearancePanel"
+          class="p-appearance-picker"
+          @keydown.esc.stop="appearance = false"
+        >
           <div class="p-color-grid">
             <UiButton
-              variant="ghost"
               v-for="item in colors"
               :key="item"
+              variant="ghost"
               type="button"
               :aria-label="
                 $t('pengolo.copy.use_color_value0', { value0: item })
@@ -152,9 +165,9 @@ async function save() {
           </div>
           <div class="p-icon-grid">
             <UiButton
-              variant="ghost"
               v-for="item in projectIcons"
               :key="item.id"
+              variant="ghost"
               type="button"
               :style="{ color }"
               :aria-label="$t('projectActions.useIcon', { name: item.label })"
@@ -195,35 +208,43 @@ async function save() {
         }}</small></label
       >
       <details class="text-sm">
-        <summary class="cursor-pointer text-muted">{{ $t("pengolo.execution.advanced") }}</summary>
-      <label class="mt-3">
-        {{ $t("pengolo.execution.label") }}
-        <UiSelect
-          v-model="executionContext"
-          :disabled="!!project"
-          :options="[{ value: '', label: $t('pengolo.execution.general') }, ...contexts.map(context => ({ value: context.id, label: context.name }))]"
-        />
-      </label>
-      <label
-        >{{ $t("pengolo.copy.document_context")
-        }}<UiSelect
-          v-model="contextMode"
-          :disabled="shared || !!executionContext"
-          :options="[
-            {
-              label: $t('pengolo.copy.project_library_only').trim(),
-              value: 'project',
-            },
-            ...(!shared && !executionContext
-              ? [
-                  {
-                    label: $t('pengolo.copy.personal_library_only').trim(),
-                    value: 'personal',
-                  },
-                ]
-              : []),
-          ]"
-      /></label>
+        <summary class="cursor-pointer text-muted">
+          {{ $t("pengolo.execution.advanced") }}
+        </summary>
+        <label class="mt-3">
+          {{ $t("pengolo.execution.label") }}
+          <UiSelect
+            v-model="executionContext"
+            :disabled="!!project"
+            :options="[
+              { value: '', label: $t('pengolo.execution.general') },
+              ...contexts.map((context) => ({
+                value: context.id,
+                label: context.name,
+              })),
+            ]"
+          />
+        </label>
+        <label
+          >{{ $t("pengolo.copy.document_context")
+          }}<UiSelect
+            v-model="contextMode"
+            :disabled="shared || !!executionContext"
+            :options="[
+              {
+                label: $t('pengolo.copy.project_library_only').trim(),
+                value: 'project',
+              },
+              ...(!shared && !executionContext
+                ? [
+                    {
+                      label: $t('pengolo.copy.personal_library_only').trim(),
+                      value: 'personal',
+                    },
+                  ]
+                : []),
+            ]"
+        /></label>
       </details>
       <p v-if="!executionContext" class="p-muted">
         {{
@@ -234,8 +255,8 @@ async function save() {
       </p>
       <p v-if="error" role="alert" class="p-error">{{ error }}</p>
       <UiTextarea
-        class="p-project-instructions"
         v-model="instructions"
+        class="p-project-instructions"
         :label="$t('personalization.projectLabel')"
         :help="
           $t(

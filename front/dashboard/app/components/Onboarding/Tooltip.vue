@@ -79,7 +79,7 @@ const handleNext = () => {
 </script>
 
 <template>
-  <Teleport to="body" v-if="shouldShow">
+  <Teleport v-if="shouldShow" to="body">
     <div
       :style="position"
       :class="[
@@ -110,14 +110,14 @@ const handleNext = () => {
         <div
           class="flex justify-between items-center pt-3 border-t border-border"
         >
-          <UiButton @click="onboardingStore.skipTutorial" variant="ghost">
+          <UiButton variant="ghost" @click="onboardingStore.skipTutorial">
             {{ $t("onboarding.actions.skip_tutorial") }}
           </UiButton>
 
           <UiButton
             variant="primary"
-            @click="handleNext"
             class="flex items-center space-x-1"
+            @click="handleNext"
           >
             <span>{{
               isLastStep

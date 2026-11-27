@@ -1,7 +1,11 @@
+import { required } from "./support.ts";
+import { graphQL } from "./graphql-fixture.ts";
+import { record, text, parseObject } from "../shared/records.ts";
 import { expect, type Page } from "@playwright/test";
 import { test } from "../../testing/browser-test.ts";
 import AxeBuilder from "@axe-core/playwright";
 import { parse, Kind } from "graphql";
+import type { GenerationReplay } from "../app/utils/pengolo-api.ts";
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => console.error(error.stack));
@@ -13,7 +17,9 @@ test.beforeEach(async ({ page }) => {
 async function mockDashboard(
   page: Page,
   libraryItems: object[] = [],
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> & {
+    pengoloStream?: GenerationReplay;
+  } = {},
 ) {
   const shell = await page.request.get("/login");
   for (const path of ["/pengolo", "/pengolo?*", "/pengolo/*", "/settings/sso"])
@@ -93,12 +99,12 @@ async function mockDashboard(
   );
   await page.routeWebSocket("**/graphql", (socket) =>
     socket.onMessage((raw) => {
-      const request = JSON.parse(String(raw));
+      const request = parseObject(String(raw));
       if (request.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
       if (
         request.type === "subscribe" &&
-        request.payload.query.includes("pengoloStream") &&
+        text(record(request.payload).query).includes("pengoloStream") &&
         overrides.pengoloStream
       )
         socket.send(
@@ -113,19 +119,20 @@ async function mockDashboard(
   let personLabel = "Alex";
   let roleLabel = "analyst";
   await page.route("**/graphql", (route) => {
-    const payload = route.request().postDataJSON();
+    const payload = graphQL(route.request().postDataJSON());
     if (payload.query.includes("setDirectoryDisplayName")) {
       expect(payload.variables.id).toBe(
         payload.variables.kind === "role" ? "analyst" : "ui-user",
       );
-      if (payload.variables.kind === "role") roleLabel = payload.variables.name;
-      else personLabel = payload.variables.name;
+      if (payload.variables.kind === "role")
+        roleLabel = text(payload.variables.name);
+      else personLabel = text(payload.variables.name);
       return route.fulfill({
         json: { data: { administration: { setDirectoryDisplayName: true } } },
       });
     }
     if (payload.query.includes("mutation savePengoloProject")) {
-      const input = payload.variables.input;
+      const input = record(payload.variables.input);
       expect(input.id).toBe("project-fixture");
       return route.fulfill({
         json: {
@@ -605,7 +612,7 @@ test("administration schema mismatches explain the update required instead of su
 }) => {
   await mockDashboard(page);
   await page.route("**/graphql", (route) =>
-    route.request().postDataJSON().query.includes("accessGraph")
+    graphQL(route.request().postDataJSON()).query.includes("accessGraph")
       ? route.fulfill({
           status: 400,
           json: {
@@ -927,9 +934,9 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   expect(promptBox && modelBox).toBeTruthy();
   expect(
     Math.abs(
-      promptBox!.y +
-        promptBox!.height / 2 -
-        (modelBox!.y + modelBox!.height / 2),
+      required(promptBox).y +
+        required(promptBox).height / 2 -
+        (required(modelBox).y + required(modelBox).height / 2),
     ),
   ).toBeLessThan(3);
   await expect(
@@ -965,13 +972,16 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
     ),
   );
   await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
-  const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
-    .width;
+  const rowWidth = required(
+    await page.locator(".p-composer-input").boundingBox(),
+  ).width;
   await prompt.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event("scroll"));
   });
-  expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth * 0.9);
+  expect(required(await prompt.boundingBox()).width).toBeGreaterThan(
+    rowWidth * 0.9,
+  );
   const lines = await prompt.evaluate((element) =>
     Array.from(element.getClientRects(), (rect) => ({
       x: rect.x,
@@ -993,9 +1003,9 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
     return range.getClientRects()[0]?.y;
   });
   expect(promptLine).toBeDefined();
-  expect(Math.abs(toolLine - promptLine!)).toBeLessThan(2);
+  expect(Math.abs(toolLine - required(promptLine))).toBeLessThan(2);
   expect(lines.length).toBeGreaterThan(1);
-  expect(lines[1]!.x).toBeLessThan(lines[0]!.x - 80);
+  expect(required(lines[1]).x).toBeLessThan(required(lines[0]).x - 80);
   await expect
     .poll(async () => (await prompt.boundingBox())?.height ?? 0)
     .toBeGreaterThan(100);
@@ -1133,6 +1143,9 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       generationId: "run-fixture",
       status: "running",
       canAnswer: true,
+      message: null,
+      chatRevision: null,
+      chatUpdatedAt: null,
       events: [
         { sequence: 1, kind: "tool", content: "web" },
         { sequence: 2, kind: "activity", content: JSON.stringify(task) },
@@ -1174,7 +1187,12 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
   const dots = await heading.locator(".p-agent-typing").boundingBox();
   const label = await heading.locator("span").last().boundingBox();
   expect(
-    Math.abs(dots!.y + dots!.height / 2 - label!.y - label!.height / 2),
+    Math.abs(
+      required(dots).y +
+        required(dots).height / 2 -
+        required(label).y -
+        required(label).height / 2,
+    ),
   ).toBeLessThan(2);
   await thinking.getByText("Thinking", { exact: true }).click();
   await expect(
@@ -1344,7 +1362,7 @@ test("Pengolo keeps a saved chat readable when its teams cannot be restored", as
   };
   await mockDashboard(page, [], { activeChat: saved, pengoloChat: saved });
   await page.route("**/graphql", (route) =>
-    route.request().postDataJSON().query.includes("query Agents")
+    graphQL(route.request().postDataJSON()).query.includes("query Agents")
       ? route.fulfill({ json: { errors: [{ message: "Unavailable" }] } })
       : route.fallback(),
   );
@@ -1493,6 +1511,9 @@ test("ask_user accepts typed and selected answers without losing a draft on fail
       generationId: "run-fixture",
       status: "running",
       canAnswer: true,
+      message: null,
+      chatRevision: null,
+      chatUpdatedAt: null,
       events: [
         {
           sequence: 1,
@@ -1504,9 +1525,9 @@ test("ask_user accepts typed and selected answers without losing a draft on fail
   });
   let answer: Record<string, unknown> | null = null;
   await page.route("**/graphql", async (route) => {
-    const payload = route.request().postDataJSON();
+    const payload = graphQL(route.request().postDataJSON());
     if (payload.query.includes("answerPengoloQuestion")) {
-      answer = payload.variables.input;
+      answer = record(payload.variables.input);
       return route.fulfill({ json: { errors: [{ message: "retry" }] } });
     }
     return route.fallback();
@@ -1600,11 +1621,13 @@ test("completed questions remain inside the response and outside copied text", a
     },
     { sequence: 3, kind: "completed", content: "" },
   ];
-  const replay = {
+  const replay: GenerationReplay = {
     generationId: runId,
     status: "completed",
     canAnswer: false,
-    message: response,
+    message: { ...response, role: "assistant" },
+    chatRevision: 1,
+    chatUpdatedAt: 1,
     events,
   };
   const running = chatFixture("fixture", runId);
@@ -1668,6 +1691,9 @@ test("Pengolo sends two files only after the user approves the email", async ({
       generationId: "run-fixture",
       status: "running",
       canAnswer: false,
+      message: null,
+      chatRevision: null,
+      chatUpdatedAt: null,
       events: [
         { sequence: 1, kind: "activity", content: JSON.stringify(proposal) },
       ],
@@ -1675,9 +1701,9 @@ test("Pengolo sends two files only after the user approves the email", async ({
   });
   const mutations: string[] = [];
   await page.route("**/graphql", async (route) => {
-    const payload = route.request().postDataJSON();
+    const payload = graphQL(route.request().postDataJSON());
     if (!payload.query.includes("mutation Email")) return route.fallback();
-    const request = JSON.parse(payload.variables.request);
+    const request = parseObject(payload.variables.request);
     const respond = (emailOperation: unknown) =>
       route.fulfill({ json: { data: { emailOperation } } });
     if (request.operation === "proposal_status")
@@ -1708,9 +1734,9 @@ test("Pengolo sends two files only after the user approves the email", async ({
     }
     if (request.operation === "draft")
       return route.fulfill({ json: { errors: [{ message: "Not found" }] } });
-    mutations.push(request.operation);
+    mutations.push(text(request.operation));
     if (request.operation === "save_draft") {
-      expect(request.content.attachments).toEqual([
+      expect(record(request.content).attachments).toEqual([
         { name: "memoire.txt", content_type: "text/plain", content: "T25l" },
         { name: "bordereau.txt", content_type: "text/plain", content: "VHdv" },
       ]);
@@ -1760,9 +1786,9 @@ test("library discovery attaches only the document cited in the final response",
     },
   });
   await page.route("**/graphql", async (route) => {
-    const payload = route.request().postDataJSON();
+    const payload = graphQL(route.request().postDataJSON());
     if (!payload.query.includes("pengoloDownload")) return route.fallback();
-    const index = ids.indexOf(payload.variables.input.id);
+    const index = ids.indexOf(text(record(payload.variables.input).id));
     return route.fulfill({
       json: {
         data: {
@@ -1790,7 +1816,7 @@ for (const used of [true, false]) {
   }) => {
     const chat = chatFixture("fixture");
     const message = {
-      ...chat.data.messages.items[0]!,
+      ...required(chat.data.messages.items[0]),
       toolCheckpoints: used ? [{ offset: 0, operation: "web" }] : [],
     };
     const record = {
@@ -1884,8 +1910,8 @@ test("message actions acknowledge copy and export and reveal copying on hover", 
   const copyBounds = await copy.boundingBox();
   expect(bubbleBounds).not.toBeNull();
   expect(copyBounds).not.toBeNull();
-  expect(copyBounds!.y).toBeGreaterThanOrEqual(
-    bubbleBounds!.y + bubbleBounds!.height,
+  expect(required(copyBounds).y).toBeGreaterThanOrEqual(
+    required(bubbleBounds).y + required(bubbleBounds).height,
   );
   await copy.click();
   await expect(
@@ -1937,7 +1963,7 @@ test("completed reasoning is consolidated above the answer with verified search 
   );
   const chat = chatFixture("fixture");
   const message = {
-    ...chat.data.messages.items[0]!,
+    ...required(chat.data.messages.items[0]),
     text: "A final public answer.",
     generationId: "run-fixture",
     activityKinds: ["plan", "web_research"],
@@ -1995,7 +2021,9 @@ test("completed reasoning is consolidated above the answer with verified search 
       generationId: "run-fixture",
       status: "completed",
       events,
-      message,
+      message: { ...message, role: "assistant" },
+      chatRevision: 1,
+      chatUpdatedAt: 1,
     },
   });
   await page.goto("/pengolo/" + chatFixtureId);
@@ -2005,8 +2033,8 @@ test("completed reasoning is consolidated above the answer with verified search 
   });
   const reasoning = article.getByText("Reasoning", { exact: true });
   await expect(reasoning).toHaveCount(1);
-  expect((await reasoning.boundingBox())!.y).toBeLessThan(
-    (await article.locator(".p-markdown").boundingBox())!.y,
+  expect(required(await reasoning.boundingBox()).y).toBeLessThan(
+    required(await article.locator(".p-markdown").boundingBox()).y,
   );
   await reasoning.click();
   await expect(
@@ -2191,7 +2219,7 @@ test("specialist report citations open an authorized panel on the right", async 
         ...base.data.messages,
         items: [
           {
-            ...base.data.messages.items[0]!,
+            ...required(base.data.messages.items[0]),
             generationId: "b".repeat(32),
             text: `Voir le [rapport sur les faits](#report-${reportId}).`,
           },
@@ -2252,7 +2280,7 @@ test("specialist report citations open an authorized panel on the right", async 
     panel.locator("img,iframe,audio,video,object,embed"),
   ).toHaveCount(0);
   const box = await panel.boundingBox();
-  expect(box!.x).toBeGreaterThan(600);
+  expect(required(box).x).toBeGreaterThan(600);
   await panel.screenshot({
     path: info.outputPath("specialist-report-panel.png"),
   });
@@ -2274,7 +2302,7 @@ test("colored task cards keep model wording and animate their checked state", as
 }, info) => {
   const base = chatFixture();
   const message = {
-    ...base.data.messages.items[0]!,
+    ...required(base.data.messages.items[0]),
     text: "| Point | Appréciation |\n| --- | --- |\n| Sources | ==À vérifier=={warning} |\n\n- [ ] Consulter les pièces\n- [x] Lire les références",
   };
   const record = {
@@ -2392,13 +2420,13 @@ test("Pengolo typography keeps user messages, responses and tables proportionate
       messages: {
         items: [
           {
-            ...chat.data.messages.items[0]!,
+            ...required(chat.data.messages.items[0]),
             id: "user-fixture",
             role: "user",
             text: "Pouvez-vous présenter ces résultats ?",
           },
           {
-            ...chat.data.messages.items[0]!,
+            ...required(chat.data.messages.items[0]),
             text: "Voici les résultats vérifiés.\n\n| Élément | Résultat |\n| --- | --- |\n| Exemple | Donnée fictive |",
           },
         ],
@@ -2435,7 +2463,7 @@ test("deleting a generated attachment keeps the answer and report citation visib
 }) => {
   const base = chatFixture();
   const message = {
-    ...base.data.messages.items[0]!,
+    ...required(base.data.messages.items[0]),
     fileIds: ["c".repeat(32)],
     text:
       "Document généré. [PDF de démonstration](/pengolo/files/" +

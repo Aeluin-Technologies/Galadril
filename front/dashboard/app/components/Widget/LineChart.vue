@@ -1,18 +1,28 @@
-<script setup>
-import { graphic } from "echarts/core";
+<script setup lang="ts">
+import { graphic, format } from "echarts/core";
+import type { Component } from "vue";
+import { record } from "../../../shared/records.ts";
 
-const props = defineProps({
-  title: String,
-  icon: [Object, Function],
-  data: { type: Array, default: () => [] },
-  categories: { type: Array, default: () => [] },
-  color: { type: String, default: "#d97706" },
-  showTooltip: { type: Boolean, default: true },
-  thresholds: {
-    type: Array,
-    default: () => [],
+const props = withDefaults(
+  defineProps<{
+    title?: string;
+    icon?: Component;
+    data?: number[];
+    categories?: string[];
+    color?: string;
+    showTooltip?: boolean;
+    thresholds?: { value: number; color: string }[];
+  }>(),
+  {
+    title: undefined,
+    icon: undefined,
+    data: () => [],
+    categories: () => [],
+    color: "#d97706",
+    showTooltip: true,
+    thresholds: () => [],
   },
-});
+);
 
 const chartOptions = computed(() => ({
   grid: { top: 20, right: 20, bottom: 20, left: 40 },
@@ -24,15 +34,18 @@ const chartOptions = computed(() => ({
     borderWidth: 1,
     padding: [8, 12],
     textStyle: { color: "#18181b", fontSize: 12 },
-    formatter: (params) => `
+    formatter: (params: unknown) => {
+      const point = record(Array.isArray(params) ? params[0] : params);
+      return `
       <div class="font-sans">
-        <div class="text-[10px] text-zinc-400 uppercase font-bold mb-1">${params[0].name}</div>
+        <div class="text-[10px] text-zinc-400 uppercase font-bold mb-1">${format.encodeHTML(String(point.name ?? ""))}</div>
         <div class="flex items-center gap-2">
           <div class="w-2 h-2 rounded-full" style="background-color: ${props.color}"></div>
-          <div class="font-mono font-bold text-zinc-900">${params[0].value}</div>
+          <div class="font-mono font-bold text-zinc-900">${format.encodeHTML(String(point.value ?? ""))}</div>
         </div>
       </div>
-    `,
+    `;
+    },
   },
   xAxis: {
     type: "category",
@@ -45,7 +58,7 @@ const chartOptions = computed(() => ({
     type: "value",
     splitLine: { lineStyle: { color: "#f4f4f5" } },
     axisLabel: { fontSize: 10, color: "#71717a" },
-    max: (value) =>
+    max: (value: { max: number }) =>
       Math.max(value.max, ...props.thresholds.map((t) => t.value)) + 20,
   },
   series: [
