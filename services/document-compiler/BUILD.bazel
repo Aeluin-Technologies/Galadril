@@ -1,5 +1,6 @@
 # gazelle:ignore
 # gazelle:exclude tests
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_test", "py_library")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
@@ -322,3 +323,14 @@ py_test(
     exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     tags = ["integration", "requires-docker", "no-sandbox"],
 )
+
+engineering_rust_docs([
+    "document_compiler_lib",
+    "document-compiler",
+    "worker_lib",
+    "supervisor_lib",
+    "compiler-worker",
+    "supervision_harness",
+    "kernel_probe",
+    "engine_diagnostic",
+])

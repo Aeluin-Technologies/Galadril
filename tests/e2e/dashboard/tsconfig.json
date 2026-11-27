@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "front/dashboard/tests/*.ts"]
 }

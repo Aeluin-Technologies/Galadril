@@ -1,3 +1,4 @@
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
@@ -86,3 +87,5 @@ multiarch_index_test(
     name = "multiarch_index_test",
     target_under_test = ":images",
 )
+
+engineering_rust_docs(["registry"])

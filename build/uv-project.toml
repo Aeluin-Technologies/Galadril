@@ -1,6 +1,29 @@
-# Bazel reads dependency metadata from uv.lock. This projection intentionally
-# omits dependency groups so the complete uv workspace graph is exposed.
+# Keep the workspace members from uv.lock and include locked verification tools.
+# Runtime rules still select only the dependencies they declare.
 [project]
 name = "galadril"
 version = "0.1.0"
 dependencies = ["testcontainers[kafka,postgres]>=4.0"]
+
+[dependency-groups]
+galadril = [
+    "amarth",
+    "eru",
+    "galadril",
+    "galadril-document-memory",
+    "galadril-inference",
+    "galadril-mcp-core",
+    "galadril-mcp-service",
+    "galadril-ontology",
+    "galadril-pipeline",
+    "galadril-plugins",
+    "galadril-registry-api",
+    "galadril-scribe",
+    "vision",
+    "basedpyright",
+    "ruff",
+    "tree-sitter",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-typescript",
+]

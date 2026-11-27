@@ -9,6 +9,11 @@ process.on("exit", stage.cleanup);
 const require = createRequire(resolve(stage.path, "package.json"));
 const environment = { ...process.env };
 if (!environment.GALADRIL_UI_TEST_ORIGIN) {
+  if (environment.GALADRIL_UI_TEST_DEV !== "1")
+    environment.GALADRIL_BROWSER_ASSETS = join(
+      stage.path,
+      "playground/.output/public/_nuxt",
+    );
   const reservation = createServer();
   await new Promise<void>((resolve, reject) => {
     reservation.once("error", reject);

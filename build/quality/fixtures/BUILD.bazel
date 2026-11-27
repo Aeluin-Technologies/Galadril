@@ -1,0 +1,34 @@
+load("@rules_rust//rust:defs.bzl", "rust_doc", "rust_library", "rust_test")
+
+[
+    rust_library(
+        name = fixture + "_violation",
+        srcs = [fixture + "_violation.rs"],
+        edition = "2024",
+        tags = ["manual"],
+        testonly = True,
+    )
+    for fixture in ["format", "lint", "type"]
+]
+
+rust_library(
+    name = "bad_docs",
+    srcs = ["documentation_violation.rs"],
+    edition = "2024",
+    tags = ["manual"],
+    testonly = True,
+)
+
+rust_doc(
+    name = "documentation_violation",
+    crate = ":bad_docs",
+    rustdoc_flags = ["-Dwarnings"],
+    tags = ["manual"],
+    testonly = True,
+)
+
+rust_test(
+    name = "coverage_control_test",
+    srcs = ["coverage_control.rs"],
+    edition = "2024",
+)

@@ -383,6 +383,8 @@ js_test(
         args = [check],
         chdir = "front/dashboard",
         # The runner materializes its own workspace; unit targets own their copied test files.
+        # The OS sandbox confines the staged links to declared package inputs.
+        patch_node_fs = False,
         copy_data_to_bin = False,
         data = glob(["tests/**"]) + [
             ":ui_sources",
@@ -395,6 +397,7 @@ js_test(
     for check in [
         "typecheck",
         "tools",
+        "policy",
         "lint",
         "format",
         "build",
@@ -438,7 +441,11 @@ js_test(
     ],
 )
 
-exports_files(["tests/email-profile.spec.ts"], visibility = ["//tests/e2e:__pkg__"])
+exports_files([
+    "shared/records.ts",
+    "tests/email-profile.spec.ts",
+    "tests/graphql-fixture.ts",
+], visibility = ["//tests/e2e:__pkg__"])
 
 js_test(
     name = "ontology_contract_test",

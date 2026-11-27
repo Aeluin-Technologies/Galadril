@@ -57,9 +57,27 @@ export function stageFrontend(
     }
   }
   // Nuxt's development transforms inject host runtime imports into workspace components.
-  const hostModules = join(root, "dashboard", "node_modules");
-  if (existsSync(hostModules))
-    symlinkSync(hostModules, join(root, "node_modules"), "dir");
+  const hostModules = join(root, application, "node_modules");
+  const stagedModules = join(root, "node_modules");
+  mkdirSync(stagedModules);
+  for (const dependencies of [join(sourceRoot, "node_modules"), hostModules]) {
+    if (!existsSync(dependencies)) continue;
+    for (const name of readdirSync(dependencies)) {
+      if (name.startsWith(".")) continue;
+      const source = join(dependencies, name);
+      const target = join(stagedModules, name);
+      if (name.startsWith("@")) {
+        mkdirSync(target, { recursive: true });
+        for (const name of readdirSync(source)) {
+          const scopedTarget = join(target, name);
+          if (!existsSync(scopedTarget))
+            symlinkSync(join(source, name), scopedTarget, "dir");
+        }
+      } else if (!existsSync(target)) {
+        symlinkSync(source, target, "dir");
+      }
+    }
+  }
   return {
     path: join(root, application),
     cleanup: () => rmSync(root, { recursive: true, force: true }),

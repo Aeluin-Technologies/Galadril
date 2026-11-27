@@ -1,0 +1,39 @@
+diff --git a/js/private/coverage/coverage.js b/js/private/coverage/coverage.js
+--- a/js/private/coverage/coverage.js
++++ b/js/private/coverage/coverage.js
+@@ -16100,13 +16100,21 @@
+     tempDirectory: process.env.COVERAGE_DIR,
+     resolve: '',
+     src: pwd,
+-    all: true,
++    // Only the browser reporter has proof of a never-loaded transformation.
++    all: false,
+     reporter: ['lcovonly'],
+ })
+     .run()
+     .then(() => {
+-        require$$0$1.renameSync(
+-            require$$0$2.join(process.env.COVERAGE_DIR, 'lcov.info'),
++        const report = require$$0$2.join(process.env.COVERAGE_DIR, 'lcov.info');
++        for (const file of require$$0$1.readdirSync(process.env.COVERAGE_DIR).sort()) {
++            if (/^browser-[a-f0-9-]+\.dat$/.test(file)) {
++                const browserLcov = require$$0$2.join(process.env.COVERAGE_DIR, file);
++                require$$0$1.appendFileSync(report, require$$0$1.readFileSync(browserLcov));
++            }
++        }
++        require$$0$1.renameSync(
++            report,
+             process.env.COVERAGE_OUTPUT_FILE
+         );
+     })
+diff --git a/js/private/js_binary.bzl b/js/private/js_binary.bzl
+--- a/js/private/js_binary.bzl
++++ b/js/private/js_binary.bzl
+@@ -562,6 +562,7 @@
+                     "js",
+                     "jsx",
+                     "tsx",
++                    "vue",
+                 ],
+             ),
+         )

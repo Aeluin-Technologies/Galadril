@@ -1,51 +1,13 @@
-* ALWAYS write industrial-grade, production-ready code with concise, precise Google-style comments in English.
-* Restrict comments strictly to file headers, function docs, or complex logic blocks; do NOT summarize the code, instead explain WHY.
-* ALWAYS write or update failing unit tests before writing production code (TDD).
-* ALWAYS keep implementation details simple, clean, and legible (Keep It Simple, Stupid), but optimize hot paths for high throughput and low latency.
-* Assume code runs under strict real-time constraints where heap allocations introduce latency jitter.
-* Strictly prioritize zero-copy operations, reuse buffers, and minimize runtime memory allocations.
-* ALWAYS use telemetry (logging, tracing, metrics) using OTLP.
-* ALWAYS verify workspace state using `bazel test //...`; avoid language specific-tests.
-* For any change under `front/`, follow `front/AGENTS.md`; for dashboard changes, also follow `front/dashboard/AGENTS.md`.
+# Galadril engineering standard
 
-# Language Rules
+- Follow the closest `AGENTS.md`. Scope changes to the requested behavior and preserve concurrent work.
+- Model bounded contexts with DDD, Clean Architecture and Ports & Adapters. Keep dependency direction inward and isolate plugin implementations behind host-owned ports.
+- Parse external data into validated domain types. Use Rust newtypes, Python value objects, TypeScript branded types or classes, enums and typestate where they represent real invariants. Reject explicit and implicit `Any`/`any`, unchecked assertions and type-check suppressions.
+- Write idiomatic code with business names and cohesive modules. Separate logical phases with blank lines. Document public contracts, invariants and decisions in technical English using Rustdoc, Google docstrings and TSDoc. Keep comments to file headers, API docs and complex logic.
+- Prefer exclusive ownership, borrowing, reusable buffers and measured allocation reductions. Reserve shared ownership for independent owners. Use bounded queues, quotas, cancellation and supervision. Preserve parallelism and use the simplest correct synchronization primitive.
+- Use fallible Rust APIs and propagate or handle every `Result`. Avoid `unsafe`, panics, unwraps and unchecked indexing. Keep Rust modules flat, forbid new `mod.rs` files, use let chains where clear, and prefer specific `#[expect]` for reviewed lint exceptions.
+- Use uv for Python. Refresh Gazelle metadata when imports or dependencies change. Type public interfaces strictly and parse payloads with Pydantic v2 at adapters. Offload blocking work from async event loops. Emit structured domain errors and bounded, privacy-safe OTLP signals at meaningful boundaries.
+- Write a failing behavior or gate test first. Preserve existing behavior with characterization tests during extraction. Use property tests for invariants, parsers and state transitions.
+- Run targeted Bazel checks and `bazel test //...`. Run the [engineering gates](build/quality/README.md) with the pinned Bazel toolchains and BuildBuddy configuration. Use Bazel coverage artifacts with verified source identity. Preserve existing tests, controls and thresholds. Reject unjustified deletions, exclusions and suppressions.
 
-## Rust
-
-* AVOID `panic!`, `unwrap()`, `expect()`, `unsafe`, and unchecked array indexing (`[]`). Use `?`, `get()`, or `match`.
-* Handle every potential error using `Result` or log it appropriately via the `tracing` ecosystem.
-* NEVER silently discard fallible operations with `let _ =`.
-  * Propagate errors with `?` when caller-handled.
-  * Use explicit `match` or `if let Err(...)` for custom logic.
-* Avoid heavy cloning. Use explicit lifetimes, references, slices, or atomic references (`Arc`) for zero-copy semantics.
-* Write flexible, idiomatic APIs using generic traits and bounds (e.g., `impl AsRef<Path>`, `impl Borrow<T>`).
-* NEVER create `mod.rs` files; prefer `src/foo.rs` over `src/foo/mod.rs`.
-* PREFER `#[expect()]` over `#[allow()]` for Clippy exceptions.
-* PREFER `let` chains (`if let ... && ...`) over nested `if let` blocks.
-* ALWAYS run before completing:
-  cargo fmt --check
-  cargo clippy --all-targets --all-features -- -D warnings
-
-## Python
-
-* ALWAYS use uv for execution and dependencies; NEVER invoke global python or pip. Then, run `bazel run //:gazelle_python_manifest.update` and `bazel run //:gazelle`. 
-* PREFER async runtime using asyncio and uvloop for I/O bounds; offload CPU/blocking tasks to Executors to avoid blocking the event loop.
-* ALWAYS minimize GC overhead using `__slots__`, `bytearray`, and `memoryview`.
-* ALWAYS enforce strict type annotations (mypy/pyright compatible) without `Any`. Use Pydantic v2 for payload parsing.
-* ALWAYS use structured domain exceptions or Result types. Log via structured JSON without leaking raw exceptions.
-* ALWAYS run before completing:
-    uv run ruff format --check
-    uv run ruff check
-
-# Skills
-
-- Use `$galadril-engineering` for substantial code changes and refactoring.
-- Use `$galadril-context-audit` when a module or trust boundary is unfamiliar.
-- Use `$galadril-security` for authorization, tenant context, RLS, retrieval
-  isolation or tool-execution boundaries.
-- Use `$galadril-ontology` for Registry, ESKG and ontology revision contracts.
-- Use `$galadril-distributed-pipelines` for Kafka/FastStream/Ray or replay.
-- Use `$galadril-observability` for OTLP signals, tracing and alert design.
-- Use `$galadril-performance` for measured resource or latency optimization.
-- Use `$galadril-property-tests` for testable algebraic invariants.
-- Use `$galadril-ai-evaluation` for model, extraction and RAG evaluation.
+Use `$galadril-engineering` for implementation, `$galadril-context-audit` for unfamiliar boundaries, `$galadril-code-quality` for CRAP, Dryer and Mutator, and `$galadril-property-tests` for invariants. Apply the relevant security, ontology, distributed-pipeline, observability, performance and AI-evaluation skills at their boundaries.

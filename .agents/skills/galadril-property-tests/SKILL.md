@@ -13,8 +13,8 @@ description: >-
    oracle equivalence, ordering, or a state-machine property.
 2. Specify the valid input domain, edge cases and invalid-input expectations.
    Generate valid structures directly; avoid near-total filtering by assumptions.
-3. Prefer the PBT library already present in the affected codebase. For a new
-   dependency, explain the property and request approval before installing it.
+3. Reuse the repository’s property test libraries and Bazel targets. Make seeds
+   reproducible and include invalid transitions and retry semantics.
 4. Run the property test before a proposed fix when feasible. Preserve the
    shrunk counterexample as a deterministic regression test.
 5. Validate both positive and rejection paths. Do not assert a tautology that

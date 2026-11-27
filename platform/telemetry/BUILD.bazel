@@ -1,3 +1,4 @@
+load("//build/quality:rust.bzl", "engineering_rust_docs")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
@@ -16,3 +17,5 @@ rust_test(
     crate = ":telemetry",
     deps = all_crate_deps(normal_dev = True),
 )
+
+engineering_rust_docs(["telemetry"])

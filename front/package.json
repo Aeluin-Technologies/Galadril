@@ -1,5 +1,13 @@
 {
   "name": "@galadril/front",
   "private": true,
-  "packageManager": "pnpm@11.6.0"
+  "packageManager": "pnpm@11.6.0",
+  "devDependencies": {
+    "@jridgewell/trace-mapping": "0.3.31",
+    "@vitest/istanbul-lib-coverage": "2.1.1",
+    "@vitest/istanbul-lib-report": "2.1.1",
+    "@vue/compiler-sfc": "3.5.44",
+    "acorn": "8.19.0",
+    "ast-v8-to-istanbul": "1.0.8"
+  }
 }

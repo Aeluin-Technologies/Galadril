@@ -1,0 +1,7 @@
+export  const explicit: any = JSON.parse("{}");
+export const implicit = JSON.parse("{}");
+export function untyped(value) {
+  return value;
+}
+// @ts-ignore
+export const claimed: number = "string";

@@ -1,0 +1,19 @@
+--- a/src/crapper/languages/treesitter.py
++++ b/src/crapper/languages/treesitter.py
+@@ -9 +9,4 @@
+-    from tree_sitter_language_pack import download, get_parser
++    from tree_sitter import Language, Parser
++    import tree_sitter_python
++    import tree_sitter_rust
++    import tree_sitter_typescript
+@@ -11,2 +14,8 @@
+-    download([language])
+-    return get_parser(language)
++    # Bazel declares the grammars as inputs. Parser initialization needs no downloads.
++    capsule = {
++        "python": tree_sitter_python.language,
++        "rust": tree_sitter_rust.language,
++        "typescript": tree_sitter_typescript.language_typescript,
++        "tsx": tree_sitter_typescript.language_tsx,
++    }[language]()
++    return Parser(Language(capsule))

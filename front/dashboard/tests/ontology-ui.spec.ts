@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { test } from "../../testing/browser-test.ts";
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 

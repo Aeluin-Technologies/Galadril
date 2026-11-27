@@ -146,3 +146,15 @@ uv.project(
     pyproject = "//third_party/hipporag/cpu:pyproject.toml",
 )
 use_repo(uv, "pip", "hipporag_cpu")
+
+quality_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+quality_archive(
+    name = "crapper",
+    build_file = "//build/quality:crapper.BUILD.bazel",
+    patch_strip = 1,
+    patches = ["//build/quality:crapper-grammars.patch"],
+    sha256 = "b132c09e2902da8e433e6b372cdfc84a6af61a79a32b52e148f3bfdef8eaa77d",
+    strip_prefix = "crapper-6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d",
+    urls = ["https://codeload.github.com/unclebob/crapper/tar.gz/6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d"],
+    type = "tar.gz",
+)

@@ -129,6 +129,15 @@ members = [
 exclude = ["platform/telemetry", "platform/document-compiler"]
 
 [dependency-groups]
+engineering = [
+    "basedpyright==1.40.2",
+    "ruff==0.17.3",
+    "tree-sitter==0.26.0",
+    "tree-sitter-python==0.25.0",
+    "tree-sitter-rust==0.24.2",
+    "tree-sitter-typescript==0.23.2",
+]
+
 dev = [
     "coverage>=7.10.0",
     "mypy>=1.19.1",
@@ -161,3 +170,26 @@ plugins = ["pydantic.mypy"]
 python_version = "3.13"
 strict = true
 ignore_missing_imports = true
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+reportAny = "error"
+reportExplicitAny = "error"
+reportInvalidCast = "error"
+reportMissingModuleSource = "error"
+enableTypeIgnoreComments = false
+extraPaths = [
+    "build/quality",
+    "machine-learning/eru/src",
+    "machine-learning/galadril-inference/src",
+    "machine-learning/scribe/python",
+    "platform/amarth/src",
+    "platform/mcp/src",
+    "platform/ontology/src",
+    "platform/pipeline/src",
+    "platform/registry/python",
+    "platform/vision/src",
+    "plugins/src",
+    "services/mcp/src",
+]

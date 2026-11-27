@@ -18,6 +18,15 @@ from infrastructure.auth.tests.test_sso import (
 
 PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 SUITE = Path(__file__).with_name("dashboard")
+WORKSPACE = Path(__file__).parents[2]
+FRONTEND_FIXTURES = (
+    "front/dashboard/tests/email-profile.spec.ts",
+    "front/dashboard/tests/email-ui.spec.ts",
+    "front/dashboard/tests/graphql-fixture.ts",
+    "front/dashboard/shared/records.ts",
+    "front/testing/browser-test.ts",
+    "front/testing/browser-profile.ts",
+)
 ACTORS = (
     "auth",
     "pengolo",
@@ -113,14 +122,11 @@ class DashboardBrowserTest(SsoIntegrationTest):
                         for path in SUITE.iterdir()
                         if path.is_file()
                     },
-                    "suite/email-profile.spec.ts": (
-                        Path(__file__).parents[2]
-                        / "front/dashboard/tests/email-profile.spec.ts"
-                    ).read_bytes(),
-                    "suite/email-ui.spec.ts": (
-                        Path(__file__).parents[2]
-                        / "front/dashboard/tests/email-ui.spec.ts"
-                    ).read_bytes(),
+                    # Preserve the imports shared with the Bazel browser tests.
+                    **{
+                        "suite/" + path: (WORKSPACE / path).read_bytes()
+                        for path in FRONTEND_FIXTURES
+                    },
                     "test-ca.pem": self.files["identity/hydra/ca.pem"],
                 }
             ),
