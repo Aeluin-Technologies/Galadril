@@ -9,6 +9,9 @@ description: >-
 
 ## Scope
 
+Consult [domain design and review](../../references/ENGINEERING.md) when
+assessing dependency direction or ownership of invariants.
+
 1. Identify the requested module, entry points and authoritative documentation.
    Consult `../../references/GALADRIL_CONTRACTS.md` selectively.
 2. Trace actual call paths, including failure, timeout, retry and asynchronous

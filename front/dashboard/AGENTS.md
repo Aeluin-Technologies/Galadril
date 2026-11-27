@@ -83,14 +83,11 @@ Follow the repository and `front/AGENTS.md` instructions as well as this file.
   variants and representative pages, including keyboard and asynchronous states.
 * Inspect visual changes in a browser at desktop and narrow widths. Use stable
   gallery scenarios for visual regression; snapshots alone do not prove behavior.
-* Integrate component tests, accessibility checks, non-mutating lint/format checks
-  and complete type checking into Bazel when introducing the shared package.
-* `pnpm typecheck` checks the complete application through
-  `tsconfig.dashboard.json`; `pnpm typecheck:tools` checks verification scripts
-  and tests through `../tsconfig.tools.json`. `pnpm lint` runs non-mutating ESLint
-  on utilities, authentication, media, shared code and tests. `pnpm format:check`
-  checks formatting without rewriting sources. Do not describe that ESLint scope
-  as a complete application-wide Vue lint pass.
+* Run the existing Bazel component, browser and quality targets. The dashboard
+  format and typed lint targets cover TypeScript and Vue throughout the package.
+  Vue TSC checks application, shared, server, tool and test contracts through
+  the dashboard and tools projects. Validate the rule configuration with
+  `//front/dashboard:ui_policy_test`.
 * Extend type-check coverage when moving or adding files. Do not let extracted
   components silently fall outside the existing include list.
 * Prefer the targeted UI/package and affected dashboard Bazel tests during

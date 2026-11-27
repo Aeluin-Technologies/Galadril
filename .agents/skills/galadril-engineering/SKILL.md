@@ -1,42 +1,26 @@
 ---
 name: galadril-engineering
 description: >-
-  Use for nontrivial production code changes, bug fixes or refactoring in Galadril
-  that require a bounded implementation and verification workflow. Not for
-  read-only research, trivial edits or architecture-only audits.
+  Use for substantial Galadril code changes, refactoring, and engineering
+  infrastructure. Covers bounded implementation, domain contracts and verification.
 ---
+
 # Galadril engineering workflow
 
-The repository `AGENTS.md` and its nested variants remain authoritative for
-language, Bazel, telemetry and security conventions. Do not restate or weaken them.
+1. Read the applicable `AGENTS.md` files. Define the observable outcome, state
+   owner, contract and callers. Use `$galadril-context-audit` for unfamiliar boundaries.
+2. Write a behavior or gate test and observe it fail for the expected reason.
+   Characterize existing behavior before extraction. Use
+   `$galadril-property-tests` for parsers, invariants and transitions.
+3. Preserve tenant context, authorization, idempotency, cancellation and error
+   semantics across the change. Keep one phase per logical block and one
+   authoritative implementation per invariant.
+4. Run targeted Bazel tests, then the workspace and engineering gates. Introduce
+   a deliberate violation for any new automated control. Report green, red and
+   unavailable checks with the failing target or rule.
 
-## Work, then improve
-
-1. Establish the requested observable outcome, affected ownership boundary and
-   the smallest coherent change. Inspect callers and contracts before editing.
-2. Check the domain shape and whether existing APIs can express the change.
-   Avoid new shared mutable state, speculative abstractions and compatibility
-   layers with no demonstrated consumer.
-3. Write or adjust a behavior test first; run it and observe a failure for the
-   expected reason. For a behavior-preserving refactor, characterize existing
-   behavior first. Do not fabricate an artificial failing test.
-4. Implement the smallest fix. Preserve tenant scope, error propagation,
-   idempotency and existing public contracts. Fix the root cause, not just
-   the visible symptom.
-5. Run targeted Bazel tests while iterating, then the workspace gate required
-   by `AGENTS.md` (`bazel test //...`). Run relevant language checks as specified
-   there. Distinguish completed, failed and unavailable checks.
-6. Refactor only after behavior is pinned; measure rather than assume gains in
-   hot paths. When useful, employ property or mutation tests through their
-   own task-specific workflows; do not invent mandatory CRAP/duplication
-   scores or install tools automatically.
-
-## Safety and report
-
-- Keep changes reviewable; never silently delete a worktree, discard edits,
-  merge, push, deploy or mutate production data.
-- Report: behavior changed, tests added, commands/results, residual risks and
-  unverified assumptions. A short meaningful log suffices; no exhaustive
-  narration is needed.
-- If you encounter an unfamiliar module or a trust boundary, use
-  `$galadril-context-audit` before claiming to understand it.
+Consult [architecture and language conventions](../../references/ENGINEERING.md)
+for modeling, API design and review. For concurrent work, read the
+[ownership and concurrency guide](../../references/CONCURRENCY.md) and use
+`$galadril-performance` when latency, throughput or allocations are at issue.
+Use `$galadril-code-quality` for CRAP, duplication and mutation evidence.

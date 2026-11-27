@@ -7,6 +7,9 @@ description: >-
 ---
 # Evidence-led performance work
 
+Read [ownership and concurrency](../../references/CONCURRENCY.md) when evaluating
+synchronization, contention, queueing or an allocation-sensitive path.
+
 1. Define a representative workload, scope, target metric and known resource
    limits. Record hardware, software versions, input size, tenant mix and
    relevant concurrency; avoid arbitrary success thresholds.
